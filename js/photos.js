@@ -222,18 +222,6 @@ const PHOTOS = [
     iso: "200",
   },
   {
-    file: "photos/DSC05301.jpg",
-    file2x: "photos/DSC05301@2x.jpg",
-    dateTaken: "2026-08-09T13:22:54",
-    alt: "A pale, translucent molted skin caught on a bare twig above rocky ground",
-    title: "Molted Skin",
-    width: 1600,
-    height: 1067,
-    aperture: "f/9",
-    shutter: "1/2000",
-    iso: "500",
-  },
-  {
     file: "photos/DSC05429.jpg",
     file2x: "photos/DSC05429@2x.jpg",
     dateTaken: "2026-08-13T16:24:40",

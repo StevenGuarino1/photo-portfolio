@@ -31,11 +31,11 @@ body {
 .site-header {
   max-width: var(--grid-max-width);
   margin: 0 auto;
-  padding: 20px var(--gap) 16px;
+  padding: 16px var(--gap) 12px;
 }
 
 .site-header h1 {
-  font-size: 1.25rem;
+  font-size: 1.75rem;
   font-weight: 600;
   margin: 0 0 6px;
   letter-spacing: 0.01em;
@@ -43,7 +43,7 @@ body {
 
 .site-header .subtitle {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 1.05rem;
   line-height: 1.4;
   color: var(--muted-color);
   max-width: 60ch;
@@ -131,8 +131,8 @@ main {
   display: flex;
   flex-direction: column;
   align-items: center;
-  max-width: 94vw;
-  max-height: 94vh;
+  max-width: 99vw;
+  max-height: 99vh;
 }
 
 .lightbox-frame {
@@ -161,8 +161,8 @@ main {
   display: block;
   width: auto;
   height: auto;
-  max-width: var(--lb-max-w, 85vw);
-  max-height: var(--lb-max-h, 85vh);
+  max-width: var(--lb-max-w, 97vw);
+  max-height: var(--lb-max-h, 92vh);
   border: var(--hairline-width) solid var(--hairline-color);
 }
 

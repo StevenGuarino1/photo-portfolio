@@ -2,11 +2,13 @@
 // Fields: file (required), alt (required), title (optional),
 // file2x (optional 2x srcset variant), width/height (intrinsic pixel size,
 // used for aspect ratio + to prevent layout shift),
+// dateTaken (optional ISO date/time — used for sorting, see SORT_MODE in script.js),
 // aperture / shutter / iso (optional EXIF — omit any/all if unknown).
 const PHOTOS = [
   {
     file: "photos/1.jpg",
     file2x: "photos/1@2x.jpg",
+    dateTaken: "2026-09-12T15:28:48",
     alt: "A small green seedling sprouting from a weathered piece of driftwood, backlit by sunset trees",
     title: "New Growth",
     width: 1314,
@@ -18,6 +20,7 @@ const PHOTOS = [
   {
     file: "photos/2.jpg",
     file2x: "photos/2@2x.jpg",
+    dateTaken: "2026-09-12T14:58:58",
     alt: "A gnarled tree root system on a riverbank, with calm water and distant mountains beyond",
     title: "River Bend",
     width: 1600,
@@ -29,6 +32,7 @@ const PHOTOS = [
   {
     file: "photos/2-alt.jpg",
     file2x: "photos/2-alt@2x.jpg",
+    dateTaken: "2026-09-07T22:02:19",
     alt: "A dense winter night sky thick with stars and faint nebulosity",
     title: "Winter Sky",
     width: 1600,
@@ -40,6 +44,7 @@ const PHOTOS = [
   {
     file: "photos/3.jpg",
     file2x: "photos/3@2x.jpg",
+    dateTaken: "2026-09-12T15:27:49",
     alt: "A wave breaking over dark rocks, shot low to the water beneath an overhanging ledge",
     title: "Breaking Wave",
     width: 1600,
@@ -51,6 +56,7 @@ const PHOTOS = [
   {
     file: "photos/4.jpg",
     file2x: "photos/4@2x.jpg",
+    dateTaken: "2026-09-12T17:06:12",
     alt: "An osprey perched on a bare branch against a plain sky, looking off to the side",
     title: "Osprey",
     width: 1600,
@@ -62,6 +68,7 @@ const PHOTOS = [
   {
     file: "photos/4-alt.jpg",
     file2x: "photos/4-alt@2x.jpg",
+    dateTaken: "2026-09-07T22:35:47",
     alt: "Long-exposure light trails curving along a dark road at night, stars visible overhead",
     title: "Night Trails",
     width: 1600,
@@ -73,6 +80,7 @@ const PHOTOS = [
   {
     file: "photos/5.jpg",
     file2x: "photos/5@2x.jpg",
+    dateTaken: "2026-09-12T15:34:23",
     alt: "Young leaves on a bare branch backlit by a bright, cloudy sky",
     title: "Backlit Leaves",
     width: 1600,
@@ -84,6 +92,7 @@ const PHOTOS = [
   {
     file: "photos/Cruise-11.jpg",
     file2x: "photos/Cruise-11@2x.jpg",
+    dateTaken: "2026-02-12T12:28:23",
     alt: "A gull walking across white sand with colorful cabanas and palm trees behind it",
     title: "Beach Gull",
     width: 1600,
@@ -95,6 +104,7 @@ const PHOTOS = [
   {
     file: "photos/Cruise-6.jpg",
     file2x: "photos/Cruise-6@2x.jpg",
+    dateTaken: "2026-02-12T07:47:10",
     alt: "A gull flying low over deep blue ocean water, carrying off a slice of pizza",
     title: "Lunch on the Wing",
     width: 1600,
@@ -106,6 +116,7 @@ const PHOTOS = [
   {
     file: "photos/DSC04734.jpg",
     file2x: "photos/DSC04734@2x.jpg",
+    dateTaken: "2026-08-04T17:48:23",
     alt: "A large white mushroom cap backlit by low morning sun, rising out of green grass",
     title: "Sunrise Mushroom",
     width: 1120,
@@ -117,6 +128,7 @@ const PHOTOS = [
   {
     file: "photos/DSC04739.jpg",
     file2x: "photos/DSC04739@2x.jpg",
+    dateTaken: "2026-08-04T17:48:43",
     alt: "The same backlit mushroom from a lower angle, with sunlight flaring around its cap",
     title: "Mushroom, Backlit",
     width: 1600,
@@ -128,6 +140,7 @@ const PHOTOS = [
   {
     file: "photos/DSC04807.jpg",
     file2x: "photos/DSC04807@2x.jpg",
+    dateTaken: "2026-08-09T11:59:20",
     alt: "A duck's head and neck in profile against a blurred green background",
     title: "Duck Portrait",
     width: 1600,
@@ -139,6 +152,7 @@ const PHOTOS = [
   {
     file: "photos/DSC04809.jpg",
     file2x: "photos/DSC04809@2x.jpg",
+    dateTaken: "2026-08-09T11:59:30",
     alt: "A duck looking directly into the camera, framed by out-of-focus trees",
     title: "Eye Contact",
     width: 1600,
@@ -150,6 +164,7 @@ const PHOTOS = [
   {
     file: "photos/DSC04810.jpg",
     file2x: "photos/DSC04810@2x.jpg",
+    dateTaken: "2026-08-09T12:00:34",
     alt: "A duck swimming with its bill open mid-quack, driftwood in the background",
     title: "Quack",
     width: 1600,
@@ -161,6 +176,7 @@ const PHOTOS = [
   {
     file: "photos/DSC04824.jpg",
     file2x: "photos/DSC04824@2x.jpg",
+    dateTaken: "2026-08-09T12:10:29",
     alt: "A small sailboat anchored on a river beneath a large steel truss railroad bridge, framed by leaves",
     title: "Sailboat and Bridge",
     width: 1529,
@@ -172,6 +188,7 @@ const PHOTOS = [
   {
     file: "photos/DSC04972.jpg",
     file2x: "photos/DSC04972@2x.jpg",
+    dateTaken: "2026-08-09T12:49:08",
     alt: "Close-up of barnacles clustered on a rock at low tide, with a rocky shoreline beyond",
     title: "Barnacles",
     width: 1600,
@@ -183,6 +200,7 @@ const PHOTOS = [
   {
     file: "photos/DSC05025.jpg",
     file2x: "photos/DSC05025@2x.jpg",
+    dateTaken: "2026-08-09T13:04:14",
     alt: "A shallow tide pool threading between dark, weathered rocks",
     title: "Tide Pool",
     width: 1344,
@@ -194,6 +212,7 @@ const PHOTOS = [
   {
     file: "photos/DSC05238.jpg",
     file2x: "photos/DSC05238@2x.jpg",
+    dateTaken: "2026-08-09T13:18:43",
     alt: "A duck balanced on one leg atop a rock, stretching a wing, silhouetted against calm water and hills",
     title: "Balancing Act",
     width: 1198,
@@ -205,6 +224,7 @@ const PHOTOS = [
   {
     file: "photos/DSC05301.jpg",
     file2x: "photos/DSC05301@2x.jpg",
+    dateTaken: "2026-08-09T13:22:54",
     alt: "A pale, translucent molted skin caught on a bare twig above rocky ground",
     title: "Molted Skin",
     width: 1600,
@@ -216,6 +236,7 @@ const PHOTOS = [
   {
     file: "photos/DSC05429.jpg",
     file2x: "photos/DSC05429@2x.jpg",
+    dateTaken: "2026-08-13T16:24:40",
     alt: "Two Canada geese in tall grass, one with its neck extended and beak open mid-honk",
     title: "Canada Geese",
     width: 1600,
@@ -227,6 +248,7 @@ const PHOTOS = [
   {
     file: "photos/DSC05512.jpg",
     file2x: "photos/DSC05512@2x.jpg",
+    dateTaken: "2026-08-13T16:31:16",
     alt: "A mottled brown duck with a yellow bill resting at the water's edge among rocks",
     title: "At the Water's Edge",
     width: 1600,
@@ -238,6 +260,7 @@ const PHOTOS = [
   {
     file: "photos/DSC05752.jpg",
     file2x: "photos/DSC05752@2x.jpg",
+    dateTaken: "2026-08-14T15:17:51",
     alt: "A jet airplane seen from directly below, silhouetted against a cloudy sky",
     title: "Overhead",
     width: 1118,
@@ -249,6 +272,7 @@ const PHOTOS = [
   {
     file: "photos/DSC05851.jpg",
     file2x: "photos/DSC05851@2x.jpg",
+    dateTaken: "2026-08-14T15:23:08",
     alt: "A Delta jet's wings and engines seen from below against a clear blue sky",
     title: "Delta",
     width: 1600,
@@ -260,6 +284,7 @@ const PHOTOS = [
   {
     file: "photos/DSC05995.jpg",
     file2x: "photos/DSC05995@2x.jpg",
+    dateTaken: "2026-08-14T20:08:04",
     alt: "Small flower buds on a stem, lit against a near-black background",
     title: "Buds",
     width: 1245,
@@ -271,6 +296,7 @@ const PHOTOS = [
   {
     file: "photos/DSC06051.jpg",
     file2x: "photos/DSC06051@2x.jpg",
+    dateTaken: "2026-08-14T21:25:14",
     alt: "A starry night sky over a backyard pergola, with a house glowing warmly below",
     title: "Stars Over the Backyard",
     width: 1600,
@@ -282,6 +308,7 @@ const PHOTOS = [
   {
     file: "photos/DSC06052.jpg",
     file2x: "photos/DSC06052@2x.jpg",
+    dateTaken: "2026-08-14T21:27:34",
     alt: "A dense field of stars with a faint band of the Milky Way",
     title: "Deep Sky",
     width: 1600,
@@ -293,6 +320,7 @@ const PHOTOS = [
   {
     file: "photos/DSC06058.jpg",
     file2x: "photos/DSC06058@2x.jpg",
+    dateTaken: "2026-08-14T21:36:20",
     alt: "A starry sky with the silhouette of a pine tree at the left edge",
     title: "Pine and Stars",
     width: 1600,
@@ -304,6 +332,7 @@ const PHOTOS = [
   {
     file: "photos/DSC06060.jpg",
     file2x: "photos/DSC06060@2x.jpg",
+    dateTaken: "2026-08-14T21:38:04",
     alt: "A starry sky over a dark treeline silhouette",
     title: "Treeline",
     width: 1600,
@@ -315,6 +344,7 @@ const PHOTOS = [
   {
     file: "photos/DSC06061.jpg",
     file2x: "photos/DSC06061@2x.jpg",
+    dateTaken: "2026-08-14T21:40:12",
     alt: "A starry sky framed by trees on either side, with a faint meteor streak",
     title: "Meteor",
     width: 1600,
@@ -326,6 +356,7 @@ const PHOTOS = [
   {
     file: "photos/DSC06067.jpg",
     file2x: "photos/DSC06067@2x.jpg",
+    dateTaken: "2026-08-14T21:56:57",
     alt: "A wide, minimal starfield with two faint meteor streaks",
     title: "Falling Stars",
     width: 1600,

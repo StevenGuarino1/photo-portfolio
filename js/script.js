@@ -1,5 +1,10 @@
-// Flip off to keep photos in the literal order they're listed in photos.js.
-const SHUFFLE_ON_LOAD = true;
+// How to order the grid on load:
+//   "shuffle" — random order (Fisher-Yates), re-shuffled on every page load
+//   "newest"  — by dateTaken, newest first (Instagram-style feed order)
+//   "oldest"  — by dateTaken, oldest first
+//   "none"    — the literal order photos are listed in photos.js
+// Photos missing a dateTaken sort to the end under "newest"/"oldest".
+const SORT_MODE = "newest";
 
 function shuffle(array) {
   const arr = array.slice();
@@ -7,6 +12,19 @@ function shuffle(array) {
     const j = Math.floor(Math.random() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
+  return arr;
+}
+
+function sortByDate(array, direction) {
+  const arr = array.slice();
+  arr.sort((a, b) => {
+    const da = a.dateTaken ? Date.parse(a.dateTaken) : null;
+    const db = b.dateTaken ? Date.parse(b.dateTaken) : null;
+    if (da === null && db === null) return 0;
+    if (da === null) return 1;
+    if (db === null) return -1;
+    return direction === "newest" ? db - da : da - db;
+  });
   return arr;
 }
 
@@ -18,7 +36,18 @@ function formatExif(photo) {
   return parts.join(" · ");
 }
 
-const orderedPhotos = SHUFFLE_ON_LOAD ? shuffle(PHOTOS) : PHOTOS.slice();
+let orderedPhotos;
+switch (SORT_MODE) {
+  case "shuffle":
+    orderedPhotos = shuffle(PHOTOS);
+    break;
+  case "newest":
+  case "oldest":
+    orderedPhotos = sortByDate(PHOTOS, SORT_MODE);
+    break;
+  default:
+    orderedPhotos = PHOTOS.slice();
+}
 
 const grid = document.getElementById("grid");
 

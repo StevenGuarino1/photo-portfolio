@@ -150,6 +150,3 @@ window.addEventListener("resize", () => {
   if (!lightbox.hidden) sizeLightboxImage();
 });
 
-// ---------- Footer year ----------
-
-document.getElementById("year").textContent = new Date().getFullYear();

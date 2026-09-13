@@ -83,7 +83,7 @@ function sizeLightboxImage() {
   // image never touches the screen edge, plus a little room below for
   // the EXIF caption line.
   const margin = 14;
-  const captionSpace = 46;
+  const captionSpace = 52;
   const maxW = Math.round(window.innerWidth - margin * 2);
   const maxH = Math.round(window.innerHeight - margin * 2 - captionSpace);
   lightboxImg.style.setProperty("--lb-max-w", `${maxW}px`);

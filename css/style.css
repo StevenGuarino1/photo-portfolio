@@ -37,16 +37,8 @@ body {
 .site-header h1 {
   font-size: 1.75rem;
   font-weight: 600;
-  margin: 0 0 6px;
-  letter-spacing: 0.01em;
-}
-
-.site-header .subtitle {
   margin: 0;
-  font-size: 1.05rem;
-  line-height: 1.4;
-  color: var(--muted-color);
-  max-width: 60ch;
+  letter-spacing: 0.01em;
 }
 
 /* ---------- Grid ---------- */

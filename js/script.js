@@ -150,3 +150,32 @@ window.addEventListener("resize", () => {
   if (!lightbox.hidden) sizeLightboxImage();
 });
 
+// Swipe left/right to move between photos on touch devices, since
+// arrow keys aren't available there.
+const SWIPE_THRESHOLD = 50; // px
+let touchStartX = null;
+let touchStartY = null;
+
+lightbox.addEventListener(
+  "touchstart",
+  (e) => {
+    touchStartX = e.changedTouches[0].clientX;
+    touchStartY = e.changedTouches[0].clientY;
+  },
+  { passive: true }
+);
+
+lightbox.addEventListener(
+  "touchend",
+  (e) => {
+    if (touchStartX === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    touchStartX = null;
+    touchStartY = null;
+    if (Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dx) < Math.abs(dy)) return;
+    showNext(dx < 0 ? 1 : -1);
+  },
+  { passive: true }
+);
+

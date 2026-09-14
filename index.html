@@ -253,8 +253,11 @@
   function makeTextRow(dir) {
     const row = document.createElement("div");
     row.className = `row text scroll-${dir}`;
-    // even count of identical spans so translateX(-50%) loops seamlessly
-    for (let i = 0; i < 10; i++) {
+    // even count of identical spans so translateX(-50%) loops seamlessly —
+    // generous enough that the band stays fully covered at every point in
+    // the scroll cycle (including the very first frame) even on wide
+    // monitors, rather than needing to scroll a bit before it looks filled
+    for (let i = 0; i < 40; i++) {
       const span = document.createElement("span");
       span.innerHTML = GEAR_TEXT;
       row.appendChild(span);

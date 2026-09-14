@@ -64,6 +64,7 @@
     transform: translate(-50%, -50%) rotate(var(--tilt));
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: var(--gap);
   }
 
@@ -209,7 +210,7 @@
   const GEAR_TEXT = `Steven Guarino ${DIVIDER} Sony A6700 ${DIVIDER} Sigma 17-40mm F1.8 DC DN | Art ${DIVIDER} Sigma 150-600mm F5-6.3 DG DN OS | Sports ${DIVIDER}`;
 
   // Every row (photo or text) alternates direction from its neighbors.
-  const ROWS = [
+  const BASE_ROWS = [
     { type: "photos", files: ["4.jpg", "DSC04824.jpg", "Cruise-6.jpg"] },
     { type: "text" },
     { type: "photos", files: ["DSC05851.jpg", "DSC04972.jpg", "DSC05238.jpg"] },
@@ -218,7 +219,18 @@
     { type: "text" },
     { type: "photos", files: ["DSC04734.jpg", "DSC05429.jpg", "DSC05025.jpg"] },
     { type: "text" },
+    { type: "photos", files: ["5-alt.jpg", "Cruise-10.jpg", "Cruise-12.jpg", "Cruise-5.jpg", "a2.jpg"] },
+    { type: "text" },
   ];
+  // Repeated so the tilted block is tall enough to reach all four
+  // corners of the viewport even on wide/short monitors — a single
+  // pass through BASE_ROWS isn't tall enough at some aspect ratios,
+  // leaving the page background visible in the corners.
+  const PATTERN_REPEAT = 3;
+  const ROWS = [];
+  for (let i = 0; i < PATTERN_REPEAT; i++) {
+    BASE_ROWS.forEach((r) => ROWS.push({ ...r }));
+  }
   ROWS.forEach((r, i) => {
     r.dir = i % 2 === 0 ? "left" : "right";
   });
@@ -286,6 +298,11 @@
     "DSC04734.jpg": { aperture: "f/14", shutter: "1/80", iso: "100" },
     "DSC05429.jpg": { aperture: "f/11", shutter: "1/2000", iso: "1600" },
     "DSC05025.jpg": { aperture: "f/6.3", shutter: "1/800", iso: "125" },
+    "5-alt.jpg": { aperture: "f/1.8", shutter: "4s", iso: "320" },
+    "Cruise-10.jpg": { aperture: "f/5.6", shutter: "1/1250", iso: "100" },
+    "Cruise-12.jpg": { aperture: "f/5.6", shutter: "1/1600", iso: "100" },
+    "Cruise-5.jpg": { aperture: "f/1.8", shutter: "1/200", iso: "100" },
+    "a2.jpg": { aperture: "f/1.4", shutter: "1.6s", iso: "640" },
   };
 
   function formatExif(meta) {
@@ -389,8 +406,8 @@
 
   // ---------- Entrance A: the photo straightens out of the tilt and
   // zooms up to full size, background fading to white, then the EXIF
-  // fades in once it's settled. Used on the very first click and then
-  // every other click after that (see the alternation below). ----------
+  // fades in once it's settled. Used on the 2nd click and every other
+  // click after that (see the alternation below). ----------
 
   function enterViaMorph(img) {
     const startRect = img.getBoundingClientRect();
@@ -484,8 +501,8 @@
 
     freezeRows();
 
-    // 1st, 3rd, 5th... "free" click opens full-size; 2nd, 4th, 6th...
-    // spins. Zoom is off the table while anything is spinning, so
+    // 1st, 3rd, 5th... "free" click spins; 2nd, 4th, 6th... opens
+    // full-size. Zoom is off the table while anything is spinning, so
     // those clicks just become another spin instead — and don't
     // themselves count toward the alternation, so a burst of clicks
     // while something's already spinning can't throw off the pattern
@@ -495,7 +512,7 @@
       useSpin = true;
     } else {
       clickCount += 1;
-      useSpin = clickCount % 2 === 0;
+      useSpin = clickCount % 2 === 1;
     }
 
     if (useSpin) {

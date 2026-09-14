@@ -1,49 +1,545 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Steven Guarino — Photography</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Steven Guarino — Photography</title>
 
-  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
-  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png" />
-  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png" />
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
 
-  <meta property="og:type" content="website" />
-  <meta property="og:title" content="Steven Guarino — Photography" />
-  <meta property="og:description" content="Wildlife, astrophotography, macro, and street photography." />
-  <meta property="og:url" content="https://stevenguarino1.github.io/photo-portfolio/" />
-  <meta property="og:image" content="https://stevenguarino1.github.io/photo-portfolio/photos/4@2x.jpg" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Steven Guarino — Photography" />
-  <meta name="twitter:description" content="Wildlife, astrophotography, macro, and street photography." />
-  <meta name="twitter:image" content="https://stevenguarino1.github.io/photo-portfolio/photos/4@2x.jpg" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Steven Guarino — Photography" />
+<meta property="og:description" content="Wildlife, astrophotography, macro, and street photography." />
+<meta property="og:url" content="https://stevenguarino1.github.io/photo-portfolio/" />
+<meta property="og:image" content="https://stevenguarino1.github.io/photo-portfolio/photos/4@2x.jpg" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Steven Guarino — Photography" />
+<meta name="twitter:description" content="Wildlife, astrophotography, macro, and street photography." />
+<meta name="twitter:image" content="https://stevenguarino1.github.io/photo-portfolio/photos/4@2x.jpg" />
 
-  <link rel="stylesheet" href="css/style.css?v=3" />
+<style>
+  /*
+    Deliberately single-theme: paper white + near-black, matching the
+    main portfolio's fixed white identity. Painted explicitly so it
+    holds on either host ground rather than inheriting a dark shell.
+  */
+  :root {
+    --bg: #ffffff;
+    --ink: #111111;
+    --ink-quiet: rgba(17, 17, 17, 0.38);
+
+    --gap: 10px;
+    --tile-h: 240px;
+    --tilt: -35deg;
+    --text-size: clamp(1.05rem, 1.25vw, 1.35rem);
+    --nameplate-font: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    overflow-x: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+
+  .stage {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  .rotate {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 220vmax;
+    transform: translate(-50%, -50%) rotate(var(--tilt));
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap);
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: var(--gap);
+    width: max-content;
+  }
+
+  .row.photos img {
+    display: block;
+    height: var(--tile-h);
+    width: auto;
+    flex: none;
+    -webkit-user-drag: none;
+    user-select: none;
+    cursor: pointer;
+  }
+
+  .whiteout {
+    position: fixed;
+    inset: 0;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 2200ms ease;
+    z-index: 999;
+  }
+
+  .whiteout.visible {
+    opacity: 1;
+  }
+
+  .morph-clone {
+    position: fixed;
+    z-index: 1000;
+    display: block;
+    -webkit-user-drag: none;
+    user-select: none;
+  }
+
+  .viewer {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    pointer-events: none;
+  }
+
+  .viewer.visible {
+    pointer-events: auto;
+    cursor: pointer;
+  }
+
+  .viewer img {
+    position: fixed;
+    display: block;
+    opacity: 0;
+  }
+
+  .viewer .exif {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 1rem;
+    color: var(--ink);
+    letter-spacing: 0.02em;
+    background: rgba(255, 255, 255, 0.92);
+    padding: 5px 14px;
+    opacity: 0;
+    transition: opacity 700ms ease;
+  }
+
+  .viewer .exif.visible {
+    opacity: 1;
+  }
+
+  .row.photos.scroll-left {
+    animation: scroll-left 38s linear infinite;
+  }
+
+  .row.photos.scroll-right {
+    animation: scroll-left 38s linear infinite reverse;
+  }
+
+  @keyframes scroll-left {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+
+  .row.text.scroll-left {
+    animation: scroll-left 100s linear infinite;
+  }
+
+  .row.text.scroll-right {
+    animation: scroll-left 100s linear infinite reverse;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .row.photos.scroll-left,
+    .row.photos.scroll-right,
+    .row.text.scroll-left,
+    .row.text.scroll-right {
+      animation-play-state: paused;
+    }
+  }
+
+  .row.text {
+    font-family: var(--nameplate-font);
+    font-size: var(--text-size);
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+
+  .row.text span {
+    color: var(--ink);
+  }
+
+  .row.text .divider {
+    display: inline-block;
+    width: 3px;
+    height: 0.85em;
+    margin: 0 1rem;
+    background: var(--ink-quiet);
+    vertical-align: middle;
+  }
+</style>
 </head>
 <body>
-  <header class="site-header">
-    <h1>Steven Guarino</h1>
-  </header>
 
-  <main>
-    <div id="grid" class="grid"></div>
-  </main>
+<div id="sections"></div>
+<div class="whiteout" id="whiteout"></div>
+<div class="viewer" id="viewer">
+  <img id="viewer-img" src="" alt="" />
+  <p class="exif" id="viewer-exif"></p>
+</div>
 
-  <div id="lightbox" class="lightbox" hidden>
-    <div class="lightbox-stage">
-      <div class="lightbox-frame">
-        <img id="lightbox-img" src="" alt="" />
-      </div>
-      <p id="lightbox-exif" class="lightbox-exif"></p>
-    </div>
-  </div>
+<script>
+  const DIVIDER = "<span class=\"divider\"></span>";
+  const GEAR_TEXT = `Steven Guarino ${DIVIDER} Sony A6700 ${DIVIDER} Sigma 17-40mm F1.8 DC DN | Art ${DIVIDER} Sigma 150-600mm F5-6.3 DG DN OS | Sports ${DIVIDER}`;
 
-  <footer class="site-footer">
-    <p>Sony a6700 · Sigma 17-40mm f/1.8 · Sigma 150-600mm DG DN Sports</p>
-  </footer>
+  // Every row (photo or text) alternates direction from its neighbors.
+  const ROWS = [
+    { type: "photos", files: ["4.jpg", "DSC04824.jpg", "Cruise-6.jpg"] },
+    { type: "text" },
+    { type: "photos", files: ["DSC05851.jpg", "DSC04972.jpg", "DSC05238.jpg"] },
+    { type: "text" },
+    { type: "photos", files: ["2.jpg", "DSC05995.jpg", "Cruise-11.jpg"] },
+    { type: "text" },
+    { type: "photos", files: ["DSC04734.jpg", "DSC05429.jpg", "DSC05025.jpg"] },
+    { type: "text" },
+  ];
+  ROWS.forEach((r, i) => {
+    r.dir = i % 2 === 0 ? "left" : "right";
+  });
 
-  <script src="js/photos.js?v=4"></script>
-  <script src="js/script.js?v=4"></script>
+  function makePhotoRow(dir, files) {
+    const row = document.createElement("div");
+    row.className = `row photos scroll-${dir}`;
+    // duplicate the list so translateX(-50%) loops seamlessly
+    const doubled = files.concat(files).concat(files).concat(files);
+    doubled.forEach((f) => {
+      const img = document.createElement("img");
+      img.src = `photos/${f}`;
+      img.alt = "";
+      img.loading = "eager";
+      row.appendChild(img);
+    });
+    return row;
+  }
+
+  function makeTextRow(dir) {
+    const row = document.createElement("div");
+    row.className = `row text scroll-${dir}`;
+    // even count of identical spans so translateX(-50%) loops seamlessly
+    for (let i = 0; i < 10; i++) {
+      const span = document.createElement("span");
+      span.innerHTML = GEAR_TEXT;
+      row.appendChild(span);
+    }
+    return row;
+  }
+
+  // The page scrolls "forever" by simply repeating this same tilted
+  // block of rows down a tall page instead of confining it to one
+  // screen — each repeat is an independent centered/rotated section.
+  const SECTION_COUNT = 1; // vertical scroll disabled for now — single screen
+
+  function buildSection() {
+    const stage = document.createElement("div");
+    stage.className = "stage";
+    const rotateEl = document.createElement("div");
+    rotateEl.className = "rotate";
+    stage.appendChild(rotateEl);
+    ROWS.forEach((r) => {
+      rotateEl.appendChild(r.type === "photos" ? makePhotoRow(r.dir, r.files) : makeTextRow(r.dir));
+    });
+    return stage;
+  }
+
+  const sectionsEl = document.getElementById("sections");
+  for (let i = 0; i < SECTION_COUNT; i++) {
+    sectionsEl.appendChild(buildSection());
+  }
+
+  // ---------- EXIF for the photos used here (same data as the main site) ----------
+  const EXIF = {
+    "4.jpg": { aperture: "f/6.3", shutter: "1/1000", iso: "1600" },
+    "DSC04824.jpg": { aperture: "f/5.6", shutter: "1/400", iso: "100" },
+    "Cruise-6.jpg": { aperture: "f/5.6", shutter: "1/640", iso: "100" },
+    "DSC05851.jpg": { aperture: "f/10", shutter: "1/2000", iso: "800" },
+    "DSC04972.jpg": { aperture: "f/11", shutter: "1/250", iso: "125" },
+    "DSC05238.jpg": { aperture: "f/5", shutter: "1/2000", iso: "200" },
+    "2.jpg": { aperture: "f/8", shutter: "1/800", iso: "125" },
+    "DSC05995.jpg": { aperture: "f/1.8", shutter: "1/40", iso: "200" },
+    "Cruise-11.jpg": { aperture: "f/5.6", shutter: "1/1000", iso: "100" },
+    "DSC04734.jpg": { aperture: "f/14", shutter: "1/80", iso: "100" },
+    "DSC05429.jpg": { aperture: "f/11", shutter: "1/2000", iso: "1600" },
+    "DSC05025.jpg": { aperture: "f/6.3", shutter: "1/800", iso: "125" },
+  };
+
+  function formatExif(meta) {
+    if (!meta) return "";
+    return [meta.aperture, meta.shutter, `ISO ${meta.iso}`].join(" · ");
+  }
+
+  // ---------- Click a photo: it stops, straightens out of the tilt,
+  // and zooms up to full size in place; the EXIF fades in once it
+  // settles. Click again to fade back to the marquee. ----------
+
+  const MORPH_MS = 1300;
+  const VIEW_FADE_MS = 300;
+
+  const TILT_DEG = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--tilt"));
+
+  const allRows = Array.from(document.querySelectorAll(".row"));
+  const whiteout = document.getElementById("whiteout");
+  const viewer = document.getElementById("viewer");
+  const viewerImg = document.getElementById("viewer-img");
+  const viewerExif = document.getElementById("viewer-exif");
+
+  let state = "idle"; // idle -> entering -> viewing -> leaving -> idle
+  let sourceImg = null; // the original grid <img> currently hidden behind the morph
+
+  function freezeRows() {
+    allRows.forEach((r) => { r.style.animationPlayState = "paused"; });
+  }
+
+  function finalImageBox(natural) {
+    // The image is always simply centered in the viewport — max 86vw/72vh,
+    // never upscaled past the source file's own resolution. The EXIF line
+    // sits just underneath, wherever that lands; the image never shifts
+    // to make room for it.
+    const maxW = window.innerWidth * 0.86;
+    const maxH = window.innerHeight * 0.72;
+    const scale = Math.min(maxW / natural.w, maxH / natural.h, 1);
+    const w = natural.w * scale;
+    const h = natural.h * scale;
+    const left = (window.innerWidth - w) / 2;
+    const top = (window.innerHeight - h) / 2;
+    return { left, top, w, h };
+  }
+
+  // Run `cb` once, after `prop` finishes transitioning on `el` — or
+  // after `ms` regardless, whichever comes first. A plain
+  // `transitionend` listener can be missed (backgrounded tab, a
+  // property that didn't actually change, etc.), and this effect must
+  // never leave the user stuck mid-animation, so every phase transition
+  // is driven through this instead of a bare listener.
+  function afterTransition(el, prop, ms, cb) {
+    let done = false;
+    function finish() {
+      if (done) return;
+      done = true;
+      el.removeEventListener("transitionend", onEnd);
+      clearTimeout(timer);
+      cb();
+    }
+    function onEnd(ev) {
+      if (ev.target !== el || ev.propertyName !== prop) return;
+      finish();
+    }
+    el.addEventListener("transitionend", onEnd);
+    const timer = setTimeout(finish, ms + 150);
+  }
+
+  // Place the real viewer <img> at its final box, visible immediately —
+  // used as the seamless handoff from the morph clone.
+  function placeViewerImage(img, finalBox) {
+    viewerImg.src = img.src;
+    viewerImg.alt = "";
+    viewerImg.style.transition = "none";
+    viewerImg.style.left = `${finalBox.left}px`;
+    viewerImg.style.top = `${finalBox.top}px`;
+    viewerImg.style.width = `${finalBox.w}px`;
+    viewerImg.style.height = `${finalBox.h}px`;
+    viewerImg.style.opacity = "1";
+    void viewerImg.offsetWidth;
+    viewerImg.style.transition = "";
+  }
+
+  // Fade in the EXIF caption underneath and make the viewer
+  // interactive (click to return). Always called only once the image
+  // has fully settled into place — never before.
+  function revealExif(img, finalBox) {
+    const filename = img.getAttribute("src").split("/").pop();
+    viewerExif.textContent = formatExif(EXIF[filename]);
+    viewerExif.style.top = `${finalBox.top + finalBox.h + 16}px`;
+    viewerExif.classList.remove("visible");
+
+    viewer.classList.add("visible");
+    state = "viewing";
+
+    requestAnimationFrame(() => {
+      // If the user already closed the viewer before this frame fired,
+      // don't re-add the class out from under the close handler.
+      if (state === "viewing") viewerExif.classList.add("visible");
+    });
+  }
+
+  // ---------- Entrance A: the photo straightens out of the tilt and
+  // zooms up to full size, background fading to white, then the EXIF
+  // fades in once it's settled. Used on the very first click and then
+  // every other click after that (see the alternation below). ----------
+
+  function enterViaMorph(img) {
+    const startRect = img.getBoundingClientRect();
+    const centerX = startRect.left + startRect.width / 2;
+    const centerY = startRect.top + startRect.height / 2;
+    const intrinsicW = img.offsetWidth;
+    const intrinsicH = img.offsetHeight;
+
+    img.style.visibility = "hidden";
+
+    const clone = document.createElement("img");
+    clone.src = img.src;
+    clone.className = "morph-clone";
+    clone.style.left = `${centerX - intrinsicW / 2}px`;
+    clone.style.top = `${centerY - intrinsicH / 2}px`;
+    clone.style.width = `${intrinsicW}px`;
+    clone.style.height = `${intrinsicH}px`;
+    clone.style.transform = `rotate(${TILT_DEG}deg)`;
+    document.body.appendChild(clone);
+
+    void clone.offsetWidth; // force reflow before animating
+
+    const natural = { w: img.naturalWidth || intrinsicW, h: img.naturalHeight || intrinsicH };
+    const finalBox = finalImageBox(natural);
+
+    whiteout.style.transitionDuration = `${MORPH_MS}ms`;
+    whiteout.classList.add("visible");
+
+    clone.style.transition = `left ${MORPH_MS}ms ease, top ${MORPH_MS}ms ease, width ${MORPH_MS}ms ease, height ${MORPH_MS}ms ease, transform ${MORPH_MS}ms ease`;
+    clone.style.left = `${finalBox.left}px`;
+    clone.style.top = `${finalBox.top}px`;
+    clone.style.width = `${finalBox.w}px`;
+    clone.style.height = `${finalBox.h}px`;
+    clone.style.transform = "rotate(0deg)";
+
+    afterTransition(clone, "width", MORPH_MS, () => {
+      clone.remove();
+      placeViewerImage(img, finalBox);
+      revealExif(img, finalBox);
+    });
+  }
+
+  // ---------- Entrance B: everything is already frozen; after a short
+  // pause the clicked photo spins in place — same position, same
+  // tilt, same size it's always been, nothing else moves — then
+  // holds still for a couple seconds and just resumes scrolling
+  // right where it left off. No blackout, no zoom, no EXIF.
+  //
+  // Spins are independent of the single-photo zoom/viewer lock: the
+  // user can click as many different photos as they want to set them
+  // all spinning at once. Once anything is spinning, zoom is blocked
+  // until every spin has finished; only then can a click open a
+  // full-size photo again. ----------
+  const SPIN_PRE_PAUSE_MS = 500;
+  const SPIN_MS = 3000;
+  const SPIN_POST_PAUSE_MS = 500;
+
+  const activeSpins = new Set();
+
+  function maybeResumeRows() {
+    if (activeSpins.size === 0 && state === "idle") {
+      allRows.forEach((r) => { r.style.animationPlayState = ""; });
+    }
+  }
+
+  function enterViaSpin(img) {
+    activeSpins.add(img);
+    setTimeout(() => {
+      img.style.transition = `transform ${SPIN_MS}ms ease-in-out`;
+      img.style.transform = "rotate(360deg)";
+
+      afterTransition(img, "transform", SPIN_MS, () => {
+        setTimeout(() => {
+          img.style.transition = "";
+          img.style.transform = "";
+          activeSpins.delete(img);
+          maybeResumeRows();
+        }, SPIN_POST_PAUSE_MS);
+      });
+    }, SPIN_PRE_PAUSE_MS);
+  }
+
+  let clickCount = 0;
+
+  sectionsEl.addEventListener("click", (e) => {
+    if (state !== "idle") return; // a full-size photo is open/animating
+    const img = e.target.closest(".row.photos img");
+    if (!img) return;
+    if (!img.complete || img.naturalWidth === 0 || img.offsetWidth === 0) return;
+    if (activeSpins.has(img)) return; // already spinning this one
+
+    freezeRows();
+
+    // 1st, 3rd, 5th... "free" click opens full-size; 2nd, 4th, 6th...
+    // spins. Zoom is off the table while anything is spinning, so
+    // those clicks just become another spin instead — and don't
+    // themselves count toward the alternation, so a burst of clicks
+    // while something's already spinning can't throw off the pattern
+    // for later.
+    let useSpin;
+    if (activeSpins.size > 0) {
+      useSpin = true;
+    } else {
+      clickCount += 1;
+      useSpin = clickCount % 2 === 0;
+    }
+
+    if (useSpin) {
+      enterViaSpin(img);
+    } else {
+      state = "entering";
+      sourceImg = img;
+      enterViaMorph(img);
+    }
+  });
+
+  viewer.addEventListener("click", () => {
+    if (state !== "viewing") return;
+    state = "leaving";
+    viewer.classList.remove("visible");
+    viewerExif.classList.remove("visible");
+    viewerImg.style.transition = `opacity ${VIEW_FADE_MS}ms ease`;
+    viewerImg.style.opacity = "0";
+
+    // Restore the grid tile immediately so it's already back in place,
+    // frozen, by the time the viewer finishes fading out over it.
+    if (sourceImg) sourceImg.style.visibility = "";
+    sourceImg = null;
+
+    // Fade the white backdrop away at the same time — straight back
+    // to the scrolling grid, no blackout step in between.
+    whiteout.style.transitionDuration = `${VIEW_FADE_MS}ms`;
+    whiteout.classList.remove("visible");
+
+    setTimeout(() => {
+      viewerImg.style.transition = "";
+      viewerImg.style.opacity = "";
+      viewerImg.style.left = "";
+      viewerImg.style.top = "";
+      viewerImg.style.width = "";
+      viewerImg.style.height = "";
+      viewerExif.style.top = "";
+      whiteout.style.transitionDuration = "";
+
+      state = "idle";
+      maybeResumeRows(); // no-op if a spin somehow started meanwhile
+    }, VIEW_FADE_MS);
+  });
+</script>
+
 </body>
 </html>

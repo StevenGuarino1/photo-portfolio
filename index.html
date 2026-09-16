@@ -114,29 +114,22 @@
   }
 
   .gallery {
-    column-count: 3;
-    column-gap: var(--gap);
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap);
+  }
+
+  .gallery-row {
+    display: flex;
+    gap: var(--gap);
   }
 
   .gallery img {
     display: block;
-    width: 100%;
     height: auto;
-    margin: 0 0 var(--gap);
-    break-inside: avoid;
-    -webkit-column-break-inside: avoid;
+    min-width: 0;
     cursor: pointer;
     background: #f2f2f2;
-  }
-
-  .gallery img.is-hidden { display: none; }
-
-  @media (max-width: 1100px) {
-    .gallery { column-count: 2; }
-  }
-
-  @media (max-width: 620px) {
-    .gallery { column-count: 1; }
   }
 
   /* ---------- Newsletter ---------- */
@@ -348,7 +341,9 @@
     });
 
     const grid = document.getElementById("grid");
+    const ratioOf = (photo) => (photo.width && photo.height ? photo.width / photo.height : 1.5);
 
+    const imgFor = new Map();
     orderedPhotos.forEach((photo, index) => {
       const img = document.createElement("img");
       img.src = photo.file;
@@ -359,12 +354,75 @@
         img.width = photo.width;
         img.height = photo.height;
       }
-      img.loading = index < 4 ? "eager" : "lazy";
+      img.loading = index < 6 ? "eager" : "lazy";
       img.decoding = "async";
-      if (photo.category) img.dataset.category = photo.category;
       img.addEventListener("click", () => openLightbox(photo));
-      grid.appendChild(img);
+      imgFor.set(photo, img);
     });
+
+    // Row size follows a repeating pattern of photos-per-row, so the page
+    // alternates between bands of two large frames and bands of three or four
+    // smaller ones. Fitting rows to target heights instead collapses toward a
+    // single height, because most of this set shares one aspect ratio.
+    function rowPlanFor(width) {
+      if (width < 620) return { pattern: [1], maxH: width * 1.6, minH: 0 };
+      if (width < 1000) return { pattern: [1, 2, 2, 3], maxH: width * 0.75, minH: width * 0.2 };
+      return { pattern: [2, 4, 3, 2, 3, 4], maxH: width * 0.45, minH: width * 0.13 };
+    }
+
+    function layout(photos) {
+      const width = grid.clientWidth;
+      if (!width) return;
+
+      const gap = parseFloat(getComputedStyle(grid).rowGap) || 0;
+      const { pattern, maxH, minH } = rowPlanFor(width);
+
+      const heightOf = (slice) => {
+        const ratioSum = slice.reduce((sum, photo) => sum + ratioOf(photo), 0);
+        return (width - gap * (slice.length - 1)) / ratioSum;
+      };
+
+      grid.textContent = "";
+      let cursor = 0;
+      let rowIndex = 0;
+
+      while (cursor < photos.length) {
+        const remaining = photos.length - cursor;
+        let count = Math.min(pattern[rowIndex % pattern.length], remaining);
+
+        // A run of portraits or panoramas can still tower or squash at the
+        // pattern's count, so nudge it until the row sits in range.
+        while (count < remaining && heightOf(photos.slice(cursor, cursor + count)) > maxH) count++;
+        while (count > 1 && heightOf(photos.slice(cursor, cursor + count)) < minH) count--;
+
+        const rowPhotos = photos.slice(cursor, cursor + count);
+        const height = heightOf(rowPhotos);
+        cursor += count;
+        rowIndex += 1;
+
+        // Only the final row can still exceed maxH, since there is nothing left
+        // to add to it. Let it sit at maxH rather than fill the width.
+        const loose = height > maxH;
+
+        const row = document.createElement("div");
+        row.className = "gallery-row";
+        rowPhotos.forEach((photo) => {
+          const img = imgFor.get(photo);
+          if (loose) {
+            img.style.flex = "0 0 auto";
+            img.style.width = `${Math.round(maxH * ratioOf(photo))}px`;
+          } else {
+            img.style.flex = `${ratioOf(photo)} 1 0%`;
+            img.style.width = "";
+          }
+          row.appendChild(img);
+        });
+        grid.appendChild(row);
+      }
+    }
+
+    let visiblePhotos = orderedPhotos;
+    layout(visiblePhotos);
 
     document.getElementById("siteNav").addEventListener("click", (e) => {
       const btn = e.target.closest("button[data-filter]");
@@ -375,9 +433,18 @@
         .forEach((el) => el.classList.toggle("is-active", el === btn));
 
       const filter = btn.dataset.filter;
-      grid.querySelectorAll("img").forEach((img) => {
-        img.classList.toggle("is-hidden", filter !== "all" && img.dataset.category !== filter);
-      });
+      visiblePhotos =
+        filter === "all" ? orderedPhotos : orderedPhotos.filter((p) => p.category === filter);
+      layout(visiblePhotos);
+    });
+
+    let lastWidth = window.innerWidth;
+    let resizeTimer;
+    window.addEventListener("resize", () => {
+      if (window.innerWidth === lastWidth) return;
+      lastWidth = window.innerWidth;
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => layout(visiblePhotos), 150);
     });
 
     // ---------- Lightbox ----------

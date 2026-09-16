@@ -66,6 +66,17 @@
     white-space: nowrap;
   }
 
+  .logo-mark {
+    color: var(--muted);
+    font-size: 0.82em;
+  }
+
+  .logo-mark::before {
+    content: "/";
+    margin-right: 0.5em;
+    opacity: 0.45;
+  }
+
   .site-nav {
     display: flex;
     flex-wrap: wrap;
@@ -288,7 +299,7 @@
 <body>
 
   <header class="site-header">
-    <a class="logo" href="./">Steven Guarino</a>
+    <a class="logo" href="./">Steven Guarino <span class="logo-mark">Archive</span></a>
     <nav class="site-nav" id="siteNav">
       <button class="nav-link is-active" type="button" data-filter="all">All</button>
       <button class="nav-link" type="button" data-filter="Wildlife">Wildlife</button>

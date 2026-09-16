@@ -25,10 +25,8 @@
 
 <style>
   :root {
-    --accent: #ec5c39;
     --text: #111;
     --muted: #6b6b6b;
-    --panel-bg: #f3f2ef;
     /* matches levonbiss.com at 1400px: 42px side padding, 39px gutters */
     --gap: clamp(18px, 2.8vw, 40px);
     --side-padding: clamp(20px, 3vw, 42px);
@@ -130,73 +128,6 @@
     min-width: 0;
     cursor: pointer;
     background: #f2f2f2;
-  }
-
-  /* ---------- Newsletter ---------- */
-
-  .subscribe {
-    background: var(--panel-bg);
-    padding: 90px var(--side-padding);
-    text-align: center;
-  }
-
-  .subscribe h2 {
-    font-size: clamp(1.5rem, 1rem + 1.44vw, 2.6rem);
-    font-weight: 400;
-    letter-spacing: -0.02em;
-    margin: 0 0 12px;
-  }
-
-  .subscribe p {
-    margin: 0 auto 32px;
-    max-width: 420px;
-    color: var(--muted);
-    font-size: 1rem;
-    line-height: 1.5;
-  }
-
-  .subscribe form {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 24px;
-  }
-
-  .subscribe input[type="email"] {
-    width: 100%;
-    max-width: 360px;
-    padding: 16px 20px;
-    font-family: inherit;
-    font-size: 1rem;
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    background: #fff;
-  }
-
-  .subscribe input[type="email"]:focus {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-
-  .subscribe button {
-    font-family: inherit;
-    font-size: 1rem;
-    background: transparent;
-    color: var(--accent);
-    border: 2px solid var(--accent);
-    padding: 16px 32px;
-    cursor: pointer;
-    transition: background 150ms ease, color 150ms ease;
-  }
-
-  .subscribe button:hover {
-    background: var(--accent);
-    color: #fff;
-  }
-
-  .subscribe .thanks {
-    font-size: 0.9rem;
-    color: var(--muted);
-    min-height: 1.2em;
   }
 
   /* ---------- Footer ---------- */
@@ -306,16 +237,6 @@
   <main>
     <div class="gallery" id="grid"></div>
   </main>
-
-  <section class="subscribe">
-    <h2>Subscribe to updates.</h2>
-    <p>Sign up with your email address to hear about new galleries and prints.</p>
-    <form id="subscribeForm">
-      <input type="email" name="email" placeholder="Email Address" required />
-      <button type="submit">Sign Up</button>
-      <p class="thanks" id="subscribeThanks"></p>
-    </form>
-  </section>
 
   <footer class="site-footer">
     <p>Sony a6700 · Sigma 17-40mm f/1.8 · Sigma 150-600mm DG DN Sports</p>
@@ -512,16 +433,6 @@
       if (!lightbox.hidden) sizeLightboxImage();
     });
 
-    // ---------- Subscribe form (static — no backend, shows a local thank-you) ----------
-
-    const subscribeForm = document.getElementById("subscribeForm");
-    const subscribeThanks = document.getElementById("subscribeThanks");
-
-    subscribeForm.addEventListener("submit", (e) => {
-      e.preventDefault();
-      subscribeThanks.textContent = "Thanks! (This is a demo form — nothing was sent.)";
-      subscribeForm.reset();
-    });
   </script>
 </body>
 </html>

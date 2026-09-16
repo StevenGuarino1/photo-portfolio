@@ -7,6 +7,7 @@
 const PHOTOS = [
   {
     file: "photos/1.jpg",
+    category: "Close-Up",
     file2x: "photos/1@2x.jpg",
     dateTaken: "2026-09-12T15:28:48",
     alt: "A small green seedling sprouting from a weathered piece of driftwood, backlit by sunset trees",
@@ -19,6 +20,7 @@ const PHOTOS = [
   },
   {
     file: "photos/2.jpg",
+    category: "Landscape",
     file2x: "photos/2@2x.jpg",
     dateTaken: "2026-09-12T14:58:58",
     alt: "A gnarled tree root system on a riverbank, with calm water and distant mountains beyond",
@@ -31,6 +33,7 @@ const PHOTOS = [
   },
   {
     file: "photos/2-alt.jpg",
+    category: "Night Sky",
     file2x: "photos/2-alt@2x.jpg",
     dateTaken: "2026-09-07T22:02:19",
     alt: "A dense winter night sky thick with stars and faint nebulosity",
@@ -43,6 +46,7 @@ const PHOTOS = [
   },
   {
     file: "photos/3.jpg",
+    category: "Landscape",
     file2x: "photos/3@2x.jpg",
     dateTaken: "2026-09-12T15:27:49",
     alt: "A wave breaking over dark rocks, shot low to the water beneath an overhanging ledge",
@@ -55,6 +59,7 @@ const PHOTOS = [
   },
   {
     file: "photos/4.jpg",
+    category: "Wildlife",
     file2x: "photos/4@2x.jpg",
     dateTaken: "2026-09-12T17:06:12",
     alt: "An osprey perched on a bare branch against a plain sky, looking off to the side",
@@ -67,6 +72,7 @@ const PHOTOS = [
   },
   {
     file: "photos/4-alt.jpg",
+    category: "Night Sky",
     file2x: "photos/4-alt@2x.jpg",
     dateTaken: "2026-09-07T22:35:47",
     alt: "Long-exposure light trails curving along a dark road at night, stars visible overhead",
@@ -79,6 +85,7 @@ const PHOTOS = [
   },
   {
     file: "photos/5.jpg",
+    category: "Close-Up",
     file2x: "photos/5@2x.jpg",
     dateTaken: "2026-09-12T15:34:23",
     alt: "Young leaves on a bare branch backlit by a bright, cloudy sky",
@@ -91,6 +98,7 @@ const PHOTOS = [
   },
   {
     file: "photos/Cruise-11.jpg",
+    category: "Wildlife",
     file2x: "photos/Cruise-11@2x.jpg",
     dateTaken: "2026-02-12T12:28:23",
     alt: "A gull walking across white sand with colorful cabanas and palm trees behind it",
@@ -103,6 +111,7 @@ const PHOTOS = [
   },
   {
     file: "photos/Cruise-6.jpg",
+    category: "Wildlife",
     file2x: "photos/Cruise-6@2x.jpg",
     dateTaken: "2026-02-12T07:47:10",
     alt: "A gull flying low over deep blue ocean water, carrying off a slice of pizza",
@@ -115,6 +124,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC04734.jpg",
+    category: "Close-Up",
     file2x: "photos/DSC04734@2x.jpg",
     dateTaken: "2026-08-04T17:48:23",
     alt: "A large white mushroom cap backlit by low morning sun, rising out of green grass",
@@ -127,6 +137,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC04739.jpg",
+    category: "Close-Up",
     file2x: "photos/DSC04739@2x.jpg",
     dateTaken: "2026-08-04T17:48:43",
     alt: "The same backlit mushroom from a lower angle, with sunlight flaring around its cap",
@@ -139,6 +150,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC04807.jpg",
+    category: "Wildlife",
     file2x: "photos/DSC04807@2x.jpg",
     dateTaken: "2026-08-09T11:59:20",
     alt: "A duck's head and neck in profile against a blurred green background",
@@ -151,6 +163,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC04809.jpg",
+    category: "Wildlife",
     file2x: "photos/DSC04809@2x.jpg",
     dateTaken: "2026-08-09T11:59:30",
     alt: "A duck looking directly into the camera, framed by out-of-focus trees",
@@ -163,6 +176,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC04810.jpg",
+    category: "Wildlife",
     file2x: "photos/DSC04810@2x.jpg",
     dateTaken: "2026-08-09T12:00:34",
     alt: "A duck swimming with its bill open mid-quack, driftwood in the background",
@@ -175,6 +189,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC04824.jpg",
+    category: "Landscape",
     file2x: "photos/DSC04824@2x.jpg",
     dateTaken: "2026-08-09T12:10:29",
     alt: "A small sailboat anchored on a river beneath a large steel truss railroad bridge, framed by leaves",
@@ -187,6 +202,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC04972.jpg",
+    category: "Close-Up",
     file2x: "photos/DSC04972@2x.jpg",
     dateTaken: "2026-08-09T12:49:08",
     alt: "Close-up of barnacles clustered on a rock at low tide, with a rocky shoreline beyond",
@@ -199,6 +215,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC05025.jpg",
+    category: "Landscape",
     file2x: "photos/DSC05025@2x.jpg",
     dateTaken: "2026-08-09T13:04:14",
     alt: "A shallow tide pool threading between dark, weathered rocks",
@@ -211,6 +228,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC05238.jpg",
+    category: "Wildlife",
     file2x: "photos/DSC05238@2x.jpg",
     dateTaken: "2026-08-09T13:18:43",
     alt: "A duck balanced on one leg atop a rock, stretching a wing, silhouetted against calm water and hills",
@@ -223,6 +241,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC05429.jpg",
+    category: "Wildlife",
     file2x: "photos/DSC05429@2x.jpg",
     dateTaken: "2026-08-13T16:24:40",
     alt: "Two Canada geese in tall grass, one with its neck extended and beak open mid-honk",
@@ -235,6 +254,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC05512.jpg",
+    category: "Wildlife",
     file2x: "photos/DSC05512@2x.jpg",
     dateTaken: "2026-08-13T16:31:16",
     alt: "A mottled brown duck with a yellow bill resting at the water's edge among rocks",
@@ -247,6 +267,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC05752.jpg",
+    category: "Aviation",
     file2x: "photos/DSC05752@2x.jpg",
     dateTaken: "2026-08-14T15:17:51",
     alt: "A jet airplane seen from directly below, silhouetted against a cloudy sky",
@@ -259,6 +280,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC05851.jpg",
+    category: "Aviation",
     file2x: "photos/DSC05851@2x.jpg",
     dateTaken: "2026-08-14T15:23:08",
     alt: "A Delta jet's wings and engines seen from below against a clear blue sky",
@@ -271,6 +293,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC05995.jpg",
+    category: "Close-Up",
     file2x: "photos/DSC05995@2x.jpg",
     dateTaken: "2026-08-14T20:08:04",
     alt: "Small flower buds on a stem, lit against a near-black background",
@@ -283,6 +306,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC06051.jpg",
+    category: "Night Sky",
     file2x: "photos/DSC06051@2x.jpg",
     dateTaken: "2026-08-14T21:25:14",
     alt: "A starry night sky over a backyard pergola, with a house glowing warmly below",
@@ -295,6 +319,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC06052.jpg",
+    category: "Night Sky",
     file2x: "photos/DSC06052@2x.jpg",
     dateTaken: "2026-08-14T21:27:34",
     alt: "A dense field of stars with a faint band of the Milky Way",
@@ -307,6 +332,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC06058.jpg",
+    category: "Night Sky",
     file2x: "photos/DSC06058@2x.jpg",
     dateTaken: "2026-08-14T21:36:20",
     alt: "A starry sky with the silhouette of a pine tree at the left edge",
@@ -319,6 +345,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC06060.jpg",
+    category: "Night Sky",
     file2x: "photos/DSC06060@2x.jpg",
     dateTaken: "2026-08-14T21:38:04",
     alt: "A starry sky over a dark treeline silhouette",
@@ -331,6 +358,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC06061.jpg",
+    category: "Night Sky",
     file2x: "photos/DSC06061@2x.jpg",
     dateTaken: "2026-08-14T21:40:12",
     alt: "A starry sky framed by trees on either side, with a faint meteor streak",
@@ -343,6 +371,7 @@ const PHOTOS = [
   },
   {
     file: "photos/DSC06067.jpg",
+    category: "Night Sky",
     file2x: "photos/DSC06067@2x.jpg",
     dateTaken: "2026-08-14T21:56:57",
     alt: "A wide, minimal starfield with two faint meteor streaks",
@@ -355,6 +384,7 @@ const PHOTOS = [
   },
   {
     file: "photos/5-alt.jpg",
+    category: "Night Sky",
     file2x: "photos/5-alt@2x.jpg",
     dateTaken: "2026-09-07T22:53:21",
     alt: "Long-exposure light trails curving along a dark road at night beside a guardrail, stars visible overhead",
@@ -367,6 +397,7 @@ const PHOTOS = [
   },
   {
     file: "photos/Cruise-10.jpg",
+    category: "Landscape",
     file2x: "photos/Cruise-10@2x.jpg",
     dateTaken: "2026-02-12T12:00:22",
     alt: "A cargo ship passing a busy beach full of swimmers and sunbathers",
@@ -379,6 +410,7 @@ const PHOTOS = [
   },
   {
     file: "photos/Cruise-12.jpg",
+    category: "Wildlife",
     file2x: "photos/Cruise-12@2x.jpg",
     dateTaken: "2026-02-12T12:53:27",
     alt: "A gull standing beside a small stack of balanced stones on a beach, ocean beyond",
@@ -391,6 +423,7 @@ const PHOTOS = [
   },
   {
     file: "photos/Cruise-5.jpg",
+    category: "Landscape",
     file2x: "photos/Cruise-5@2x.jpg",
     dateTaken: "2026-02-11T17:59:18",
     alt: "The sun setting into the ocean in a fiery orange sky, with a cruise ship silhouette in the distance",
@@ -403,6 +436,7 @@ const PHOTOS = [
   },
   {
     file: "photos/a2.jpg",
+    category: "Landscape",
     file2x: "photos/a2@2x.jpg",
     dateTaken: "2026-01-17T21:30:11",
     alt: "Bare winter branches silhouetted against a hazy blue dusk sky",

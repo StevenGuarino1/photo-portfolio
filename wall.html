@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Steven Guarino — Photography</title>
+
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png" />
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Steven Guarino — Photography" />
+<meta property="og:description" content="Wildlife, astrophotography, macro, and street photography." />
+<meta property="og:url" content="https://stevenguarino1.github.io/photo-portfolio/wall.html" />
+<meta property="og:image" content="https://stevenguarino1.github.io/photo-portfolio/photos/4@2x.jpg" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Steven Guarino — Photography" />
+<meta name="twitter:description" content="Wildlife, astrophotography, macro, and street photography." />
+<meta name="twitter:image" content="https://stevenguarino1.github.io/photo-portfolio/photos/4@2x.jpg" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --accent: #ec5c39;
+    --text: #111;
+    --muted: #6b6b6b;
+    --panel-bg: #f3f2ef;
+    /* matches levonbiss.com at 1400px: 42px side padding, 39px gutters */
+    --gap: clamp(18px, 2.8vw, 40px);
+    --side-padding: clamp(20px, 3vw, 42px);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    color: var(--text);
+    font-family: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+
+  a { color: inherit; }
+
+  /* ---------- Header ---------- */
+
+  .site-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 14px 32px;
+    padding: clamp(26px, 2.9vw, 40px) var(--side-padding);
+  }
+
+  .site-header .logo {
+    font-size: clamp(1.05rem, 0.9rem + 0.55vw, 1.5rem);
+    letter-spacing: -0.02em;
+    font-weight: 400;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .site-nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 26px;
+  }
+
+  .nav-link {
+    font-family: inherit;
+    font-size: clamp(0.78rem, 0.7rem + 0.2vw, 0.95rem);
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 2px 0;
+    cursor: pointer;
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    opacity: 0.75;
+    transition: opacity 150ms ease;
+  }
+
+  .nav-link:hover {
+    opacity: 1;
+  }
+
+  .nav-link.is-active {
+    opacity: 1;
+    border-bottom-color: currentColor;
+  }
+
+  .nav-sep {
+    align-self: center;
+    width: 1px;
+    height: 0.9em;
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  /* ---------- Gallery ---------- */
+
+  main {
+    padding: var(--side-padding) var(--side-padding) var(--gap);
+  }
+
+  .gallery {
+    column-count: 3;
+    column-gap: var(--gap);
+  }
+
+  .gallery img {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin: 0 0 var(--gap);
+    break-inside: avoid;
+    -webkit-column-break-inside: avoid;
+    cursor: pointer;
+    background: #f2f2f2;
+  }
+
+  .gallery img.is-hidden { display: none; }
+
+  @media (max-width: 1100px) {
+    .gallery { column-count: 2; }
+  }
+
+  @media (max-width: 620px) {
+    .gallery { column-count: 1; }
+  }
+
+  /* ---------- Newsletter ---------- */
+
+  .subscribe {
+    background: var(--panel-bg);
+    padding: 90px var(--side-padding);
+    text-align: center;
+  }
+
+  .subscribe h2 {
+    font-size: clamp(1.4rem, 1.1rem + 1vw, 1.95rem);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    margin: 0 0 12px;
+  }
+
+  .subscribe p {
+    margin: 0 auto 32px;
+    max-width: 420px;
+    color: var(--muted);
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+
+  .subscribe form {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .subscribe input[type="email"] {
+    width: 100%;
+    max-width: 360px;
+    padding: 16px 20px;
+    font-family: inherit;
+    font-size: 1rem;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    background: #fff;
+  }
+
+  .subscribe input[type="email"]:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .subscribe button {
+    font-family: inherit;
+    font-size: 1rem;
+    background: transparent;
+    color: var(--accent);
+    border: 2px solid var(--accent);
+    padding: 16px 32px;
+    cursor: pointer;
+    transition: background 150ms ease, color 150ms ease;
+  }
+
+  .subscribe button:hover {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .subscribe .thanks {
+    font-size: 0.9rem;
+    color: var(--muted);
+    min-height: 1.2em;
+  }
+
+  /* ---------- Footer ---------- */
+
+  .site-footer {
+    padding: 28px var(--side-padding) 44px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.78rem;
+    line-height: 1.6;
+  }
+
+  .site-footer p { margin: 0; }
+
+  /* ---------- Lightbox ---------- */
+
+  .lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.5);
+    backdrop-filter: blur(24px) saturate(0.65);
+    -webkit-backdrop-filter: blur(24px) saturate(0.65);
+    opacity: 0;
+    transition: opacity 200ms ease;
+  }
+
+  .lightbox[hidden] {
+    display: flex;
+    pointer-events: none;
+  }
+
+  .lightbox.is-open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .lightbox-stage {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 99vw;
+    max-height: 99vh;
+  }
+
+  .lightbox-frame {
+    position: relative;
+    display: inline-block;
+    line-height: 0;
+    isolation: isolate;
+  }
+
+  .lightbox-frame::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: scale(2.2);
+    background: radial-gradient(
+      ellipse closest-side at center,
+      rgba(0, 0, 0, 0.55) 0%,
+      rgba(0, 0, 0, 0.55) calc(100% / 2.2),
+      rgba(0, 0, 0, 0) 100%
+    );
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  #lightbox-img {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: var(--lb-max-w, 97vw);
+    max-height: var(--lb-max-h, 92vh);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  .lightbox-exif {
+    margin: 16px 0 0;
+    font-size: 1rem;
+    color: #e8e8e8;
+    text-align: center;
+  }
+
+  .lightbox-exif:empty { display: none; }
+
+  body.lightbox-open { overflow: hidden; }
+</style>
+</head>
+<body>
+
+  <header class="site-header">
+    <a class="logo" href="wall.html">Steven Guarino</a>
+    <nav class="site-nav" id="siteNav">
+      <button class="nav-link is-active" type="button" data-filter="all">All</button>
+      <button class="nav-link" type="button" data-filter="Wildlife">Wildlife</button>
+      <button class="nav-link" type="button" data-filter="Night Sky">Night Sky</button>
+      <button class="nav-link" type="button" data-filter="Landscape">Landscape</button>
+      <button class="nav-link" type="button" data-filter="Close-Up">Close-Up</button>
+      <button class="nav-link" type="button" data-filter="Aviation">Aviation</button>
+      <span class="nav-sep" aria-hidden="true"></span>
+      <a class="nav-link" href="gallery.html">Gallery</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="gallery" id="grid"></div>
+  </main>
+
+  <section class="subscribe">
+    <h2>Subscribe to updates.</h2>
+    <p>Sign up with your email address to hear about new galleries and prints.</p>
+    <form id="subscribeForm">
+      <input type="email" name="email" placeholder="Email Address" required />
+      <button type="submit">Sign Up</button>
+      <p class="thanks" id="subscribeThanks"></p>
+    </form>
+  </section>
+
+  <footer class="site-footer">
+    <p>Sony a6700 · Sigma 17-40mm f/1.8 · Sigma 150-600mm DG DN Sports</p>
+  </footer>
+
+  <div id="lightbox" class="lightbox" hidden>
+    <div class="lightbox-stage">
+      <div class="lightbox-frame">
+        <img id="lightbox-img" src="" alt="" />
+      </div>
+      <p id="lightbox-exif" class="lightbox-exif"></p>
+    </div>
+  </div>
+
+  <script src="js/photos.js?v=4"></script>
+  <script>
+    // ---------- Gallery ----------
+
+    const orderedPhotos = PHOTOS.slice().sort((a, b) => {
+      const da = a.dateTaken ? Date.parse(a.dateTaken) : 0;
+      const db = b.dateTaken ? Date.parse(b.dateTaken) : 0;
+      return db - da;
+    });
+
+    const grid = document.getElementById("grid");
+
+    orderedPhotos.forEach((photo, index) => {
+      const img = document.createElement("img");
+      img.src = photo.file;
+      if (photo.file2x) img.srcset = `${photo.file} 1x, ${photo.file2x} 2x`;
+      img.alt = photo.alt || "";
+      if (photo.title) img.title = photo.title;
+      if (photo.width && photo.height) {
+        img.width = photo.width;
+        img.height = photo.height;
+      }
+      img.loading = index < 4 ? "eager" : "lazy";
+      img.decoding = "async";
+      if (photo.category) img.dataset.category = photo.category;
+      img.addEventListener("click", () => openLightbox(photo));
+      grid.appendChild(img);
+    });
+
+    document.getElementById("siteNav").addEventListener("click", (e) => {
+      const btn = e.target.closest("button[data-filter]");
+      if (!btn) return;
+
+      document
+        .querySelectorAll("#siteNav .nav-link")
+        .forEach((el) => el.classList.toggle("is-active", el === btn));
+
+      const filter = btn.dataset.filter;
+      grid.querySelectorAll("img").forEach((img) => {
+        img.classList.toggle("is-hidden", filter !== "all" && img.dataset.category !== filter);
+      });
+    });
+
+    // ---------- Lightbox ----------
+
+    function formatExif(photo) {
+      const parts = [];
+      if (photo.aperture) parts.push(photo.aperture);
+      if (photo.shutter) parts.push(photo.shutter);
+      if (photo.iso) parts.push(`ISO ${photo.iso}`);
+      return parts.join(" · ");
+    }
+
+    const lightbox = document.getElementById("lightbox");
+    const lightboxImg = document.getElementById("lightbox-img");
+    const lightboxExif = document.getElementById("lightbox-exif");
+
+    function sizeLightboxImage() {
+      const margin = 14;
+      const captionSpace = 52;
+      const maxW = Math.round(window.innerWidth - margin * 2);
+      const maxH = Math.round(window.innerHeight - margin * 2 - captionSpace);
+      lightboxImg.style.setProperty("--lb-max-w", `${maxW}px`);
+      lightboxImg.style.setProperty("--lb-max-h", `${maxH}px`);
+    }
+
+    function openLightbox(photo) {
+      lightboxImg.src = photo.file;
+      lightboxImg.alt = photo.alt || "";
+      if (photo.file2x) {
+        lightboxImg.srcset = `${photo.file} 1x, ${photo.file2x} 2x`;
+      } else {
+        lightboxImg.removeAttribute("srcset");
+      }
+      lightboxExif.textContent = formatExif(photo);
+
+      sizeLightboxImage();
+      lightbox.hidden = false;
+      document.body.classList.add("lightbox-open");
+      requestAnimationFrame(() => lightbox.classList.add("is-open"));
+    }
+
+    function closeLightbox() {
+      lightbox.classList.remove("is-open");
+      document.body.classList.remove("lightbox-open");
+      const onEnd = (e) => {
+        if (e.target !== lightbox) return;
+        lightbox.hidden = true;
+        lightbox.removeEventListener("transitionend", onEnd);
+      };
+      lightbox.addEventListener("transitionend", onEnd);
+    }
+
+    lightbox.addEventListener("click", (e) => {
+      if (e.target === lightbox || e.target === lightbox.querySelector(".lightbox-stage")) {
+        closeLightbox();
+      }
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (lightbox.hidden) return;
+      if (e.key === "Escape") closeLightbox();
+    });
+
+    window.addEventListener("resize", () => {
+      if (!lightbox.hidden) sizeLightboxImage();
+    });
+
+    // ---------- Subscribe form (static — no backend, shows a local thank-you) ----------
+
+    const subscribeForm = document.getElementById("subscribeForm");
+    const subscribeThanks = document.getElementById("subscribeThanks");
+
+    subscribeForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      subscribeThanks.textContent = "Thanks! (This is a demo form — nothing was sent.)";
+      subscribeForm.reset();
+    });
+  </script>
+</body>
+</html>

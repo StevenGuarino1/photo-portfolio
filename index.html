@@ -151,9 +151,13 @@
   }
 
   /* ---------- Hover (mouse only) ----------
-     The photo under the cursor lifts and tilts toward it (angles and glare
-     position come from the pointermove handler), casts a glow of its own
-     colors onto the page, and the rest of the grid dims. */
+     The photo under the cursor lifts and tilts toward it, lit by a fixed
+     light above the screen: the raised edges catch a glint, the side dipping
+     away falls into shade, and a faint reflection slides the opposite way to
+     the cursor. The angles come from the pointermove handler. It also casts
+     a glow of its own colors onto the page while the rest of the grid dims. */
+
+  .tile-light { display: none; }
 
   @media (hover: hover) and (pointer: fine) {
     .tile {
@@ -185,23 +189,46 @@
 
     .tile:hover::before { opacity: 0.9; }
 
-    /* The glare, which follows the pointer. */
-    .tile::after {
-      content: "";
+    /* Shade on the dipped side, plus a reflection band that slides against
+       the cursor. */
+    .tile-light {
+      display: block;
       position: absolute;
       inset: 0;
-      background: radial-gradient(
-        circle at var(--mx, 50%) var(--my, 50%),
-        rgba(255, 255, 255, 0.45),
-        transparent 60%
-      );
+      background:
+        linear-gradient(var(--shade-angle, 180deg), transparent 30%, rgba(0, 0, 0, var(--shade, 0))),
+        linear-gradient(
+            115deg,
+            transparent 38%,
+            rgba(255, 255, 255, 0.5) 48%,
+            rgba(255, 255, 255, 0.5) 52%,
+            transparent 62%
+          )
+          var(--sheen-x, 50%) var(--sheen-y, 50%) / 250% 250% no-repeat;
       mix-blend-mode: soft-light;
       opacity: 0;
       transition: opacity 300ms ease;
       pointer-events: none;
     }
 
-    .tile:hover::after { opacity: 1; }
+    .tile:hover .tile-light { opacity: 1; }
+
+    /* The edge glint: a thin ring, brightest on the raised edges. */
+    .tile::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      padding: 1.5px;
+      background: linear-gradient(var(--rim-angle, 0deg), transparent 35%, rgba(255, 255, 255, 0.95));
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+      opacity: 0;
+      transition: opacity 300ms ease;
+      pointer-events: none;
+    }
+
+    .tile:hover::after { opacity: var(--rim, 0.45); }
   }
 
   @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: reduce) {
@@ -464,7 +491,9 @@
       img.src = photo.file;
       img.addEventListener("click", () => openLightbox(photo));
 
-      tile.appendChild(img);
+      const light = document.createElement("span"); // hover shading and reflection
+      light.className = "tile-light";
+      tile.append(img, light);
       tileFor.set(photo, tile);
     });
 
@@ -603,8 +632,10 @@
     // ---------- Hover ----------
 
     // Tilt the photo under the mouse so the side under the cursor dips away,
-    // and move the glare with it. The lift, glow and dimming are in the CSS.
+    // and light it from a fixed point above the screen. The lift, glow and
+    // dimming are in the CSS.
     const MAX_TILT = 10; // degrees
+    const TOP_LIGHT = 0.35; // how far the light sits above centre, in tile heights
     let tiltFrame = 0;
 
     grid.addEventListener("pointermove", (e) => {
@@ -615,10 +646,25 @@
         // offset* are layout values, so the tilt already applied doesn't skew them.
         const x = Math.min(Math.max((e.pageX - tile.offsetLeft) / tile.offsetWidth, 0), 1);
         const y = Math.min(Math.max((e.pageY - tile.offsetTop) / tile.offsetHeight, 0), 1);
-        tile.style.setProperty("--rx", `${((0.5 - y) * 2 * MAX_TILT).toFixed(2)}deg`);
-        tile.style.setProperty("--ry", `${((x - 0.5) * 2 * MAX_TILT).toFixed(2)}deg`);
-        tile.style.setProperty("--mx", `${(x * 100).toFixed(1)}%`);
-        tile.style.setProperty("--my", `${(y * 100).toFixed(1)}%`);
+        const dx = x - 0.5;
+        const dy = y - 0.5;
+        const tilt = Math.hypot(dx, dy) / Math.SQRT1_2; // 0 at the centre, 1 in a corner
+
+        tile.style.setProperty("--rx", `${(-dy * 2 * MAX_TILT).toFixed(2)}deg`);
+        tile.style.setProperty("--ry", `${(dx * 2 * MAX_TILT).toFixed(2)}deg`);
+
+        // The raised side (opposite the cursor) turns toward the light, so its
+        // edges glint; the dipped side falls into shade. As a CSS gradient
+        // angle: 0deg points up, 90deg points right.
+        const angle = (Math.atan2(-dx, dy + TOP_LIGHT) * 180) / Math.PI;
+        tile.style.setProperty("--rim-angle", `${angle.toFixed(1)}deg`);
+        tile.style.setProperty("--rim", (0.45 + 0.55 * tilt).toFixed(2));
+        tile.style.setProperty("--shade-angle", `${(angle + 180).toFixed(1)}deg`);
+        tile.style.setProperty("--shade", (0.6 * tilt).toFixed(2));
+
+        // A reflection moves the opposite way to the cursor, like glare on glass.
+        tile.style.setProperty("--sheen-x", `${((1 - x) * 100).toFixed(1)}%`);
+        tile.style.setProperty("--sheen-y", `${((1 - y) * 100).toFixed(1)}%`);
       });
     });
 
@@ -626,7 +672,9 @@
       const tile = e.target.closest(".tile");
       if (!tile || tile.contains(e.relatedTarget)) return;
       cancelAnimationFrame(tiltFrame);
-      ["--rx", "--ry", "--mx", "--my"].forEach((name) => tile.style.removeProperty(name));
+      // Only the tilt resets; the lighting keeps its angle while it fades out.
+      tile.style.removeProperty("--rx");
+      tile.style.removeProperty("--ry");
     });
 
     // ---------- Lightbox ----------

@@ -331,7 +331,7 @@
     // same-category neighbours are avoided when there's a choice. Sorting purely
     // by date lined up near-identical frames from one shoot.
     const OUTING_GAP = 3 * 60 * 60 * 1000;
-    const SPREAD = 4;
+    const SPREAD = 6; // about a row and a half, so lookalikes don't stack either
     const timeOf = (photo) => (photo.dateTaken ? Date.parse(photo.dateTaken) : 0);
     const sameOuting = (a, b) =>
       a.category === b.category && Math.abs(timeOf(a) - timeOf(b)) <= OUTING_GAP;

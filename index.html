@@ -486,20 +486,43 @@
     }
 
     let visiblePhotos = orderedPhotos;
-    layout(visiblePhotos);
+
+    function showCategory(filter) {
+      document
+        .querySelectorAll("#siteNav .nav-link")
+        .forEach((el) => el.classList.toggle("is-active", el.dataset.filter === filter));
+
+      visiblePhotos =
+        filter === "all" ? orderedPhotos : mixed(PHOTOS.filter((p) => p.category === filter));
+      layout(visiblePhotos);
+    }
+
+    // The category lives in the URL (#night-sky), so a link can open straight
+    // to it and a reload keeps it.
+    const slugOf = (filter) => filter.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+    function categoryFromHash() {
+      const btn = [...document.querySelectorAll("#siteNav .nav-link")].find(
+        (el) => slugOf(el.dataset.filter) === location.hash.slice(1)
+      );
+      return btn ? btn.dataset.filter : "all";
+    }
+
+    showCategory(categoryFromHash());
 
     document.getElementById("siteNav").addEventListener("click", (e) => {
       const btn = e.target.closest("button[data-filter]");
       if (!btn) return;
 
-      document
-        .querySelectorAll("#siteNav .nav-link")
-        .forEach((el) => el.classList.toggle("is-active", el === btn));
-
       const filter = btn.dataset.filter;
-      visiblePhotos =
-        filter === "all" ? orderedPhotos : mixed(PHOTOS.filter((p) => p.category === filter));
-      layout(visiblePhotos);
+      const url = filter === "all" ? location.pathname + location.search : `#${slugOf(filter)}`;
+      history.replaceState(null, "", url);
+      showCategory(filter);
+    });
+
+    window.addEventListener("hashchange", () => {
+      if (lightboxOpen) closeLightbox();
+      showCategory(categoryFromHash());
     });
 
     let lastWidth = window.innerWidth;

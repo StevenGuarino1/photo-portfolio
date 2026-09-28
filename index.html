@@ -28,9 +28,12 @@
     --bg: #121212;
     --text: #e8e8e8;
     --muted: #8a8a8a;
-    /* side padding matches levonbiss.com at 1400px; gutters tightened for a denser grid */
     --gap: clamp(10px, 1.6vw, 24px);
-    --side-padding: clamp(20px, 3vw, 42px);
+    --top-padding: clamp(20px, 3vw, 42px);
+    /* Side margins frame the page like a mat; past --content-max the page
+       stops widening and centres instead. */
+    --content-max: 1600px;
+    --side-padding: max(clamp(20px, 6vw, 96px), calc((100% - var(--content-max)) / 2));
   }
 
   * { box-sizing: border-box; }
@@ -109,7 +112,7 @@
   /* ---------- Gallery ---------- */
 
   main {
-    padding: var(--side-padding) var(--side-padding) var(--gap);
+    padding: var(--top-padding) var(--side-padding) var(--gap);
   }
 
   .gallery {
@@ -407,8 +410,8 @@
     // smaller ones. Fitting rows to target heights instead collapses toward a
     // single height, because most of this set shares one aspect ratio.
     function rowPlanFor(width) {
-      if (width < 620) return { pattern: [1, 2, 2], maxH: width * 1.2, minH: width * 0.3 };
-      if (width < 1000) return { pattern: [2, 3, 3, 4], maxH: width * 0.5, minH: width * 0.15 };
+      if (width < 560) return { pattern: [1, 2, 2], maxH: width * 1.2, minH: width * 0.3 };
+      if (width < 860) return { pattern: [2, 3, 3, 4], maxH: width * 0.5, minH: width * 0.15 };
       return { pattern: [3, 5, 4, 3, 4, 5], maxH: width * 0.32, minH: width * 0.1 };
     }
 

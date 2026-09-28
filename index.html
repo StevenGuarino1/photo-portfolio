@@ -270,11 +270,32 @@
   <script>
     // ---------- Gallery ----------
 
-    const orderedPhotos = PHOTOS.slice().sort((a, b) => {
-      const da = a.dateTaken ? Date.parse(a.dateTaken) : 0;
-      const db = b.dateTaken ? Date.parse(b.dateTaken) : 0;
-      return db - da;
-    });
+    // Newest first, but a photo waits while one from the same outing (same
+    // category, taken within a few hours) is among the last few placed, and
+    // same-category neighbours are avoided when there's a choice. Sorting purely
+    // by date lined up near-identical frames from one shoot.
+    const OUTING_GAP = 3 * 60 * 60 * 1000;
+    const SPREAD = 4;
+    const timeOf = (photo) => (photo.dateTaken ? Date.parse(photo.dateTaken) : 0);
+    const sameOuting = (a, b) =>
+      a.category === b.category && Math.abs(timeOf(a) - timeOf(b)) <= OUTING_GAP;
+
+    function mixed(photos) {
+      const pool = photos.slice().sort((a, b) => timeOf(b) - timeOf(a));
+      const out = [];
+      while (pool.length) {
+        const recent = out.slice(-SPREAD);
+        const last = out[out.length - 1];
+        const fresh = (photo) => !recent.some((placed) => sameOuting(photo, placed));
+        let pick = pool.findIndex((photo) => fresh(photo) && (!last || photo.category !== last.category));
+        if (pick === -1) pick = pool.findIndex(fresh);
+        if (pick === -1) pick = 0;
+        out.push(pool.splice(pick, 1)[0]);
+      }
+      return out;
+    }
+
+    const orderedPhotos = mixed(PHOTOS);
 
     const grid = document.getElementById("grid");
     const ratioOf = (photo) => (photo.width && photo.height ? photo.width / photo.height : 1.5);
@@ -402,7 +423,7 @@
 
       const filter = btn.dataset.filter;
       visiblePhotos =
-        filter === "all" ? orderedPhotos : orderedPhotos.filter((p) => p.category === filter);
+        filter === "all" ? orderedPhotos : mixed(PHOTOS.filter((p) => p.category === filter));
       layout(visiblePhotos);
     });
 

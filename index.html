@@ -152,8 +152,13 @@
 
   /* ---------- Hover (mouse only) ----------
      vanilla-tilt (loaded at the end of the page) tilts and enlarges the photo
-     under the cursor and sweeps a glossy glare across it. The photo also
-     casts a glow of its own colors onto the page. */
+     under the cursor. On top of that it shines like glossy glass: a specular
+     reflection slides the opposite way to the cursor, over a clear coat,
+     and the edges nearest the reflection glint. The positions come from the
+     tilt's tiltChange events. The photo also casts a glow of its own colors
+     onto the page. */
+
+  .shine { display: none; }
 
   /* How much a hovered photo enlarges. The tilt setup reads it, and so does
      layout(), to load thumbnails sharp enough for the enlarged size. */
@@ -163,7 +168,7 @@
     :root { --hover-scale: 1.18; }
 
     .tile {
-      position: relative; /* holds the glow and vanilla-tilt's glare */
+      position: relative; /* holds the glow, shine and edge glint */
       z-index: 0;
     }
 
@@ -183,6 +188,55 @@
     }
 
     .tile:hover::before { opacity: 0.8; }
+
+    /* The reflection and clear coat. Blended as added light (plus-lighter,
+       screen where that's unsupported), so it gleams on dark photos too
+       instead of greying them. */
+    .shine {
+      display: block;
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(
+          circle at var(--shine-x, 50%) var(--shine-y, 30%),
+          rgba(255, 255, 255, calc(var(--shine, 0.6) * 0.65)) 0%,
+          rgba(255, 255, 255, calc(var(--shine, 0.6) * 0.2)) 22%,
+          rgba(255, 255, 255, 0) 50%
+        ),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 42%);
+      mix-blend-mode: screen;
+      mix-blend-mode: plus-lighter;
+      opacity: 0;
+      transition: opacity 300ms ease;
+      pointer-events: none;
+    }
+
+    .tile:hover .shine { opacity: 1; }
+
+    /* The edge glint: a 1px gradient border masked to a ring, brightest on
+       the edges nearest the reflection. */
+    .tile::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border: 1px solid transparent;
+      background: linear-gradient(
+          var(--rim-angle, 0deg),
+          rgba(255, 255, 255, 0.15),
+          rgba(255, 255, 255, 0) 40%,
+          rgba(255, 255, 255, 0) 60%,
+          rgba(255, 255, 255, 0.9)
+        )
+        border-box;
+      -webkit-mask: linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask: linear-gradient(#000 0 0) padding-box exclude, linear-gradient(#000 0 0);
+      opacity: 0;
+      transition: opacity 300ms ease;
+      pointer-events: none;
+    }
+
+    .tile:hover::after { opacity: 1; }
   }
 
   /* ---------- Footer ---------- */
@@ -452,7 +506,9 @@
       img.src = photo.file;
       img.addEventListener("click", () => openLightbox(photo));
 
-      tile.appendChild(img);
+      const shine = document.createElement("div"); // hover reflection (see Hover)
+      shine.className = "shine";
+      tile.append(img, shine);
       tileFor.set(photo, tile);
     });
 
@@ -538,9 +594,6 @@
         });
         grid.appendChild(row);
       });
-
-      // vanilla-tilt sizes its glare to the tile, and tiles just changed size.
-      photos.forEach((photo) => tileFor.get(photo).vanillaTilt?.updateGlareSize());
     }
 
     let visiblePhotos = orderedPhotos;
@@ -594,23 +647,44 @@
 
     // ---------- Hover ----------
 
-    // With a mouse, vanilla-tilt tilts the photo under the cursor, enlarges it
-    // and sweeps a glossy glare across it. It loads deferred, so this runs once
-    // it's there; if the CDN can't be reached, photos simply don't tilt.
+    // With a mouse, vanilla-tilt tilts the photo under the cursor and enlarges
+    // it, and each tilt moves the shine. It loads deferred, so this runs once
+    // it's there; if the CDN can't be reached (or motion is reduced), photos
+    // still shine on hover, just without moving.
     document.addEventListener("DOMContentLoaded", () => {
       const mouse = matchMedia("(hover: hover) and (pointer: fine)").matches;
       const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (!window.VanillaTilt || !mouse || reducedMotion) return;
 
-      VanillaTilt.init([...tileFor.values()], {
+      const tiles = [...tileFor.values()];
+      VanillaTilt.init(tiles, {
         max: 10,
         speed: 400,
         scale: HOVER_SCALE,
-        glare: true,
-        "max-glare": 0.35,
         gyroscope: false,
       });
+
+      tiles.forEach((tile) => tile.addEventListener("tiltChange", moveShine));
     });
+
+    // The reflection sits opposite the cursor, as a light reflecting off
+    // tilting glass would, pulled a little toward the top (the light is
+    // overhead), and brightens the further the photo tilts. The edges nearest
+    // it glint.
+    function moveShine(e) {
+      const tile = e.currentTarget;
+      const { percentageX: px, percentageY: py } = e.detail;
+      const x = 100 - px;
+      const y = (100 - py) * 0.75 - 5;
+      const tilt = Math.min(Math.hypot(px - 50, py - 50) / 50, 1);
+
+      tile.style.setProperty("--shine-x", `${x.toFixed(1)}%`);
+      tile.style.setProperty("--shine-y", `${y.toFixed(1)}%`);
+      tile.style.setProperty("--shine", (0.6 + 0.4 * tilt).toFixed(2));
+      // As a CSS gradient angle: 0deg points up, 90deg points right.
+      const rimAngle = (Math.atan2(x - 50, 50 - y) * 180) / Math.PI;
+      tile.style.setProperty("--rim-angle", `${rimAngle.toFixed(1)}deg`);
+    }
 
     // ---------- Lightbox ----------
 

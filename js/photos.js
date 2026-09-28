@@ -1,8 +1,10 @@
-// Photo list. Add images by adding an entry here.
+// Photo list. Add images by adding an entry here, then run
+// `python tools/make_thumbs.py` to make the grid's smaller copies.
 // Fields: file (required), alt (required), title (optional),
 // file2x (optional 2x srcset variant), width/height (intrinsic pixel size,
 // used for aspect ratio + to prevent layout shift),
-// dateTaken (optional ISO date/time — used for sorting, see SORT_MODE in script.js),
+// dateTaken (optional ISO date/time — orders the gallery, newest first, and
+// keeps shots from the same outing apart; see mixed() in index.html),
 // aperture / shutter / iso (optional EXIF — omit any/all if unknown).
 const PHOTOS = [
   {

@@ -120,15 +120,29 @@
 
   .gallery-row {
     display: flex;
+    align-items: flex-start;
     gap: var(--gap);
+  }
+
+  /* The tile holds the placeholder color while its photo fades in. */
+  .tile {
+    min-width: 0;
+    background: #1c1c1c;
   }
 
   .gallery img {
     display: block;
+    width: 100%;
     height: auto;
-    min-width: 0;
     cursor: pointer;
-    background: #1c1c1c;
+    opacity: 0;
+    transition: opacity 400ms ease;
+  }
+
+  .gallery img.is-loaded { opacity: 1; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .gallery img { transition: none; }
   }
 
   /* ---------- Footer ---------- */
@@ -265,11 +279,23 @@
     const grid = document.getElementById("grid");
     const ratioOf = (photo) => (photo.width && photo.height ? photo.width / photo.height : 1.5);
 
-    const imgFor = new Map();
+    // The grid loads small copies from photos/thumbs/ (made by
+    // tools/make_thumbs.py) sized to each tile; the lightbox still shows the
+    // full-size files.
+    const THUMB_WIDTHS = [480, 800, 1200]; // keep in sync with tools/make_thumbs.py
+
+    function gridSrcset(photo) {
+      const stem = photo.file.split("/").pop().replace(/\.[^.]+$/, "");
+      const sources = THUMB_WIDTHS.map((w) => `photos/thumbs/${stem}-${w}.jpg ${w}w`);
+      if (photo.width > THUMB_WIDTHS[THUMB_WIDTHS.length - 1]) {
+        sources.push(`${photo.file} ${photo.width}w`);
+      }
+      return sources.join(", ");
+    }
+
+    const tileFor = new Map();
     orderedPhotos.forEach((photo, index) => {
       const img = document.createElement("img");
-      img.src = photo.file;
-      if (photo.file2x) img.srcset = `${photo.file} 1x, ${photo.file2x} 2x`;
       img.alt = photo.alt || "";
       if (photo.title) img.title = photo.title;
       if (photo.width && photo.height) {
@@ -278,8 +304,25 @@
       }
       img.loading = index < 6 ? "eager" : "lazy";
       img.decoding = "async";
+      img.addEventListener("load", () => img.classList.add("is-loaded"));
+      // No thumbnails yet (make_thumbs.py not run): use the full-size files.
+      img.addEventListener(
+        "error",
+        () => {
+          img.srcset = photo.file2x ? `${photo.file} 1x, ${photo.file2x} 2x` : "";
+          img.src = photo.file;
+        },
+        { once: true }
+      );
+      img.sizes = "(max-width: 620px) 100vw, 33vw"; // refined per tile in layout()
+      img.srcset = gridSrcset(photo);
+      img.src = photo.file;
       img.addEventListener("click", () => openLightbox(photo));
-      imgFor.set(photo, img);
+
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      tile.appendChild(img);
+      tileFor.set(photo, tile);
     });
 
     // Row size follows a repeating pattern of photos-per-row, so the page
@@ -329,15 +372,18 @@
         const row = document.createElement("div");
         row.className = "gallery-row";
         rowPhotos.forEach((photo) => {
-          const img = imgFor.get(photo);
+          const tile = tileFor.get(photo);
+          const tileWidth = (loose ? maxH : height) * ratioOf(photo);
           if (loose) {
-            img.style.flex = "0 0 auto";
-            img.style.width = `${Math.round(maxH * ratioOf(photo))}px`;
+            tile.style.flex = "0 0 auto";
+            tile.style.width = `${Math.round(tileWidth)}px`;
           } else {
-            img.style.flex = `${ratioOf(photo)} 1 0%`;
-            img.style.width = "";
+            tile.style.flex = `${ratioOf(photo)} 1 0%`;
+            tile.style.width = "";
           }
-          row.appendChild(img);
+          // Lets the browser pick the smallest thumbnail that stays sharp.
+          tile.firstChild.sizes = `${Math.ceil(tileWidth)}px`;
+          row.appendChild(tile);
         });
         grid.appendChild(row);
       }

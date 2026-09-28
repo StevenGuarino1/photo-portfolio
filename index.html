@@ -124,6 +124,8 @@
     gap: var(--gap);
   }
 
+  .gallery-row.is-centered { justify-content: center; }
+
   /* The tile holds the placeholder color while its photo fades in. */
   .tile {
     min-width: 0;
@@ -368,33 +370,52 @@
         return (width - gap * (slice.length - 1)) / ratioSum;
       };
 
-      grid.textContent = "";
+      const rows = [];
       let cursor = 0;
-      let rowIndex = 0;
 
       while (cursor < photos.length) {
         const remaining = photos.length - cursor;
-        let count = Math.min(pattern[rowIndex % pattern.length], remaining);
+        let count = Math.min(pattern[rows.length % pattern.length], remaining);
 
         // A run of portraits or panoramas can still tower or squash at the
         // pattern's count, so nudge it until the row sits in range.
         while (count < remaining && heightOf(photos.slice(cursor, cursor + count)) > maxH) count++;
         while (count > 1 && heightOf(photos.slice(cursor, cursor + count)) < minH) count--;
 
-        const rowPhotos = photos.slice(cursor, cursor + count);
-        const height = heightOf(rowPhotos);
+        rows.push(photos.slice(cursor, cursor + count));
         cursor += count;
-        rowIndex += 1;
+      }
 
-        // Only the final row can still exceed maxH, since there is nothing left
-        // to add to it. Let it sit at maxH rather than fill the width.
-        const loose = height > maxH;
+      // The final row only gets the leftovers, often too few to fill the width.
+      // Re-split it with the row above so both fill it, as evenly as possible.
+      if (rows.length > 1 && heightOf(rows[rows.length - 1]) > maxH) {
+        const pair = rows[rows.length - 2].concat(rows[rows.length - 1]);
+        let best = null;
+        for (let split = 1; split < pair.length; split++) {
+          const a = heightOf(pair.slice(0, split));
+          const b = heightOf(pair.slice(split));
+          if (Math.max(a, b) > maxH || Math.min(a, b) < minH) continue;
+          if (!best || Math.abs(a - b) < best.diff) best = { split, diff: Math.abs(a - b) };
+        }
+        if (best) rows.splice(-2, 2, pair.slice(0, best.split), pair.slice(best.split));
+      }
+
+      // A lone row (a category with only a photo or two) may run a little
+      // taller to fill the width; past that it sits at the cap, centred so it
+      // reads as deliberate rather than as a row missing a photo.
+      const lone = rows.length === 1;
+      const cap = lone ? maxH * 1.25 : maxH;
+
+      grid.textContent = "";
+      rows.forEach((rowPhotos) => {
+        const height = heightOf(rowPhotos);
+        const loose = height > cap;
 
         const row = document.createElement("div");
-        row.className = "gallery-row";
+        row.className = loose && lone ? "gallery-row is-centered" : "gallery-row";
         rowPhotos.forEach((photo) => {
           const tile = tileFor.get(photo);
-          const tileWidth = (loose ? maxH : height) * ratioOf(photo);
+          const tileWidth = (loose ? cap : height) * ratioOf(photo);
           if (loose) {
             tile.style.flex = "0 0 auto";
             tile.style.width = `${Math.round(tileWidth)}px`;
@@ -407,7 +428,7 @@
           row.appendChild(tile);
         });
         grid.appendChild(row);
-      }
+      });
     }
 
     let visiblePhotos = orderedPhotos;

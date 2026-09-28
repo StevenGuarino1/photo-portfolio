@@ -151,34 +151,23 @@
   }
 
   /* ---------- Hover (mouse only) ----------
-     The photo under the cursor lifts and tilts toward it, lit by a fixed
-     light above the screen: the raised edges catch a glint with light
-     spilling in from them, and the side dipping away falls into shade. The
-     angles come from the pointermove handler. It also casts a glow of its own
-     colors onto the page while the rest of the grid dims. */
+     vanilla-tilt (loaded at the end of the page) tilts and enlarges the photo
+     under the cursor and sweeps a glossy glare across it. The photo also
+     casts a glow of its own colors onto the page. */
 
-  .tile-light { display: none; }
-
-  /* layout() also reads this, to load thumbnails sharp enough to enlarge. */
+  /* How much a hovered photo enlarges. The tilt setup reads it, and so does
+     layout(), to load thumbnails sharp enough for the enlarged size. */
   :root { --hover-scale: 1; }
 
   @media (hover: hover) and (pointer: fine) {
-    :root { --hover-scale: 1.12; }
+    :root { --hover-scale: 1.18; }
 
     .tile {
-      position: relative;
+      position: relative; /* holds the glow and vanilla-tilt's glare */
       z-index: 0;
-      transition: transform 450ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 300ms ease;
     }
 
-    .tile:hover {
-      z-index: 2;
-      transform: perspective(1000px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg))
-        scale(var(--hover-scale));
-      transition: transform 150ms ease-out, opacity 300ms ease;
-    }
-
-    .gallery:hover .tile:not(:hover) { opacity: 0.35; }
+    .tile:hover { z-index: 2; }
 
     /* The glow: a blurred copy of the photo spilling out behind it. */
     .tile::before {
@@ -193,48 +182,7 @@
       pointer-events: none;
     }
 
-    .tile:hover::before { opacity: 0.9; }
-
-    /* Light spilling in from the lit edges (an inset shadow offset away from
-       them, so it only shows on that side), and shade on the dipped side. */
-    .tile-light {
-      display: block;
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(
-        var(--shade-angle, 180deg),
-        transparent 40%,
-        rgba(0, 0, 0, var(--shade, 0))
-      );
-      box-shadow: inset calc(var(--lx, 0) * -10px) calc(var(--ly, -1) * -10px) 18px -6px
-        rgba(255, 255, 255, calc(var(--rim, 0.45) * 0.45));
-      opacity: 0;
-      transition: opacity 300ms ease;
-      pointer-events: none;
-    }
-
-    .tile:hover .tile-light { opacity: 1; }
-
-    /* The edge glint: a thin ring, brightest on the raised edges. */
-    .tile::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      padding: 1.5px;
-      background: linear-gradient(var(--rim-angle, 0deg), transparent 35%, rgba(255, 255, 255, 0.95));
-      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-      -webkit-mask-composite: xor;
-      mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
-      opacity: 0;
-      transition: opacity 300ms ease;
-      pointer-events: none;
-    }
-
-    .tile:hover::after { opacity: var(--rim, 0.45); }
-  }
-
-  @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: reduce) {
-    .tile:hover { transform: none; }
+    .tile:hover::before { opacity: 0.8; }
   }
 
   /* ---------- Footer ---------- */
@@ -413,6 +361,13 @@
   </div>
 
   <script src="js/photos.js?v=4"></script>
+  <script
+    src="https://cdnjs.cloudflare.com/ajax/libs/vanilla-tilt/1.8.1/vanilla-tilt.min.js"
+    integrity="sha512-wC/cunGGDjXSl9OHUH0RuqSyW4YNLlsPwhcLxwWW1CR4OeC2E1xpcdZz2DeQkEmums41laI+eGMw95IJ15SS3g=="
+    crossorigin="anonymous"
+    referrerpolicy="no-referrer"
+    defer
+  ></script>
   <script>
     // ---------- Gallery ----------
 
@@ -450,6 +405,10 @@
     // tools/make_thumbs.py) sized to each tile; the lightbox still shows the
     // full-size files.
     const THUMB_WIDTHS = [480, 800, 1200]; // keep in sync with tools/make_thumbs.py
+
+    // How much a hovered photo enlarges (1 on touch screens); see --hover-scale.
+    const HOVER_SCALE =
+      parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hover-scale")) || 1;
 
     function gridSrcset(photo) {
       const stem = photo.file.split("/").pop().replace(/\.[^.]+$/, "");
@@ -493,9 +452,7 @@
       img.src = photo.file;
       img.addEventListener("click", () => openLightbox(photo));
 
-      const light = document.createElement("span"); // hover shading and reflection
-      light.className = "tile-light";
-      tile.append(img, light);
+      tile.appendChild(img);
       tileFor.set(photo, tile);
     });
 
@@ -557,11 +514,6 @@
       const lone = rows.length === 1;
       const cap = lone ? maxH * 1.25 : maxH;
 
-      // With a mouse, a hovered photo enlarges; ask for a thumbnail that stays
-      // sharp at that size (touch screens report 1 and download nothing extra).
-      const hoverScale =
-        parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hover-scale")) || 1;
-
       grid.textContent = "";
       rows.forEach((rowPhotos) => {
         const height = heightOf(rowPhotos);
@@ -579,12 +531,16 @@
             tile.style.flex = `${ratioOf(photo)} 1 0%`;
             tile.style.width = "";
           }
-          // Lets the browser pick the smallest thumbnail that stays sharp.
-          tile.firstChild.sizes = `${Math.ceil(tileWidth * hoverScale)}px`;
+          // Lets the browser pick the smallest thumbnail that stays sharp,
+          // including when the photo is enlarged on hover.
+          tile.firstChild.sizes = `${Math.ceil(tileWidth * HOVER_SCALE)}px`;
           row.appendChild(tile);
         });
         grid.appendChild(row);
       });
+
+      // vanilla-tilt sizes its glare to the tile, and tiles just changed size.
+      photos.forEach((photo) => tileFor.get(photo).vanillaTilt?.updateGlareSize());
     }
 
     let visiblePhotos = orderedPhotos;
@@ -638,50 +594,22 @@
 
     // ---------- Hover ----------
 
-    // Tilt the photo under the mouse so the side under the cursor dips away,
-    // and light it from a fixed point above the screen. The lift, glow and
-    // dimming are in the CSS.
-    const MAX_TILT = 10; // degrees
-    const TOP_LIGHT = 0.35; // how far the light sits above centre, in tile heights
-    let tiltFrame = 0;
+    // With a mouse, vanilla-tilt tilts the photo under the cursor, enlarges it
+    // and sweeps a glossy glare across it. It loads deferred, so this runs once
+    // it's there; if the CDN can't be reached, photos simply don't tilt.
+    document.addEventListener("DOMContentLoaded", () => {
+      const mouse = matchMedia("(hover: hover) and (pointer: fine)").matches;
+      const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (!window.VanillaTilt || !mouse || reducedMotion) return;
 
-    grid.addEventListener("pointermove", (e) => {
-      const tile = e.pointerType === "mouse" && e.target.closest(".tile");
-      if (!tile) return;
-      cancelAnimationFrame(tiltFrame);
-      tiltFrame = requestAnimationFrame(() => {
-        // offset* are layout values, so the tilt already applied doesn't skew them.
-        const x = Math.min(Math.max((e.pageX - tile.offsetLeft) / tile.offsetWidth, 0), 1);
-        const y = Math.min(Math.max((e.pageY - tile.offsetTop) / tile.offsetHeight, 0), 1);
-        const dx = x - 0.5;
-        const dy = y - 0.5;
-        const tilt = Math.hypot(dx, dy) / Math.SQRT1_2; // 0 at the centre, 1 in a corner
-
-        tile.style.setProperty("--rx", `${(-dy * 2 * MAX_TILT).toFixed(2)}deg`);
-        tile.style.setProperty("--ry", `${(dx * 2 * MAX_TILT).toFixed(2)}deg`);
-
-        // The raised side (opposite the cursor) turns toward the light, so its
-        // edges glint; the dipped side falls into shade. As a CSS gradient
-        // angle: 0deg points up, 90deg points right.
-        const angle = Math.atan2(-dx, dy + TOP_LIGHT);
-        const degrees = (angle * 180) / Math.PI;
-        tile.style.setProperty("--rim-angle", `${degrees.toFixed(1)}deg`);
-        tile.style.setProperty("--rim", (0.45 + 0.55 * tilt).toFixed(2));
-        // Unit vector toward the lit side, in screen axes (y points down).
-        tile.style.setProperty("--lx", Math.sin(angle).toFixed(3));
-        tile.style.setProperty("--ly", (-Math.cos(angle)).toFixed(3));
-        tile.style.setProperty("--shade-angle", `${(degrees + 180).toFixed(1)}deg`);
-        tile.style.setProperty("--shade", (0.3 * tilt).toFixed(2));
+      VanillaTilt.init([...tileFor.values()], {
+        max: 10,
+        speed: 400,
+        scale: HOVER_SCALE,
+        glare: true,
+        "max-glare": 0.35,
+        gyroscope: false,
       });
-    });
-
-    grid.addEventListener("pointerout", (e) => {
-      const tile = e.target.closest(".tile");
-      if (!tile || tile.contains(e.relatedTarget)) return;
-      cancelAnimationFrame(tiltFrame);
-      // Only the tilt resets; the lighting keeps its angle while it fades out.
-      tile.style.removeProperty("--rx");
-      tile.style.removeProperty("--ry");
     });
 
     // ---------- Lightbox ----------

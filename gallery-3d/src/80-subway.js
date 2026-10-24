@@ -84,7 +84,7 @@
       const OFFSETS = Array.from({ length: N }, (_, i) => i - MID);
       const DOORS_X = [-5, 0, 5];
       const SEATS = [[-7.3, -5.95], [-4.05, -0.95], [0.95, 4.05], [5.95, 7.3]];
-      R.scene.fog = new THREE.FogExp2(0x231e2a, 0.0026);
+      R.scene.fog = new THREE.FogExp2(0x2a2129, 0.0008);
 
       R.add(new THREE.HemisphereLight(0xe2ead6, 0x3a3730, 0.8));
       const tubeLight = new THREE.PointLight(0xf2f5ff, 3, 7, 1.6);
@@ -812,8 +812,9 @@
       R.add(sky);
 
       // Facades: lit windows in a grid, some dark, some flickering blue with
-      // a television, on a near-black wall. One texture covers a block about
-      // 24 m wide and 48 m tall.
+      // a television, on a near-black wall. One copy of the texture covers
+      // 24 m by 48 m (three-metre floors); it repeats to fit each building,
+      // offset per building so no two line up.
       const facade = (seed, lit) => {
         const t = canvasTex(128, 256, (g) => {
           const r = rng(seed);
@@ -827,16 +828,33 @@
               g.fillRect(4 + col * 15.5, 6 + row * 15.5, 9, 10);
             }
           }
-        }, { repeat: false });
+        });
         return t;
+      };
+      const fitFacade = (mat) => {
+        mat.onBeforeCompile = (sh) => {
+          sh.vertexShader = sh.vertexShader.replace("#include <uv_vertex>", `#include <uv_vertex>
+            #if defined(USE_MAP) && defined(USE_INSTANCING)
+              vec3 sc = vec3(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz));
+              vMapUv = vMapUv * vec2(max(sc.x, sc.z) / 24.0, sc.y / 48.0) + floor(fract(instanceMatrix[3].xz * vec2(0.131, 0.173)) * vec2(8.0, 16.0)) / vec2(8.0, 16.0);
+            #endif`);
+        };
+        return mat;
       };
       const roofMat = new THREE.MeshBasicMaterial({ color: 0x08080b });
       const unitBox = new THREE.BoxGeometry(1, 1, 1);
       unitBox.translate(0, 0.5, 0);
+      // The street grid: an 80 m block, with avenues along the line (one
+      // right under the viaduct) and cross streets every 80 m. Cross streets
+      // sit at x = 40 (mod 80) in the frame of anything that repeats on a
+      // multiple of 80 m.
+      const BLOCK = 80;
+      const crossGap = (x, half) => Math.abs((((x - 40) % BLOCK) + BLOCK * 1.5) % BLOCK - BLOCK / 2) < half + 6;
+      const aveGap = (n, half) => Math.abs((((n % BLOCK) + BLOCK * 1.5) % BLOCK) - BLOCK / 2) < half + 7;
       // One layer of buildings: `P` metres long, repeated, `n0`–`n1` metres
-      // either side of the line.
+      // either side of the line. `avoid` keeps streets clear.
       const layers = [];
-      function layer({ seed, P, n0, n1, every, w, d, h, tint, lit, count }) {
+      function layer({ seed, P, n0, n1, every, w, d, h, tint, lit, count, avoid }) {
         const r = rng(seed);
         const spots = [];
         for (const side of [-1, 1]) {
@@ -845,12 +863,14 @@
             const bw = w[0] + r() * (w[1] - w[0]);
             const bd = d[0] + r() * (d[1] - d[0]);
             const bh = h[0] + Math.pow(r(), 1.8) * (h[1] - h[0]);
-            spots.push([x, n, bw, bd, bh, r()]);
+            const k = r();
+            if (avoid && avoid(x, n, bw, bd)) continue;
+            spots.push([x, n, bw, bd, bh, k]);
           }
         }
         const take = Math.max(1, Math.round(spots.length * count));
         const used = spots.slice(0, take);
-        const mats = [0, 1].map((k) => new THREE.MeshBasicMaterial({ map: facade(seed * 7 + k, lit), color: tint }));
+        const mats = [0, 1].map((k) => fitFacade(new THREE.MeshBasicMaterial({ map: facade(seed * 7 + k, lit), color: tint })));
         const group = new THREE.Group();
         for (const k of [0, 1]) {
           const mine = used.filter((sp) => (sp[5] < 0.5 ? 0 : 1) === k);
@@ -869,73 +889,225 @@
         }
         city.add(group);
         layers.push({ group, P });
-        return { group, used };
+        return { group, used, P };
       }
       const D = Q.density;
-      // Right below the line: low blocks, close enough to sweep past.
-      const nearL = layer({ seed: 301, P: 420, n0: 20, n1: 60, every: 16, w: [10, 22], d: [10, 20], h: [4, 15], tint: 0xffffff, lit: 0.42, count: 1 });
-      // A few hundred metres out: taller blocks, a little hazier.
-      layer({ seed: 302, P: 900, n0: 110, n1: 300, every: 24, w: [14, 30], d: [14, 30], h: [14, 70], tint: 0xb9b3c4, lit: 0.36, count: D < 0.5 ? 0.6 : 1 });
-      // The skyline on the horizon: towers, dim and blue with distance.
-      const farL = layer({ seed: 303, P: 2400, n0: 420, n1: 950, every: 34, w: [20, 44], d: [20, 44], h: [50, 230], tint: 0x6c6a86, lit: 0.3, count: D < 0.5 ? 0.5 : 1 });
+      const FWY = -340; // an elevated freeway out past the mid-rise blocks
+      const offStreets = (x, n, bw, bd) => crossGap(x, bw / 2) || aveGap(n, bd / 2);
+      // Right below the line: low blocks between the avenues, close enough
+      // to sweep past.
+      const nearL = layer({ seed: 301, P: 400, n0: 16, n1: 64, every: 14, w: [10, 22], d: [10, 22], h: [4, 13], tint: 0xffffff, lit: 0.42, count: 1, avoid: offStreets });
+      // A couple of hundred metres out: mid-rise blocks, a little hazier.
+      layer({ seed: 302, P: 880, n0: 95, n1: 305, every: 20, w: [14, 30], d: [14, 30], h: [12, 55], tint: 0xb9b3c4, lit: 0.36, count: D < 0.5 ? 0.6 : 1, avoid: offStreets });
+      // Downtown, past the freeway: towers.
+      const townL = layer({ seed: 304, P: 1600, n0: 390, n1: 820, every: 26, w: [18, 40], d: [18, 40], h: [50, 240], tint: 0x8c88a4, lit: 0.33, count: D < 0.5 ? 0.6 : 1 });
+      // The skyline on the horizon: supertalls, dim and blue with distance.
+      const farL = layer({ seed: 303, P: 3600, n0: 900, n1: 1420, every: 40, w: [26, 60], d: [26, 60], h: [90, 430], tint: 0x5e5c7c, lit: 0.27, count: D < 0.5 ? 0.5 : 1 });
 
-      // Red aircraft lights blinking on the tallest towers.
-      const beacons = (() => {
+      // The tallest towers get a floodlit crown and a spire, and every tall
+      // one a red aircraft light that blinks.
+      const crownMat = new THREE.MeshBasicMaterial({ color: 0x9a9284 });
+      const beaconPts = [];
+      for (const L of [townL, farL]) {
+        const tall = L.used.filter((sp) => sp[4] > 150);
+        const crowns = tall.filter((sp) => sp[4] > 280);
+        const m = new THREE.Matrix4();
+        const crown = new THREE.InstancedMesh(unitBox, crownMat, Math.max(1, crowns.length * 3));
+        const spire = new THREE.InstancedMesh(unitBox, roofMat, Math.max(1, crowns.length * 3));
+        crown.count = spire.count = crowns.length * 3;
+        let i = 0;
+        for (const [x, n, bw, bd, bh] of crowns) {
+          for (const copy of [-1, 0, 1]) {
+            m.makeScale(bw * 0.7, bh * 0.05, bd * 0.7).setPosition(x + copy * L.P, STREET + bh, CW / 2 + n);
+            crown.setMatrixAt(i, m);
+            m.makeScale(2, bh * 0.22, 2).setPosition(x + copy * L.P, STREET + bh * 1.05, CW / 2 + n);
+            spire.setMatrixAt(i++, m);
+          }
+        }
+        crown.frustumCulled = spire.frustumCulled = false;
+        L.group.add(crown, spire);
         const pts = [];
-        for (const [x, n, bw, bd, bh] of farL.used) {
-          if (bh < 140) continue;
-          for (const copy of [-1, 0, 1]) pts.push(x + copy * 2400, STREET + bh + 2, CW / 2 + n);
+        for (const [x, n, , , bh] of tall) {
+          const top = crowns.some((c) => c[0] === x && c[1] === n) ? bh * 1.27 : bh;
+          for (const copy of [-1, 0, 1]) pts.push(x + copy * L.P, STREET + top + 2, CW / 2 + n);
         }
         const g = new THREE.BufferGeometry();
         g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
-        const p = new THREE.Points(g, new THREE.PointsMaterial({ map: glowTex, color: 0xff3020, size: 9, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+        const p = new THREE.Points(g, new THREE.PointsMaterial({ map: glowTex, color: 0xff3020, size: L === farL ? 14 : 9, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
         p.frustumCulled = false;
-        farL.group.add(p);
-        return p;
-      })();
+        L.group.add(p);
+        beaconPts.push(p);
+      }
 
-      // Streets: a grid of sodium-lit roads far below, and street lamps in
-      // rows along the avenues either side of the line.
+      // The glow of the city on the haze along the horizon, behind the
+      // skyline; it rides with the camera like the sky.
+      {
+        const len = 320;
+        const geo = new THREE.CylinderGeometry(1460, 1460, len, 48, 1, true);
+        geo.translate(0, len / 2 - 40, 0);
+        const pos = geo.attributes.position;
+        const cols = new Float32Array(pos.count * 3);
+        for (let k = 0; k < pos.count; k++) {
+          const v = pos.getY(k) < 0 ? 0.7 : 0;
+          cols.set([v, v * 0.62, v * 0.38], k * 3);
+        }
+        geo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+        const haze = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide, fog: false }));
+        haze.position.y = STREET;
+        haze.frustumCulled = false;
+        sky.add(haze);
+      }
+
+      // Streets: the grid far below, sodium-lit, with a pool of light at
+      // every crossing.
       const streetTex = canvasTex(256, 256, (g) => {
         g.fillStyle = "#09090b";
         g.fillRect(0, 0, 256, 256);
+        const pool = g.createRadialGradient(128, 128, 0, 128, 128, 70);
+        pool.addColorStop(0, "rgba(120, 72, 30, 0.55)");
+        pool.addColorStop(1, "rgba(120, 72, 30, 0)");
+        g.fillStyle = pool;
+        g.fillRect(0, 0, 256, 256);
+        g.fillStyle = "#1a1612";
+        g.fillRect(0, 112, 256, 32);
+        g.fillRect(112, 0, 32, 256);
         g.fillStyle = "#2a1c10";
         g.fillRect(0, 118, 256, 20);
         g.fillRect(118, 0, 20, 256);
-        g.fillStyle = "#4a3018";
-        g.fillRect(0, 127, 256, 2);
-        g.fillRect(127, 0, 2, 256);
+        g.fillStyle = "#6a5030";
+        for (let x = 0; x < 256; x += 16) { g.fillRect(x, 127, 8, 2); g.fillRect(127, x, 2, 8); }
       });
       streetTex.repeat.set(40, 40);
       const streets = new THREE.Mesh(new THREE.PlaneGeometry(3200, 3200), new THREE.MeshBasicMaterial({ map: streetTex }));
       streets.rotation.x = -Math.PI / 2;
-      streets.position.set(0, STREET - 0.05, CW / 2);
+      // Shifted half a block so the avenues fall at n = 0, ±80, ±160 ...
+      streets.position.set(0, STREET - 0.05, CW / 2 + BLOCK / 2);
       city.add(streets);
+      // Street lamps along the avenues and the cross streets.
       const lampPts = [];
-      for (const n of [-12, 12, -50, 50]) for (let x = 0; x < 420; x += 22) for (const copy of [-1, 0, 1]) lampPts.push(x + copy * 420, STREET + 7, CW / 2 + n);
+      for (const n of [-85, -75, 75, 85, -165, -155, 155, 165]) for (let x = 0; x < 400; x += 25) if (!crossGap(x, 0)) lampPts.push(x, STREET + 7, CW / 2 + n);
+      for (let cx = 40; cx < 400; cx += BLOCK) for (const dx of [-5, 5]) for (let n = -305; n <= 305; n += 22) if (!aveGap(n, 0)) lampPts.push(cx + dx, STREET + 7, CW / 2 + n);
       {
+        const pts = [];
+        for (let i = 0; i < lampPts.length; i += 3) for (const copy of [-1, 0, 1]) pts.push(lampPts[i] + copy * 400, lampPts[i + 1], lampPts[i + 2]);
         const g = new THREE.BufferGeometry();
-        g.setAttribute("position", new THREE.Float32BufferAttribute(lampPts, 3));
+        g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
         const p = new THREE.Points(g, new THREE.PointsMaterial({ map: glowTex, color: 0xffa040, size: 4, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
         p.frustumCulled = false;
         nearL.group.add(p);
       }
-      // Traffic on the avenue below: headlights one way, tail lights the other.
-      const traffic = [[0xfff2d0, 9, 18], [0xff2a1a, -11, 23]].map(([color, speed, n]) => {
+      // The freeway: a deck on columns nine metres up, lamps down the middle.
+      const FY = STREET + 9;
+      {
+        const deck = new THREE.Mesh(new THREE.BoxGeometry(4000, 1.2, 28), new THREE.MeshBasicMaterial({ color: 0x141416 }));
+        deck.position.set(0, FY - 0.6, CW / 2 + FWY);
+        city.add(deck);
+        const cols = new THREE.Group();
+        const colMesh = new THREE.InstancedMesh(unitBox, new THREE.MeshBasicMaterial({ color: 0x1c1c1f }), 30);
+        const m = new THREE.Matrix4();
         const pts = [];
-        const r = rng(n * 13);
-        for (let x = 0; x < 420; x += 9 + r() * 30) for (const copy of [-1, 0, 1]) pts.push(x + copy * 420, STREET + 0.8, CW / 2 + n, x + copy * 420 + 0.1, STREET + 0.8, CW / 2 + n + 1.6);
+        let i = 0;
+        for (let x = 0; x < 400; x += 40) {
+          for (const copy of [-1, 0, 1]) {
+            m.makeScale(3, 8, 3).setPosition(x + copy * 400, STREET, CW / 2 + FWY);
+            colMesh.setMatrixAt(i++, m);
+            pts.push(x + copy * 400, FY + 8, CW / 2 + FWY, x + 20 + copy * 400, FY + 8, CW / 2 + FWY);
+          }
+        }
+        colMesh.frustumCulled = false;
         const g = new THREE.BufferGeometry();
         g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
-        const p = new THREE.Points(g, new THREE.PointsMaterial({ map: glowTex, color, size: 1.6, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+        const lamps = new THREE.Points(g, new THREE.PointsMaterial({ map: glowTex, color: 0xffb060, size: 7, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+        lamps.frustumCulled = false;
+        cols.add(colMesh, lamps);
+        city.add(cols);
+        layers.push({ group: cols, P: 400 });
+      }
+
+      // Traffic. Every car is a pair of headlights and a pair of tail
+      // lights, so you can tell which way it's going even from above. Cars
+      // run in lanes along the avenues, up and down the cross streets, and
+      // thick and fast on the freeway; they bunch up like they've come off
+      // a light. Everything lives in a window 1280 m long (a whole number
+      // of blocks) and wraps round.
+      const HW = 640;
+      const wrap = (v, h) => ((((v + h) % (2 * h)) + 2 * h) % (2 * h)) - h;
+      function fleet({ lanes, gap, size, seed }) {
+        const r = rng(seed);
+        const cars = [];
+        for (const lane of lanes) {
+          const span = lane.axis === "x" ? 2 * HW : 2 * lane.reach;
+          for (let p = r() * gap[1]; p < span; ) {
+            cars.push({ lane, p, v: lane.speed * (0.9 + r() * 0.2) });
+            p += r() < 0.25 ? gap[1] * (1 + r() * 3) : gap[0] * (1 + r());
+          }
+        }
+        const pos = new Float32Array(cars.length * 12);
+        const col = new Float32Array(cars.length * 12);
+        const HEAD = new THREE.Color(0xfff2d0);
+        const TAIL = new THREE.Color(0xff2a1a).multiplyScalar(0.8);
+        cars.forEach((c, i) => {
+          for (let k = 0; k < 4; k++) (k < 2 ? HEAD : TAIL).toArray(col, i * 12 + k * 3);
+        });
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+        const pts = new THREE.Points(g, new THREE.PointsMaterial({ map: glowTex, vertexColors: true, size, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+        pts.frustumCulled = false;
+        city.add(pts);
+        return { cars, pos, g };
+      }
+      const lanes = [];
+      const aves = D < 0.5 ? [0, -80, 80] : [0, -80, 80, -160, 160];
+      for (const n of aves) {
+        const offs = n === 0 ? [-6, -3, 3, 6] : [-2, 2];
+        for (const o of offs) lanes.push({ axis: "x", n: n + o, dir: o < 0 ? 1 : -1, speed: 9 + Math.abs(n) / 40, y: STREET + 0.6 });
+      }
+      for (let k = 0; k < (2 * HW) / BLOCK; k++) {
+        for (const o of [-1.8, 1.8]) lanes.push({ axis: "z", x: 40 + k * BLOCK + o, dir: o < 0 ? 1 : -1, speed: 8 + (k % 3) * 2, reach: 310, y: STREET + 0.6 });
+      }
+      const street = fleet({ lanes, gap: D < 0.5 ? [16, 60] : [9, 40], size: 1.5, seed: 77 });
+      const fwyLanes = [-10.5, -7, -3.5, 3.5, 7, 10.5].map((o) => ({ axis: "x", n: FWY + o, dir: o < 0 ? 1 : -1, speed: 24 + Math.abs(o), y: FY + 0.7 }));
+      const freeway = fleet({ lanes: fwyLanes, gap: D < 0.5 ? [9, 30] : [5, 22], size: 2.6, seed: 78 });
+      function drive(f, dt) {
+        const { cars, pos } = f;
+        for (let i = 0; i < cars.length; i++) {
+          const c = cars[i];
+          const L = c.lane;
+          c.p += c.v * L.dir * dt;
+          let x, z, dx, dz;
+          if (L.axis === "x") {
+            x = wrap(c.p - travelled, HW);
+            z = CW / 2 + L.n;
+            dx = L.dir; dz = 0;
+          } else {
+            x = wrap(L.x - travelled, HW);
+            z = CW / 2 + wrap(c.p, L.reach);
+            dx = 0; dz = L.dir;
+          }
+          // Headlights 2 m ahead, tail lights 2 m behind, 0.75 m either side.
+          const o = i * 12;
+          pos[o] = x + dx * 2 - dz * 0.75; pos[o + 1] = L.y; pos[o + 2] = z + dz * 2 + dx * 0.75;
+          pos[o + 3] = x + dx * 2 + dz * 0.75; pos[o + 4] = L.y; pos[o + 5] = z + dz * 2 - dx * 0.75;
+          pos[o + 6] = x - dx * 2 - dz * 0.75; pos[o + 7] = L.y; pos[o + 8] = z - dz * 2 + dx * 0.75;
+          pos[o + 9] = x - dx * 2 + dz * 0.75; pos[o + 10] = L.y; pos[o + 11] = z - dz * 2 - dx * 0.75;
+        }
+        f.g.attributes.position.needsUpdate = true;
+      }
+      // An airliner, high up and far off, crossing the sky with its lights.
+      const plane = (() => {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, -9, 0, 0, 9, 0, 0], 3));
+        g.setAttribute("color", new THREE.Float32BufferAttribute([1, 1, 1, 1, 0.1, 0.1, 0.2, 1, 0.3], 3));
+        const p = new THREE.Points(g, new THREE.PointsMaterial({ map: glowTex, vertexColors: true, size: 10, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
         p.frustumCulled = false;
         city.add(p);
-        return { p, speed, x: 0 };
-      });
-      // Two searchlights sweeping the clouds from far across the city.
-      const beams = [[-700, -820], [600, 760]].map(([x, n], i) => {
-        const len = 900;
-        const geo = new THREE.CylinderGeometry(22, 1.5, len, 16, 1, true);
+        return p;
+      })();
+      // Searchlights sweeping the clouds from far across the city.
+      const beams = [[-700, -820], [600, 760], [150, 1200], [-300, -1250]].slice(0, D < 0.5 ? 2 : 4).map(([x, n], i) => {
+        const len = 1000;
+        const geo = new THREE.CylinderGeometry(24, 1.5, len, 16, 1, true);
         geo.translate(0, len / 2, 0);
         const pos = geo.attributes.position;
         const cols = new Float32Array(pos.count * 3);
@@ -955,12 +1127,15 @@
         sky.position.copy(R.camLocal);
         travelled += SPEED * dt;
         for (const L of layers) L.group.position.x = -(travelled % L.P);
-        streetTex.offset.x = (travelled / 80) % 1;
-        for (const tr of traffic) {
-          tr.x = (tr.x + (tr.speed - SPEED) * dt) % 420;
-          tr.p.position.x = tr.x > 0 ? tr.x - 420 : tr.x;
-        }
-        beacons.material.opacity = Math.sin(t * 3) > 0.2 ? 1 : 0.15;
+        streetTex.offset.x = (travelled / BLOCK) % 1;
+        drive(street, dt);
+        drive(freeway, dt);
+        const blink = Math.sin(t * 3) > 0.2 ? 1 : 0.15;
+        for (const b of beaconPts) b.material.opacity = blink;
+        // The airliner takes about three minutes to cross; its strobe flashes.
+        const pt = ((t / 180) % 1) * 2 - 1;
+        plane.position.set(pt * 1800, 420 + pt * 60, CW / 2 + 1100 - pt * 300);
+        plane.material.size = t % 1.3 < 0.08 ? 16 : 10;
         for (const b of beams) {
           b.beam.rotation.z = Math.sin(t * 0.12 + b.phase) * 0.45;
           b.beam.rotation.x = Math.sin(t * 0.09 + b.phase * 2) * 0.25;

@@ -297,7 +297,7 @@
   const doors = []; // the lobby's doorways, one per room
 
   // Around the octagonal lobby, clockwise from north. The south side is the
-  // way you came in; north-west is kept for a room still to come.
+  // way you came in.
   const SLOTS = [
     { angle: 0, room: "gallery" },
     { angle: 45, room: "overlook" },
@@ -306,7 +306,7 @@
     { angle: 180, entrance: true },
     { angle: 225, room: "subway" },
     { angle: 270, room: "moor" },
-    { angle: 315, soon: true },
+    { angle: 315, room: "nature" },
   ];
 
   const heading = (x, z) => Math.atan2(x, z);

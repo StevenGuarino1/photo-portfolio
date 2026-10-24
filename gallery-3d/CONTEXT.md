@@ -51,7 +51,7 @@ This is everything relevant from the long Windows session, which built this gall
 - **Voices and sound** (`35-voices.js` plus each room's `sound`): everything is synthesized with Web Audio (formant-filter babble, laughs, crickets, wind, owl, pump hum and so on). Each room has its own sound bus that crossfades through the corridors, behind a master limiter. No recordings are used.
 
 ## Rooms
-- **Lobby:** an octagon with a brass inlaid floor map, a sign over each door, and vestibules tinted toward each room's colour. Each doorway leaks that room's light. The entrance doors have two featured photos beside them. The north-west door is a closed "Coming soon".
+- **Lobby:** an octagon with a brass inlaid floor map, a sign over each door, and vestibules tinted toward each room's colour. Each doorway leaks that room's light. The entrance doors have two featured photos beside them. The north-west door leads to the Nature Train.
 - **Gallery** (with the Globe Room behind it):
   - The Osprey has a crowd of 13 around it in an arc that keeps the photo visible. A laughing man in a yellow shirt points at the gull photo.
   - There's a bench at the best view, track lights, and light pools painted on the walls.
@@ -59,14 +59,22 @@ This is everything relevant from the long Windows session, which built this gall
 - **Moor:** a lone doorframe in a broken fence; moonlit and dark, with dead trees, mist, fireflies, bats, a shooting star, standing stones with a lantern, and seven night photos floating in the air.
 - **Pool:** a big drained pool (22 × 10 m) lying lengthways toward an eerily distant house with one lit window. A dim blue lamp in the deep end; photos set into the tile. Rain starts after about a minute (or at the deep end) and slowly fills the pool; R or the button drains it. Gate lamp, lounge chair, a pool ring in the deep end, and leaves blowing in gusts.
 - **Hawk Watch:** a golden-hour ridge with layered valley ridges and a river. Raptors circle, with an occasional eye-level fly-by. Grass bends in gusts, there's a snapping flag, and bird photos stand on posts and a board.
-- **Night Train** (`80-subway.js`; the most recent work):
+- **Night Train** (`80-subway.js`):
   - Five cars on a smoothly curving track: `bendAt(t) = 0.1 sin(0.25t) + 0.03 sin(0.61t+1)`, about 25 seconds per left-right cycle.
+    - The bends are fixed in the track (curvature at `s` ahead = `bendAt(t + s/SPEED)/L`), so curves stream past; the old version re-bent the whole track at once and the rails out the window slid sideways.
+    - Speed is calculated, not guessed: tightest radius 120 m and a 1.0 m/s² sideways comfort limit (unbanked line) give √120 = 10.95 m/s. He asked for it to be calculated.
     - He disliked sudden snapping turns, and he disliked the earlier slow version that only got going after you walked in.
     - Cars, gangways, walls and riders update every frame, and you're carried with your car.
   - Interior: a realistic but grimy pass with molded bucket seats, brushed steel, scratched windows, a stained floor, litter, light panels with dead bugs, and an amber LED sign.
-  - Outside: an elevated line at night ("Gotham"). Viaduct posts with lamps sweep past; city layers sit at near, mid and far distance for parallax, with traffic, red aircraft beacons, searchlights and orange-lit low cloud.
+  - Outside: an elevated line at night ("Gotham"). Viaduct posts with lamps sweep past; city layers at near, mid, downtown and skyline distance for parallax, on an 80 m street grid. Cars (head and tail lights) run the avenues, cross streets and an elevated freeway. Floodlit crowns, spires, aircraft beacons, four searchlights, a horizon glow, an airliner.
+  - Sound: rumble, wheel roar, soft motor hum, clacks timed from 39 ft rails and real truck/axle spacing. He hated a whine (an old 3.1 kHz squeal), so no steady high tones.
   - Possible issue: the city layers move in a straight line while the train bends.
   - Riders: asleep, reading, holding a strap, looking up.
+- **Nature Train** (`85-naturetrain.js`; the most recent work): behind the north-west door. Five wooden coaches you enter from the back, so the doorway looks straight down the aisle.
+  - Same curving-track model as the Night Train, but the coach you enter is the rear one. Speed calculated the same way: radius 141 m gives 11.87 m/s.
+  - Inside: plank floor and jute runner, panelled wainscot, arched board roof with ribs, brass lamps, facing slatted or cane benches, brass luggage racks with trailing vines, ferns and big-leaved plants in terracotta, moss, windows dropped open, a dog. Landscape, Wildlife and Close-Up photos framed in wood in the vestibules.
+  - Outside, golden hour. Near things (ballast, sleepers, rails, telegraph poles and sagging wires, trees, grass, deer) are placed along the track so they follow the bends. Further out the land is in world coordinates (forest band, a winding river, hills, snowy mountains, sky and sun) and the train's integrated heading and position carry you through it, so the view swings as it turns.
+  - Sound: wind through the windows, leaves, birdsong phrases, a wood pigeon, creaks, clacks timed from the speed.
 - **Drive-in:** a giant weathered screen running a slideshow of landscape photos every 12 seconds with flicker and grain. Projector beam with dust and moths, booth and snack bar, a half-lit marquee, speaker poles, fog and fireflies. An old car with two people on the hood.
 
 ## His taste and how to work with him
@@ -85,9 +93,10 @@ This is everything relevant from the long Windows session, which built this gall
 ## Testing
 - `python3 gallery-3d/build.py --test` writes `crowd-lab/v2/` with `window.__app` hooks. Serve the repo root with `python3 -m http.server 8000`.
 - `cdp.py` is a small headless-Chrome driver with no dependencies. `ui_test.py` (desktop plus emulated phone touch), `collide_test.py`, `perf_after.py` and `sound_test.py` use it. The Chrome path is auto-detected.
+- In a claude.ai cloud session: jsDelivr is blocked for the headless browser, so `npm pack three@0.165.0`, unpack it as `crowd-lab/three` and point the importmap in `crowd-lab/v2/index.html` at `/crowd-lab/three/` (test copy only). Point `cdp.CHROME` at `/opt/pw-browsers/chromium-1243/chrome-linux64/chrome` through a wrapper that adds `--no-sandbox`, use `Page(..., gpu=False)`, and set `NO_PROXY=127.0.0.1,localhost`. Delete `crowd-lab/` before committing.
 
 ## Ideas not done yet
-- Fill the "Coming soon" door with a Close-Up greenhouse or an Aviation hangar.
+- Nature Train: trestle bridges, tunnels, light shafts through the trees.
 - Use real CC0 ambient recordings instead of synthesized sound.
 - Captions for photos (each card already has an empty caption field, filled from photos.js).
 - A nightclub room with dancing rigged characters.

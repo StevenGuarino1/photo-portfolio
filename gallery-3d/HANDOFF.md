@@ -21,10 +21,11 @@ Serve the repo root (`python3 -m http.server 8000`) and open `/crowd-lab/v2/` to
   - Pool
   - Hawk Watch
   - Night Train (subway)
+  - Nature Train (north-west)
   - Drive-in
-  - North-west is a closed "Coming soon" door kept for a new room.
 - **How rooms draw:** each room is its own scene, seen only through its doorway (stencil plus per-material clipping planes). Rooms load when you come near.
-- **Night Train:** five cars on a curving track that changes over time (`bendAt` in `src/80-subway.js`), with a grimy, realistic interior and an elevated night city outside, built in layers for distance.
+- **Night Train:** five cars on a curving track whose bends are fixed in the track and stream past (`bendAt` in `src/80-subway.js`), at a calculated 10.95 m/s, with a grimy, realistic interior and an elevated night city with traffic outside, built in layers for distance.
+- **Nature Train:** five wooden coaches entered from the back (`src/85-naturetrain.js`), plants everywhere, a golden-hour valley outside that stays lined up through the bends.
 
 ## How Steven likes to work
 - He usually views things remotely (on his phone or another PC), so publish the artifact and send screenshots rather than pointing him at localhost.
@@ -34,7 +35,7 @@ Serve the repo root (`python3 -m http.server 8000`) and open `/crowd-lab/v2/` to
 - Mid-task changes of direction are normal. Fold them in and keep going.
 
 ## Open ideas
-- Fill the "Coming soon" door with a Close-Up greenhouse or an Aviation hangar.
+- Nature Train extras: trestle bridges, tunnels, light shafts through the trees.
 - Swap the synthesized sound for real CC0 ambient recordings.
 - Add photo captions, a nightclub room with dancing characters, and a "Walk the gallery" link on the real site.
 - Bring the characters' look closer to the newer, more realistic train interior.

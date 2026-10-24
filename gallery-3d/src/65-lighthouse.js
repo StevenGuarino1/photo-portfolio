@@ -805,61 +805,83 @@
       // The beams: long faint cones from the bullseyes, out over the sea,
       // each with a spotlight that lights what it falls on.
       const BEAM_LEN = 420;
+      const BEAM_R = (x) => 0.25 + (x / BEAM_LEN) * 60; // the cone's radius
+      // Each beam is one sheet along its axis, turned every frame to face
+      // you (like a billboard that can only spin about the beam), brightest
+      // down the middle and fading to nothing at the cone's edge and along
+      // its length. Seen from anywhere it's one smooth shaft of light, with
+      // no seams or edges.
       const beamGeo = (() => {
-        const geo = new THREE.CylinderGeometry(0.25, 60, BEAM_LEN, 32, 16, true);
-        geo.translate(0, BEAM_LEN / 2, 0);
-        geo.rotateZ(-Math.PI / 2);
+        const segs = 32;
+        const pos = [];
+        const f = [];
+        const v = [];
+        const idx = [];
+        for (let i = 0; i <= segs; i++) {
+          const x = (BEAM_LEN * i) / segs;
+          for (const side of [-1, 1]) {
+            pos.push(x, side * BEAM_R(x), 0);
+            f.push(i / segs);
+            v.push(side);
+          }
+          if (i < segs) idx.push(i * 2, i * 2 + 2, i * 2 + 1, i * 2 + 1, i * 2 + 2, i * 2 + 3);
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+        geo.setAttribute("aF", new THREE.Float32BufferAttribute(f, 1));
+        geo.setAttribute("aV", new THREE.Float32BufferAttribute(v, 1));
+        geo.setIndex(idx);
         return geo;
       })();
-      // A shaft of light: brightest down its middle from wherever you look
-      // (where you see through the most of it), fading along its length and
-      // at its edges, a little brighter during lightning.
       const beamMat = new THREE.ShaderMaterial({
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
-        // Only the far side of the cone, so wherever you look through it
-        // you see one sheet of light, not two with a gap between.
-        side: THREE.BackSide,
-        uniforms: { uLen: { value: BEAM_LEN }, uOpacity: { value: 0.34 } },
+        side: THREE.DoubleSide,
+        uniforms: { uOpacity: { value: 0.3 }, uEnd: { value: 1 } },
         vertexShader: `
-          uniform float uLen;
+          attribute float aF;
+          attribute float aV;
           varying float vF;
-          varying vec3 vN;
-          varying vec3 vV;
+          varying float vV;
           varying float vD;
           void main() {
-            vF = position.x / uLen;
+            vF = aF;
+            vV = aV;
             vec4 mv = modelViewMatrix * vec4(position, 1.0);
-            vN = normalize(normalMatrix * normal);
-            vV = normalize(-mv.xyz);
             vD = length(mv.xyz);
             gl_Position = projectionMatrix * mv;
           }`,
         fragmentShader: `
           uniform float uOpacity;
+          uniform float uEnd;
           varying float vF;
-          varying vec3 vN;
-          varying vec3 vV;
+          varying float vV;
           varying float vD;
           void main() {
-            float face = abs(dot(normalize(vN), normalize(vV)));
+            float across = pow(max(0.0, 1.0 - vV * vV), 1.8);
+            float along = pow(1.0 - vF, 2.0) * smoothstep(0.0, 0.02, vF);
             // Faded close to you, so a beam sweeping past is a glow in the
-            // rain rather than a wall.
-            float a = pow(1.0 - vF, 2.2) * smoothstep(0.0, 0.015, vF) * pow(face, 2.5) * smoothstep(1.5, 14.0, vD) * uOpacity;
+            // rain rather than a wall; and thinner when you look along it.
+            float a = across * along * smoothstep(2.0, 18.0, vD) * uEnd * uOpacity;
             gl_FragColor = vec4(vec3(1.0, 0.9, 0.72) * a, 1.0);
           }`,
       });
       beamMat.userData.noClip = true;
+      const beamSheets = [];
       const flares = [];
       bullNormals.forEach((phi) => {
         const arm = new THREE.Group();
         arm.rotation.y = -phi;
         arm.position.y = 0.95;
         drum.add(arm);
-        const beam = new THREE.Mesh(beamGeo, beamMat);
-        beam.rotation.z = -0.09; // tilted down toward the sea
-        arm.add(beam);
+        const tilt = new THREE.Group();
+        tilt.rotation.z = -0.09; // tilted down toward the sea
+        arm.add(tilt);
+        const beam = new THREE.Mesh(beamGeo, beamMat.clone());
+        beam.frustumCulled = false;
+        tilt.add(beam);
+        beamSheets.push({ tilt, beam });
         const spot = new THREE.SpotLight(0xffe8c0, 24, 900, 0.17, 0.55, 0);
         arm.add(spot);
         spot.target.position.set(200, -200 * Math.tan(0.09), 0);
@@ -1367,78 +1389,118 @@
       })();
       // The sky: low, heavy cloud, lit up by the lightning.
       const skyGroup = new THREE.Group();
-      const dome = skyDome({ top: 0x07090c, mid: 0x12161c, low: 0x10141a, sunDir: new THREE.Vector3(0.3, 0.1, 1), glow: [0.1, 0.12, 0.15], tight: 8, spread: 3, glowAmt: [0.05, 0.02] });
+      const dome = skyDome({ top: 0x0e1115, mid: 0x1c2027, low: 0x10141a, sunDir: new THREE.Vector3(0.3, 0.1, 1), glow: [0.1, 0.12, 0.15], tight: 8, spread: 3, glowAmt: [0.05, 0.02] });
       skyGroup.add(dome);
       const domeBase = { top: dome.material.uniforms.top.value.clone(), mid: dome.material.uniforms.mid.value.clone(), low: dome.material.uniforms.low.value.clone() };
-      const cloudTex = canvasTex(512, 512, (g) => {
-        const r = rng(1321);
-        for (let i = 0; i < 180; i++) {
-          const x = r() * 512;
-          const y = r() * 512;
-          const rad = 20 + r() * 70;
-          const blob = g.createRadialGradient(x, y, 0, x, y, rad);
-          blob.addColorStop(0, `rgba(255, 255, 255, ${0.15 + r() * 0.2})`);
-          blob.addColorStop(1, "rgba(255, 255, 255, 0)");
-          g.fillStyle = blob;
-          for (const dx of [-512, 0, 512]) for (const dy of [-512, 0, 512]) g.fillRect(x - rad + dx, y - rad + dy, rad * 2, rad * 2);
-        }
-      });
-      cloudTex.repeat.set(6, 6);
-      // The clouds come in three layers, laid out in the world rather than
-      // riding with you, so they shift against each other as you move and
-      // give the storm its height: a solid overcast high up, a broken
-      // layer below it with gaps you can see the overcast through, and low
-      // scud drifting round the headland, some of it between you and the
-      // thing in the sea and some behind it. Nothing is low enough to cut
-      // through it: its head is about 290 m up.
-      const cloudMat = new THREE.MeshBasicMaterial({ map: cloudTex, color: 0x2a3038, transparent: true, opacity: 0.92, depthWrite: false, side: THREE.DoubleSide, fog: false });
-      const clouds = new THREE.Mesh(new THREE.CircleGeometry(2750, 64), cloudMat);
-      clouds.rotation.x = Math.PI / 2;
-      clouds.position.y = 950;
-      clouds.renderOrder = -1;
-      T.add(clouds);
-      // The broken layer: lumps of cloud with clear gaps between.
-      const brokenTex = canvasTex(512, 512, (g) => {
-        const r = rng(1322);
-        for (let i = 0; i < 70; i++) {
-          const cx = r() * 512;
-          const cy = r() * 512;
-          const n = 6 + Math.floor(r() * 10);
-          for (let k = 0; k < n; k++) {
-            const x = cx + (r() - 0.5) * 90;
-            const y = cy + (r() - 0.5) * 50;
-            const rad = 14 + r() * 40;
-            const blob = g.createRadialGradient(x, y, 0, x, y, rad);
-            blob.addColorStop(0, `rgba(255, 255, 255, ${0.35 + r() * 0.3})`);
-            blob.addColorStop(1, "rgba(255, 255, 255, 0)");
-            g.fillStyle = blob;
-            for (const dx of [-512, 0, 512]) for (const dy of [-512, 0, 512]) g.fillRect(x - rad + dx, y - rad + dy, rad * 2, rad * 2);
-          }
-        }
-      });
-      brokenTex.repeat.set(5, 5);
-      const brokenMat = new THREE.MeshBasicMaterial({ map: brokenTex, color: 0x1c2026, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide, fog: false });
-      const broken = new THREE.Mesh(new THREE.CircleGeometry(2800, 64), brokenMat);
-      broken.rotation.x = Math.PI / 2;
-      broken.position.y = 560;
-      T.add(broken);
+      // The clouds come in three layers, fixed in the world so they shift
+      // against each other as you move and give the storm its height: a
+      // near-solid overcast high up, a broken layer below it with gaps you
+      // see the overcast through, and low scud drifting round the headland,
+      // some between you and the thing in the sea, some behind it. Nothing
+      // is low enough to cut through it: its head is about 290 m up.
+      // Each layer is a disc that follows you across (so its edge is
+      // always the same far-off distance away and fades out softly into
+      // the sky) while its clouds are drawn from where they are in the
+      // world, mixed from two scales of the same texture so they don't
+      // repeat, darker where they're thick, lit up in the lightning.
+      const cloudLayers = [];
+      function cloudLayer({ y, radius, scale, wind, dark, light, base, gain, opacity, order, seed }) {
+        // A fine grid rather than a fan of long thin triangles, which some
+        // GPUs draw with visible seams at this size.
+        const geo = new THREE.PlaneGeometry(radius * 2, radius * 2, 80, 80);
+        geo.rotateX(Math.PI / 2);
+        const mat = new THREE.ShaderMaterial({
+          transparent: true,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          defines: { OCTAVES: D < 0.5 ? 4 : 5 },
+          uniforms: {
+            uOff: { value: new THREE.Vector2() }, uWind: { value: new THREE.Vector2(...wind) }, uTime: { value: 0 },
+            uScale: { value: scale }, uR: { value: new THREE.Vector2(radius * 0.5, radius * 0.98) }, uDark: { value: new THREE.Color(dark) }, uLight: { value: new THREE.Color(light) },
+            uBase: { value: base }, uGain: { value: gain }, uOpacity: { value: opacity }, uFlash: { value: 0 }, uSeed: { value: seed },
+          },
+          vertexShader: `
+            varying vec2 vXZ;
+            void main() {
+              vXZ = position.xz;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }`,
+          fragmentShader: `
+            uniform vec2 uOff, uWind, uR;
+            uniform float uTime, uScale, uBase, uGain, uOpacity, uFlash, uSeed;
+            uniform vec3 uDark, uLight;
+            varying vec2 vXZ;
+            float hash2(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+            float vnoise(vec2 p) {
+              vec2 i = floor(p);
+              vec2 f = fract(p);
+              vec2 u = f * f * (3.0 - 2.0 * f);
+              return mix(mix(hash2(i), hash2(i + vec2(1.0, 0.0)), u.x), mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), u.x), u.y);
+            }
+            float fbm(vec2 p) {
+              float v = 0.0;
+              float a = 0.5;
+              mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+              for (int i = 0; i < OCTAVES; i++) { v += a * vnoise(p); p = m * p; a *= 0.5; }
+              return v;
+            }
+            void main() {
+              vec2 p = (uOff + vXZ) / uScale + uSeed;
+              vec2 drift = uWind * uTime / uScale;
+              // Warped noise: billowing shapes that slowly roll and change.
+              vec2 q = vec2(fbm(p + drift * 0.5), fbm(p + vec2(5.2, 1.3) - drift * 0.3));
+              float n = fbm(p + 1.6 * q + drift);
+              float d = clamp(uBase + uGain * (n - 0.5), 0.0, 1.0);
+              float rim = 1.0 - smoothstep(uR.x, uR.y, length(vXZ));
+              if (rim <= 0.0) discard;
+              // Thick parts darker, thin edges lighter.
+              vec3 c = mix(uLight, uDark, smoothstep(0.25, 1.0, d) * (0.6 + 0.4 * q.x));
+              c += uFlash * vec3(0.5, 0.56, 0.7) * (0.3 + 0.7 * (1.0 - d * 0.5));
+              gl_FragColor = vec4(c, d * uOpacity * rim);
+              #include <colorspace_fragment>
+            }`,
+        });
+        mat.userData.noClip = true;
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.y = y;
+        mesh.renderOrder = order;
+        mesh.frustumCulled = false;
+        T.add(mesh);
+        cloudLayers.push({ mesh, mat });
+        return mesh;
+      }
+      cloudLayer({ y: 950, radius: 2750, scale: 900, wind: [4, 2.5], dark: 0x15181c, light: 0x262a30, base: 0.8, gain: 1.4, opacity: 0.97, order: -1, seed: 3.1 });
+      cloudLayer({ y: 560, radius: 2800, scale: 480, wind: [9, 5.5], dark: 0x0a0b0e, light: 0x3a414b, base: 0.15, gain: 3.4, opacity: 0.98, order: 0, seed: 11.7 });
       // Low scud: soft, ragged billboards circling the headland on the
       // wind, each at its own height and distance, kept clear of the band
       // the giant walks in so none of them passes through it.
       const scudTex = canvasTex(256, 128, (g) => {
         const r = rng(1323);
-        for (let i = 0; i < 40; i++) {
-          const x = 30 + r() * 196;
-          const y = 50 + r() * 40 - (Math.abs(128 - (30 + r() * 196)) / 128) * 10;
-          const rad = 10 + r() * 30;
+        for (let i = 0; i < 46; i++) {
+          const x = 40 + r() * 176;
+          const y = 52 + r() * 30;
+          const rad = 10 + r() * 26;
           const blob = g.createRadialGradient(x, y, 0, x, y, rad);
           blob.addColorStop(0, `rgba(255, 255, 255, ${0.25 + r() * 0.25})`);
           blob.addColorStop(1, "rgba(255, 255, 255, 0)");
           g.fillStyle = blob;
           g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
         }
+        // Fade everything to nothing well inside the edges, so no cloud is
+        // ever cut off square.
+        g.globalCompositeOperation = "destination-in";
+        g.save();
+        g.translate(128, 64);
+        g.scale(1, 0.5);
+        const mask = g.createRadialGradient(0, 0, 0, 0, 0, 124);
+        mask.addColorStop(0, "rgba(0, 0, 0, 1)");
+        mask.addColorStop(0.6, "rgba(0, 0, 0, 0.8)");
+        mask.addColorStop(1, "rgba(0, 0, 0, 0)");
+        g.fillStyle = mask;
+        g.fillRect(-128, -128, 256, 256);
+        g.restore();
       }, { repeat: false });
-      const scudMats = [0x262b32, 0x1e2228, 0x2e333a].map((c) => new THREE.SpriteMaterial({ map: scudTex, color: c, transparent: true, depthWrite: false, fog: false, opacity: 0.75 }));
+      const scudMats = [0x23272d, 0x1b1e23, 0x2a2f35].map((c) => new THREE.SpriteMaterial({ map: scudTex, color: c, transparent: true, depthWrite: false, fog: false, opacity: 0.7 }));
       const scud = [];
       {
         const r = rng(1324);
@@ -1560,77 +1622,150 @@
       })();
 
       // ---------- The thing in the sea ----------
-      // Far out, something enormous wades through the swell: a hunched,
-      // long-armed figure about 400 m tall, thigh-deep, lumbering slowly
-      // back and forth a kilometre off. Almost black, so it's a shape
-      // against the clouds, plainest in the lightning, with two pale
-      // pinpoints where its eyes should be.
-      const GS = 40; // about 400 m tall, thigh-deep in the sea
+      // Far out, something enormous wades through the swell: about 400 m
+      // tall, thigh-deep, a kilometre and a quarter off, wandering slowly
+      // back and forth. Gaunt and hunched, a ridged spine, a long skull
+      // jutting forward on its neck with the jaw hanging open, arms far too
+      // long, its fingers trailing in the sea. Near black, so mostly it's a
+      // shape against the clouds; the lightning shows it whole, and when
+      // the lighthouse beam swings across it, it's lit up for a moment.
+      // The sea foams round its legs, and a veil of spray hangs at its
+      // waist.
+      const GS = 40; // built about ten units tall, scaled up
       const giant = (() => {
-        const mat = new THREE.MeshBasicMaterial({ color: 0x050607, fog: false });
-        const limb = (w, h, d, y) => {
-          const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-          m.position.y = y;
+        const mat = new THREE.MeshLambertMaterial({ color: 0x15171a, flatShading: true, fog: false });
+        const mesh = (geo, parent, x = 0, y = 0, z = 0) => {
+          const m = new THREE.Mesh(geo, mat);
+          m.position.set(x, y, z);
+          parent.add(m);
           return m;
         };
-        // Built about 10 units tall, scaled up.
+        // A limb hanging down (-y) from its joint, tapering.
+        const limb = (r0, r1, len, parent, sides = 7) => {
+          const g = new THREE.CylinderGeometry(r0, r1, len, sides, 1);
+          g.translate(0, -len / 2, 0);
+          const m = mesh(g, parent);
+          const knob = mesh(new THREE.SphereGeometry(r0 * 1.08, sides, 5), parent);
+          void knob;
+          return m;
+        };
+        const joint = (parent, x, y, z) => {
+          const g = new THREE.Group();
+          g.position.set(x, y, z);
+          parent.add(g);
+          return g;
+        };
         const root = new THREE.Group();
-        const hips = new THREE.Group();
-        hips.position.y = 1.2;
-        root.add(hips);
-        hips.add(limb(2.6, 1.2, 1.6, 0));
-        const torso = new THREE.Group();
-        torso.position.y = 0.4;
-        torso.rotation.x = 0.4; // hunched forward
-        hips.add(torso);
-        torso.add(limb(3.0, 3.6, 1.9, 1.8));
-        const hump = limb(3.6, 1.6, 2.2, 3.3);
-        hump.rotation.x = -0.3;
-        torso.add(hump);
-        const neck = new THREE.Group();
-        neck.position.set(0, 3.7, 0.6);
-        neck.rotation.x = 0.35;
-        torso.add(neck);
-        const head = limb(1.1, 1.3, 1.2, 0.5);
-        head.position.z = 0.4;
-        neck.add(head);
-        for (const s of [-1, 1]) {
-          const eye = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xc8d4e8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true, opacity: 0.55 }));
-          eye.scale.setScalar(0.32);
-          eye.position.set(s * 0.26, 0.6, 1.05);
-          neck.add(eye);
+        const hips = joint(root, 0, 1.4, 0);
+        const pelvis = mesh(new THREE.SphereGeometry(1, 8, 6), hips);
+        pelvis.scale.set(1.2, 0.75, 0.85);
+        const torso = joint(hips, 0, 0.3, 0);
+        torso.rotation.x = 0.45; // hunched forward
+        // Ribcage: wide at the top, pinched at the waist, flattened.
+        const ribs = mesh(new THREE.CylinderGeometry(1.45, 0.75, 3.6, 9, 3), torso, 0, 1.8, 0);
+        ribs.scale.z = 0.72;
+        const shoulders = mesh(new THREE.SphereGeometry(1.6, 10, 7), torso, 0, 3.35, -0.2);
+        shoulders.scale.set(1.15, 0.65, 0.85);
+        // Hump and ridged spine down the back.
+        const hump = mesh(new THREE.SphereGeometry(1.1, 8, 6), torso, 0, 3.0, -0.75);
+        hump.scale.set(1.1, 0.9, 0.8);
+        for (let k = 0; k < 9; k++) {
+          const spine = mesh(new THREE.ConeGeometry(0.17 - k * 0.008, 0.75 - k * 0.03, 5), torso, 0, 0.6 + k * 0.42, -0.95 - Math.sin((k / 8) * Math.PI) * 0.45);
+          spine.rotation.x = -1.1;
         }
+        // Neck jutting forward, long skull, hanging jaw.
+        const neck = joint(torso, 0, 3.5, 0.7);
+        neck.rotation.x = 0.9;
+        limb(0.42, 0.32, 1.3, neck).rotation.x = Math.PI; // points up the neck
+        const head = joint(neck, 0, 1.3, 0);
+        head.rotation.x = -0.75; // so the face looks forward and a little down
+        const skull = mesh(new THREE.SphereGeometry(0.62, 9, 7), head, 0, 0.25, 0.25);
+        skull.scale.set(0.8, 0.85, 1.35);
+        const brow = mesh(new THREE.BoxGeometry(0.9, 0.18, 0.4), head, 0, 0.42, 0.72);
+        brow.rotation.x = 0.3;
+        const jaw = joint(head, 0, 0.0, 0.2);
+        jaw.rotation.x = 0.35;
+        const jawBone = mesh(new THREE.ConeGeometry(0.42, 1.2, 6), jaw, 0, -0.15, 0.55);
+        jawBone.rotation.x = Math.PI / 2;
+        jawBone.scale.set(1, 1, 0.45);
+        for (const s of [-1, 1]) {
+          const eye = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xd8e2f0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true, opacity: 0.6 }));
+          eye.scale.setScalar(0.28);
+          eye.position.set(s * 0.22, 0.32, 1.02);
+          head.add(eye);
+          // A horn swept back from each side of the skull.
+          const horn = mesh(new THREE.ConeGeometry(0.12, 1.3, 5), head, s * 0.35, 0.7, -0.1);
+          horn.rotation.set(-0.9, 0, -s * 0.35);
+        }
+        // Arms: far too long, ending in long curled fingers.
         const arms = [-1, 1].map((s) => {
-          const shoulder = new THREE.Group();
-          shoulder.position.set(s * 1.9, 3.2, 0.2);
-          torso.add(shoulder);
-          const upper = limb(0.8, 3.4, 0.8, -1.7);
-          shoulder.add(upper);
-          const elbow = new THREE.Group();
-          elbow.position.y = -3.4;
-          shoulder.add(elbow);
-          elbow.add(limb(0.7, 3.6, 0.7, -1.8));
-          const hand = limb(1.0, 1.3, 0.6, -4.0);
-          elbow.add(hand);
-          return { shoulder, elbow, s };
+          const shoulder = joint(torso, s * 1.75, 3.2, 0.1);
+          limb(0.36, 0.26, 3.6, shoulder);
+          const elbow = joint(shoulder, 0, -3.6, 0);
+          limb(0.28, 0.2, 4.0, elbow);
+          const wrist = joint(elbow, 0, -4.0, 0);
+          const palm = mesh(new THREE.BoxGeometry(0.55, 0.8, 0.22), wrist, 0, -0.4, 0);
+          void palm;
+          const fingers = [];
+          for (let k = 0; k < 4; k++) {
+            const f = joint(wrist, (k - 1.5) * 0.15 * s, -0.8, 0);
+            limb(0.075, 0.035, 1.2 - Math.abs(k - 1.5) * 0.12, f, 5);
+            f.rotation.x = 0.35;
+            f.rotation.z = (k - 1.5) * 0.08 * s;
+            fingers.push(f);
+          }
+          const thumb = joint(wrist, s * 0.3, -0.35, 0.1);
+          limb(0.08, 0.04, 0.7, thumb, 5);
+          thumb.rotation.z = s * 0.6;
+          return { shoulder, elbow, wrist, fingers, s };
         });
         const legs = [-1, 1].map((s) => {
-          const hip = new THREE.Group();
-          hip.position.set(s * 0.9, -0.3, 0);
-          hips.add(hip);
-          hip.add(limb(1.1, 3.0, 1.1, -1.5));
-          const knee = new THREE.Group();
-          knee.position.y = -3.0;
-          hip.add(knee);
-          knee.add(limb(1.0, 3.0, 1.0, -1.5));
+          const hip = joint(hips, s * 0.85, -0.4, 0);
+          limb(0.6, 0.42, 3.2, hip);
+          const knee = joint(hip, 0, -3.2, 0);
+          limb(0.42, 0.3, 3.2, knee);
           return { hip, knee, s };
         });
         root.scale.setScalar(GS);
         T.add(root);
-        return { root, hips, torso, neck, arms, legs, yaw: 0, lastStep: 0, a: 0, r: 0 };
+        // Foam where its legs and fingers meet the sea, and spray hanging
+        // round its waist.
+        const foamTex = canvasTex(128, 128, (g) => {
+          const r = rng(1401);
+          for (let i = 0; i < 140; i++) {
+            const a = r() * TAU;
+            const d = 18 + r() * 42;
+            const x = 64 + Math.cos(a) * d;
+            const y = 64 + Math.sin(a) * d * 0.8;
+            const rad = 3 + r() * 9;
+            const blob = g.createRadialGradient(x, y, 0, x, y, rad);
+            blob.addColorStop(0, `rgba(255, 255, 255, ${0.3 + r() * 0.4})`);
+            blob.addColorStop(1, "rgba(255, 255, 255, 0)");
+            g.fillStyle = blob;
+            g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+          }
+        }, { repeat: false });
+        const foamMat = new THREE.MeshBasicMaterial({ map: foamTex, color: 0x4e575e, transparent: true, depthWrite: false });
+        const foam = Array.from({ length: 4 }, (_, i) => {
+          const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), foamMat.clone());
+          m.rotation.x = -Math.PI / 2;
+          m.scale.setScalar(i < 2 ? 95 : 60);
+          T.add(m);
+          return m;
+        });
+        const veil = new THREE.Sprite(new THREE.SpriteMaterial({ map: scudTex, color: 0x3a4048, transparent: true, depthWrite: false, opacity: 0.5 }));
+        veil.scale.set(520, 140, 1);
+        T.add(veil);
+        // The lighthouse beam lighting it as it passes.
+        const beamLight = new THREE.PointLight(0xffe8c0, 0, 700, 1);
+        T.add(beamLight);
+        return { root, hips, torso, neck, head, jaw, arms, legs, foam, veil, beamLight, mat, yaw: 0, lastStep: 0 };
       })();
       const GIANT_A = THREE.MathUtils.degToRad(222); // roughly where you face from the gallery
       const GIANT_R = 1250;
+      const gv = new THREE.Vector3();
+      const gv2 = new THREE.Vector3();
+      const toT = (obj, v) => T.worldToLocal(obj.getWorldPosition(v));
       function giantTick(t, dt) {
         const g = giant;
         // Wandering back and forth along the horizon at about 1.5 m/s.
@@ -1642,30 +1777,67 @@
         const dz = z - (g.z ?? z);
         g.x = x;
         g.z = z;
-        if (!g.started) { g.started = true; const da = 0.3 * 0.0035 * Math.cos(t * 0.0035); g.yaw = Math.atan2(-Math.sin(a) * Math.sign(da || 1), Math.cos(a) * Math.sign(da || 1)); }
+        if (!g.started) { g.started = true; const da = Math.cos(t * 0.0035); g.yaw = Math.atan2(-Math.sin(a) * Math.sign(da || 1), Math.cos(a) * Math.sign(da || 1)); }
         else if (Math.hypot(dx, dz) > 1e-4) {
           const want = Math.atan2(dx, dz);
           g.yaw += wrapPi(want - g.yaw) * Math.min(1, dt * 0.15);
         }
-        // A slow, heavy stride: nine seconds a cycle.
+        // A slow, heavy stride: nine seconds a cycle, rolling from side to
+        // side with each step.
         const ph = (t / 9) * TAU;
         const sn = Math.sin(ph);
-        g.root.position.set(x, SEA + 0.6 * GS + Math.abs(Math.cos(ph)) * 0.25 * GS, z);
-        g.root.rotation.y = g.yaw;
-        g.hips.rotation.z = sn * 0.06;
-        g.torso.rotation.z = -sn * 0.08;
-        g.torso.rotation.x = 0.4 + Math.abs(sn) * 0.06;
-        g.neck.rotation.y = Math.sin(t * 0.05) * 0.5; // looking about
-        g.neck.rotation.x = 0.35 + Math.sin(t * 0.07 + 2) * 0.15;
+        const cs = Math.cos(ph);
+        g.root.position.set(x, SEA + 0.6 * GS + Math.abs(cs) * 0.22 * GS, z);
+        g.root.rotation.y = g.yaw + sn * 0.05;
+        g.hips.rotation.z = sn * 0.07;
+        g.torso.rotation.z = -sn * 0.1;
+        g.torso.rotation.x = 0.45 + Math.abs(sn) * 0.07;
+        // Its head turns slowly, scanning, now and then toward the light.
+        const toTower = wrapPi(Math.atan2(-x, -z) - g.yaw);
+        const scan = Math.sin(t * 0.045) * 0.6 + Math.sin(t * 0.017 + 1) * 0.3;
+        const look = Math.max(0, Math.sin(t * 0.021 + 0.5)) ** 4;
+        g.neck.rotation.y = scan * (1 - look) + THREE.MathUtils.clamp(toTower, -1.1, 1.1) * look;
+        g.neck.rotation.x = 0.9 + Math.sin(t * 0.07 + 2) * 0.12;
+        g.jaw.rotation.x = 0.3 + Math.sin(t * 0.11) * 0.12;
         for (const L of g.legs) {
-          L.hip.rotation.x = L.s * sn * 0.4;
-          L.knee.rotation.x = Math.max(0, -L.s * Math.cos(ph)) * 0.6;
+          L.hip.rotation.x = L.s * sn * 0.42;
+          L.knee.rotation.x = Math.max(0, -L.s * cs) * 0.7;
         }
         for (const A of g.arms) {
-          A.shoulder.rotation.x = -A.s * Math.sin(ph - 0.6) * 0.3 - 0.25;
-          A.shoulder.rotation.z = A.s * 0.12;
-          A.elbow.rotation.x = -0.3 - Math.max(0, A.s * Math.sin(ph - 1.2)) * 0.25;
+          // Hanging forward from the hunch and swinging, heavy and late.
+          A.shoulder.rotation.x = -A.s * Math.sin(ph - 0.7) * 0.28 - 0.5;
+          A.shoulder.rotation.z = A.s * (0.14 + Math.abs(sn) * 0.04);
+          A.elbow.rotation.x = -0.25 - Math.max(0, A.s * Math.sin(ph - 1.3)) * 0.3;
+          A.wrist.rotation.x = 0.2 + Math.sin(ph - 1.8) * 0.15;
+          for (const f of A.fingers) f.rotation.x = 0.35 + Math.sin(t * 0.4 + A.s) * 0.1;
         }
+        // Foam: where each thigh crosses the sea, and under each hand when
+        // it drags low enough.
+        g.root.updateMatrixWorld(true);
+        g.legs.forEach((L, i) => {
+          const h = toT(L.hip, gv);
+          const k = toT(L.knee, gv2);
+          const f = THREE.MathUtils.clamp((h.y - SEA) / Math.max(1e-3, h.y - k.y), 0, 1);
+          const m = g.foam[i];
+          m.position.set(h.x + (k.x - h.x) * f, SEA + 1.5, h.z + (k.z - h.z) * f);
+          m.material.opacity = 0.8;
+          m.scale.setScalar(95 * (1 + Math.sin(t * 0.7 + i * 2) * 0.08));
+          m.rotation.z = t * 0.05 + i;
+        });
+        g.arms.forEach((A, i) => {
+          const w = toT(A.wrist, gv);
+          const m = g.foam[2 + i];
+          m.position.set(w.x, SEA + 1.5, w.z);
+          m.material.opacity = 0.75 * (1 - THREE.MathUtils.smoothstep(w.y - SEA, 10, 60));
+        });
+        g.veil.position.set(x, SEA + 0.75 * GS, z);
+        // The beam: bullseyes face the drum's 0 and pi, so in the tower's
+        // frame the beams point at angles -spin and pi - spin.
+        const spin = drum.rotation.y;
+        let lit = 0;
+        for (const phi of [0, Math.PI]) lit = Math.max(lit, 1 - THREE.MathUtils.smoothstep(Math.abs(wrapPi(a - (phi - spin))), 0.05, 0.15));
+        g.beamLight.position.set(Math.cos(a) * (r - 320), 110, Math.sin(a) * (r - 320));
+        g.beamLight.intensity = lit * 4500;
         // Each footfall is heard, late, as far off as it is.
         const step = Math.floor(ph / Math.PI);
         if (step !== g.lastStep) {
@@ -1771,6 +1943,7 @@
 
       // ---------- Every frame ----------
       const toCam = new THREE.Vector3();
+      const beamCam = new THREE.Vector3();
       const camT = new THREE.Vector3();
       const motionState = { gust: 0 };
       let lastSconces = -1;
@@ -1821,6 +1994,16 @@
             f.flare.scale.setScalar(0.8 + k * 2.2);
           }
           flame.scale.setScalar(1 + Math.sin(t * 13) * 0.03);
+          // Turn each beam's sheet to face you.
+          for (const b of beamSheets) {
+            b.tilt.updateWorldMatrix(true, false);
+            const c = b.tilt.worldToLocal(beamCam.copy(camera.position));
+            b.beam.rotation.x = Math.atan2(-c.y, c.z);
+            // Looking along a beam, a flat sheet would thin to a line; fade
+            // it there and let the flare and lit rain carry it.
+            const l = c.length() || 1;
+            b.beam.material.uniforms.uEnd.value = 1 - THREE.MathUtils.smoothstep(Math.abs(c.x) / l, 0.85, 0.99) * 0.85;
+          }
 
           // The three nearest lamps light the stair round you.
           const nearest = sconces.map((sc, i) => ({ i, d: Math.hypot(sc.p.x - you.x, (sc.p.y - camY - 1.5) * 1.5, sc.p.z - yz) })).sort((a, b) => a.d - b.d);
@@ -1849,9 +2032,14 @@
           dome.material.uniforms.top.value.copy(domeBase.top).lerp(new THREE.Color(0x8a9ab8), f * 0.8);
           dome.material.uniforms.mid.value.copy(domeBase.mid).lerp(new THREE.Color(0xa8b8d0), f * 0.8);
           dome.material.uniforms.low.value.copy(domeBase.low).lerp(new THREE.Color(0x8a98a8), f * 0.6);
-          cloudMat.color.setHex(0x2a3038).lerp(new THREE.Color(0xb8c4dc), f);
-          brokenMat.color.setHex(0x1c2026).lerp(new THREE.Color(0x9aa6be), f);
-          scudMats.forEach((m, k) => m.color.setHex([0x262b32, 0x1e2228, 0x2e333a][k]).lerp(new THREE.Color(0x8a96aa), f));
+          for (const L of cloudLayers) {
+            L.mat.uniforms.uFlash.value = f;
+            L.mat.uniforms.uTime.value = t;
+            L.mesh.position.x = camT.x;
+            L.mesh.position.z = camT.z;
+            L.mat.uniforms.uOff.value.set(camT.x, camT.z);
+          }
+          scudMats.forEach((m, k) => m.color.setHex([0x23272d, 0x1b1e23, 0x2a2f35][k]).lerp(new THREE.Color(0x7a8698), f));
 
           // Sea, rain, clouds, glass.
           seaUniforms.uTime.value = t;
@@ -1861,10 +2049,6 @@
           // drum angles 0 and pi.
           rain.material.uniforms.uBeam.value = -drum.rotation.y;
           rain.material.uniforms.uCam.value.set(you.x, camY + 1.62, yz);
-          cloudTex.offset.x = (t * 0.0015) % 1;
-          cloudTex.offset.y = (t * 0.001) % 1;
-          brokenTex.offset.x = (t * 0.004) % 1;
-          brokenTex.offset.y = (t * 0.0025) % 1;
           for (const c of scud) {
             const a = c.a + t * c.w;
             c.sp.position.set(Math.cos(a) * c.rad, c.y, Math.sin(a) * c.rad);

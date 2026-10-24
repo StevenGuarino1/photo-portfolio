@@ -721,7 +721,7 @@
       // ---------- The lens ----------
       // On a fluted iron pedestal with its clockwork, a drum of eight glass
       // panels in a brass frame: two bullseyes, six of prisms. It turns
-      // once every twelve seconds, so from out at sea it flashes every six.
+      // once every forty seconds, so from out at sea it sweeps past every twenty.
       const lens = new THREE.Group();
       lens.position.set(0, HL, 0);
       T.add(lens);
@@ -805,7 +805,7 @@
       // each with a spotlight that lights what it falls on.
       const BEAM_LEN = 420;
       const beamGeo = (() => {
-        const geo = new THREE.CylinderGeometry(0.25, 30, BEAM_LEN, 32, 16, true);
+        const geo = new THREE.CylinderGeometry(0.25, 60, BEAM_LEN, 32, 16, true);
         geo.translate(0, BEAM_LEN / 2, 0);
         geo.rotateZ(-Math.PI / 2);
         return geo;
@@ -857,11 +857,11 @@
         arm.position.y = 0.95;
         drum.add(arm);
         const beam = new THREE.Mesh(beamGeo, beamMat);
-        beam.rotation.z = -0.035; // tilted down toward the sea
+        beam.rotation.z = -0.09; // tilted down toward the sea
         arm.add(beam);
-        const spot = new THREE.SpotLight(0xffe8c0, 14, 900, 0.075, 0.5, 0);
+        const spot = new THREE.SpotLight(0xffe8c0, 24, 900, 0.17, 0.55, 0);
         arm.add(spot);
-        spot.target.position.set(200, -200 * Math.tan(0.05), 0);
+        spot.target.position.set(200, -200 * Math.tan(0.09), 0);
         arm.add(spot.target);
         const flare = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xfff0d0, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0, fog: false }));
         flare.position.set(LR0 + 0.05, 0, 0);
@@ -1458,8 +1458,8 @@
               float along = length(q.xz);
               float ang = atan(q.z, q.x);
               float off = abs(mod(ang - uBeam + 3.14159265, 3.14159265) - 1.5707963);
-              float spread = 0.075 + 0.6 / max(along, 1.0);
-              vLit = (1.0 - smoothstep(spread * 0.6, spread, 1.5707963 - off)) * smoothstep(-2.0, 1.0, -abs(q.y + along * 0.035) + along * 0.075 + 0.3);
+              float spread = 0.14 + 0.6 / max(along, 1.0);
+              vLit = (1.0 - smoothstep(spread * 0.6, spread, 1.5707963 - off)) * smoothstep(-2.0, 1.0, -abs(q.y + along * 0.09) + along * 0.14 + 0.3);
               gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
             }`,
           fragmentShader: `
@@ -1615,7 +1615,7 @@
           storm.wind = motionState.gust;
 
           // The lens turns; a bullseye facing you flares.
-          drum.rotation.y = (t / 12) * TAU;
+          drum.rotation.y = (t / 40) * TAU;
           camT.set(you.x, camY + 1.62, yz);
           for (const f of flares) {
             const a = f.phi - drum.rotation.y;

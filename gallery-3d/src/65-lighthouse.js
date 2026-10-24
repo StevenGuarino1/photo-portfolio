@@ -1401,7 +1401,7 @@
         T.add(l);
         return l;
       })();
-      const storm = { next: 4, flash: 0, flashes: [], ex: 0, strikes: [], crashes: [], wind: 0 };
+      const storm = { next: 4, flash: 0, flashes: [], ex: 0, strikes: [], crashes: [], steps: [], wind: 0 };
       function strike(t) {
         const r = Math.random;
         const a = r() * TAU;
@@ -1494,6 +1494,121 @@
         T.add(lines);
         return lines;
       })();
+
+      // ---------- The thing in the sea ----------
+      // Far out, something enormous wades through the swell: a hunched,
+      // long-armed figure about 400 m tall, thigh-deep, lumbering slowly
+      // back and forth a kilometre off. Almost black, so it's a shape
+      // against the clouds, plainest in the lightning, with two pale
+      // pinpoints where its eyes should be.
+      const GS = 40; // about 400 m tall, thigh-deep in the sea
+      const giant = (() => {
+        const mat = new THREE.MeshBasicMaterial({ color: 0x050607, fog: false });
+        const limb = (w, h, d, y) => {
+          const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+          m.position.y = y;
+          return m;
+        };
+        // Built about 10 units tall, scaled up.
+        const root = new THREE.Group();
+        const hips = new THREE.Group();
+        hips.position.y = 1.2;
+        root.add(hips);
+        hips.add(limb(2.6, 1.2, 1.6, 0));
+        const torso = new THREE.Group();
+        torso.position.y = 0.4;
+        torso.rotation.x = 0.4; // hunched forward
+        hips.add(torso);
+        torso.add(limb(3.0, 3.6, 1.9, 1.8));
+        const hump = limb(3.6, 1.6, 2.2, 3.3);
+        hump.rotation.x = -0.3;
+        torso.add(hump);
+        const neck = new THREE.Group();
+        neck.position.set(0, 3.7, 0.6);
+        neck.rotation.x = 0.35;
+        torso.add(neck);
+        const head = limb(1.1, 1.3, 1.2, 0.5);
+        head.position.z = 0.4;
+        neck.add(head);
+        for (const s of [-1, 1]) {
+          const eye = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xc8d4e8, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true, opacity: 0.55 }));
+          eye.scale.setScalar(0.32);
+          eye.position.set(s * 0.26, 0.6, 1.05);
+          neck.add(eye);
+        }
+        const arms = [-1, 1].map((s) => {
+          const shoulder = new THREE.Group();
+          shoulder.position.set(s * 1.9, 3.2, 0.2);
+          torso.add(shoulder);
+          const upper = limb(0.8, 3.4, 0.8, -1.7);
+          shoulder.add(upper);
+          const elbow = new THREE.Group();
+          elbow.position.y = -3.4;
+          shoulder.add(elbow);
+          elbow.add(limb(0.7, 3.6, 0.7, -1.8));
+          const hand = limb(1.0, 1.3, 0.6, -4.0);
+          elbow.add(hand);
+          return { shoulder, elbow, s };
+        });
+        const legs = [-1, 1].map((s) => {
+          const hip = new THREE.Group();
+          hip.position.set(s * 0.9, -0.3, 0);
+          hips.add(hip);
+          hip.add(limb(1.1, 3.0, 1.1, -1.5));
+          const knee = new THREE.Group();
+          knee.position.y = -3.0;
+          hip.add(knee);
+          knee.add(limb(1.0, 3.0, 1.0, -1.5));
+          return { hip, knee, s };
+        });
+        root.scale.setScalar(GS);
+        T.add(root);
+        return { root, hips, torso, neck, arms, legs, yaw: 0, lastStep: 0, a: 0, r: 0 };
+      })();
+      const GIANT_A = THREE.MathUtils.degToRad(222); // roughly where you face from the gallery
+      const GIANT_R = 1250;
+      function giantTick(t, dt) {
+        const g = giant;
+        // Wandering back and forth along the horizon at about 1.5 m/s.
+        const a = GIANT_A + 0.3 * Math.sin(t * 0.0035);
+        const r = GIANT_R + 100 * Math.sin(t * 0.006 + 1);
+        const x = Math.cos(a) * r;
+        const z = Math.sin(a) * r;
+        const dx = x - (g.x ?? x);
+        const dz = z - (g.z ?? z);
+        g.x = x;
+        g.z = z;
+        if (!g.started) { g.started = true; const da = 0.3 * 0.0035 * Math.cos(t * 0.0035); g.yaw = Math.atan2(-Math.sin(a) * Math.sign(da || 1), Math.cos(a) * Math.sign(da || 1)); }
+        else if (Math.hypot(dx, dz) > 1e-4) {
+          const want = Math.atan2(dx, dz);
+          g.yaw += wrapPi(want - g.yaw) * Math.min(1, dt * 0.15);
+        }
+        // A slow, heavy stride: nine seconds a cycle.
+        const ph = (t / 9) * TAU;
+        const sn = Math.sin(ph);
+        g.root.position.set(x, SEA + 0.6 * GS + Math.abs(Math.cos(ph)) * 0.25 * GS, z);
+        g.root.rotation.y = g.yaw;
+        g.hips.rotation.z = sn * 0.06;
+        g.torso.rotation.z = -sn * 0.08;
+        g.torso.rotation.x = 0.4 + Math.abs(sn) * 0.06;
+        g.neck.rotation.y = Math.sin(t * 0.05) * 0.5; // looking about
+        g.neck.rotation.x = 0.35 + Math.sin(t * 0.07 + 2) * 0.15;
+        for (const L of g.legs) {
+          L.hip.rotation.x = L.s * sn * 0.4;
+          L.knee.rotation.x = Math.max(0, -L.s * Math.cos(ph)) * 0.6;
+        }
+        for (const A of g.arms) {
+          A.shoulder.rotation.x = -A.s * Math.sin(ph - 0.6) * 0.3 - 0.25;
+          A.shoulder.rotation.z = A.s * 0.12;
+          A.elbow.rotation.x = -0.3 - Math.max(0, A.s * Math.sin(ph - 1.2)) * 0.25;
+        }
+        // Each footfall is heard, late, as far off as it is.
+        const step = Math.floor(ph / Math.PI);
+        if (step !== g.lastStep) {
+          g.lastStep = step;
+          storm.steps.push({ at: t, dist: Math.hypot(x, z) });
+        }
+      }
 
       // ---------- Where you can walk ----------
       // Lines on the floor plan and round blockers, for whichever level
@@ -1712,6 +1827,8 @@
           }
           spray.p.geometry.attributes.position.needsUpdate = true;
 
+          giantTick(t, dt);
+
           // The ship rides the swell and creeps along.
           ship.position.x = -150 + ((t * 1.2) % 600) - 300;
           ship.rotation.z = Math.sin(t * 0.5) * 0.04;
@@ -1807,6 +1924,9 @@
           hornAt += 60 + A.chance() * 50;
         }
       });
+      const stepTone = A.filter("lowpass", 60, 0.9);
+      const stepAmp = A.gain(0);
+      A.hiss().connect(stepTone).connect(stepAmp).connect(A.bus);
       const seen = new Set();
       return {
         update() {
@@ -1830,6 +1950,16 @@
             washAmp.gain.setTargetAtTime(0, at + 0.9, 0.9);
           }
           st.crashes.length = 0;
+          // The giant's footfalls: a deep thud, a few seconds late.
+          for (const f of st.steps) {
+            const at = now + f.dist / 343;
+            stepAmp.gain.setValueAtTime(0.0001, at);
+            stepAmp.gain.linearRampToValueAtTime(0.22, at + 0.08);
+            stepAmp.gain.exponentialRampToValueAtTime(0.0001, at + 1.6);
+            stepTone.frequency.setValueAtTime(60, at);
+            stepTone.frequency.exponentialRampToValueAtTime(30, at + 1.4);
+          }
+          st.steps.length = 0;
           // Thunder, delayed by the distance to the strike.
           for (const s of st.strikes) {
             if (seen.has(s)) continue;

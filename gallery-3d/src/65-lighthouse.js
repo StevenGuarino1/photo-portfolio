@@ -101,7 +101,7 @@
       S.mode = "ground";
       S.changed = true;
       const SEA = -12;
-      R.scene.fog = new THREE.FogExp2(0x10141a, 0.0026);
+      R.scene.fog = new THREE.FogExp2(0x10141a, 0.00075);
       // Everything below is built in the tower's frame and placed here.
       const T = new THREE.Group();
       T.position.set(0, 0, ZC);
@@ -1174,19 +1174,29 @@
       // The sea: big storm swells, foam on their crests and round the rocks.
       const seaUniforms = { uTime: { value: 0 }, uFlash: { value: 0 } };
       const sea = (() => {
-        const n = D < 0.5 ? 120 : 200;
-        const geo = new THREE.PlaneGeometry(1800, 1800, n, n);
+        // Out to SEA_R, just inside the camera's 3 km reach. From the
+        // gallery, 31 m up, the true horizon is about 20 km off, but by
+        // 2.9 km the sea is within a few pixels of it, and the sky's lowest
+        // band carries on in the sea's colour to close the gap.
+        const SEA_R = 2900;
+        const n = D < 0.5 ? 160 : 240;
+        const geo = new THREE.PlaneGeometry(2, 2, n, n);
         geo.rotateX(-Math.PI / 2);
-        // Bunch the vertices toward the middle, where you look most closely,
-        // and lay the texture by position so it doesn't stretch.
+        // Square rings of the grid become circles, bunched toward the
+        // middle where you look most closely; the texture is laid by
+        // position so it doesn't stretch.
         const pos = geo.attributes.position;
         const uv = geo.attributes.uv;
         for (let i = 0; i < pos.count; i++) {
-          const f = (v) => Math.sign(v) * Math.pow(Math.abs(v) / 900, 1.8) * 900;
-          const x = f(pos.getX(i));
-          const z = f(pos.getZ(i));
+          const u = pos.getX(i);
+          const v = pos.getZ(i);
+          const m = Math.max(Math.abs(u), Math.abs(v));
+          const l = Math.hypot(u, v) || 1;
+          const r = SEA_R * Math.pow(m, 2.4);
+          const x = (u / l) * r;
+          const z = (v / l) * r;
           pos.setXYZ(i, x, 0, z);
-          uv.setXY(i, x / 1800 + 0.5, z / 1800 + 0.5);
+          uv.setXY(i, x / (2 * SEA_R) + 0.5, z / (2 * SEA_R) + 0.5);
         }
         // Ripples: a tile of noise turned into a normal map.
         const rippleTex = (() => {
@@ -1223,7 +1233,7 @@
             g.putImageData(img, 0, 0);
           }, { srgb: false });
         })();
-        rippleTex.repeat.set(1800 / 14, 1800 / 14);
+        rippleTex.repeat.set((2 * SEA_R) / 14, (2 * SEA_R) / 14);
         const mat = new THREE.MeshStandardMaterial({ color: 0x0a1418, roughness: 0.22, metalness: 0.15, normalMap: rippleTex, normalScale: new THREE.Vector2(0.7, 0.7) });
         mat.onBeforeCompile = (sh) => {
           sh.uniforms.uTime = seaUniforms.uTime;
@@ -1248,7 +1258,11 @@
                 h += a * (s + 0.25 * (1.0 - c * c) - 0.125);
                 grad += a * k * d * (c + 0.5 * s * c);
               }
-              return h;
+              // Far out the grid is too coarse for the swell, and you
+              // couldn't see it anyway: it flattens to the ripples alone.
+              float far = 1.0 - smoothstep(900.0, 2000.0, length(p));
+              grad *= far;
+              return h * far;
             }
           `;
           sh.vertexShader = waves + sh.vertexShader
@@ -1352,7 +1366,7 @@
       })();
       // The sky: low, heavy cloud, lit up by the lightning.
       const skyGroup = new THREE.Group();
-      const dome = skyDome({ top: 0x07090c, mid: 0x12161c, low: 0x1c2228, sunDir: new THREE.Vector3(0.3, 0.1, 1), glow: [0.1, 0.12, 0.15], tight: 8, spread: 3, glowAmt: [0.05, 0.02] });
+      const dome = skyDome({ top: 0x07090c, mid: 0x12161c, low: 0x10141a, sunDir: new THREE.Vector3(0.3, 0.1, 1), glow: [0.1, 0.12, 0.15], tight: 8, spread: 3, glowAmt: [0.05, 0.02] });
       skyGroup.add(dome);
       const domeBase = { top: dome.material.uniforms.top.value.clone(), mid: dome.material.uniforms.mid.value.clone(), low: dome.material.uniforms.low.value.clone() };
       const cloudTex = canvasTex(512, 512, (g) => {
@@ -1368,9 +1382,9 @@
           for (const dx of [-512, 0, 512]) for (const dy of [-512, 0, 512]) g.fillRect(x - rad + dx, y - rad + dy, rad * 2, rad * 2);
         }
       });
-      cloudTex.repeat.set(3, 3);
+      cloudTex.repeat.set(6, 6);
       const cloudMat = new THREE.MeshBasicMaterial({ map: cloudTex, color: 0x2a3038, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide, fog: false });
-      const clouds = new THREE.Mesh(new THREE.CircleGeometry(1400, 48), cloudMat);
+      const clouds = new THREE.Mesh(new THREE.CircleGeometry(2900, 64), cloudMat);
       clouds.rotation.x = Math.PI / 2;
       clouds.position.y = 160;
       skyGroup.add(clouds);

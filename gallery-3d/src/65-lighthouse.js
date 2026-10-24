@@ -1384,11 +1384,75 @@
         }
       });
       cloudTex.repeat.set(6, 6);
-      const cloudMat = new THREE.MeshBasicMaterial({ map: cloudTex, color: 0x2a3038, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide, fog: false });
-      const clouds = new THREE.Mesh(new THREE.CircleGeometry(2900, 64), cloudMat);
+      // The clouds come in three layers, laid out in the world rather than
+      // riding with you, so they shift against each other as you move and
+      // give the storm its height: a solid overcast high up, a broken
+      // layer below it with gaps you can see the overcast through, and low
+      // scud drifting round the headland, some of it between you and the
+      // thing in the sea and some behind it. Nothing is low enough to cut
+      // through it: its head is about 290 m up.
+      const cloudMat = new THREE.MeshBasicMaterial({ map: cloudTex, color: 0x2a3038, transparent: true, opacity: 0.92, depthWrite: false, side: THREE.DoubleSide, fog: false });
+      const clouds = new THREE.Mesh(new THREE.CircleGeometry(2750, 64), cloudMat);
       clouds.rotation.x = Math.PI / 2;
-      clouds.position.y = 160;
-      skyGroup.add(clouds);
+      clouds.position.y = 950;
+      clouds.renderOrder = -1;
+      T.add(clouds);
+      // The broken layer: lumps of cloud with clear gaps between.
+      const brokenTex = canvasTex(512, 512, (g) => {
+        const r = rng(1322);
+        for (let i = 0; i < 70; i++) {
+          const cx = r() * 512;
+          const cy = r() * 512;
+          const n = 6 + Math.floor(r() * 10);
+          for (let k = 0; k < n; k++) {
+            const x = cx + (r() - 0.5) * 90;
+            const y = cy + (r() - 0.5) * 50;
+            const rad = 14 + r() * 40;
+            const blob = g.createRadialGradient(x, y, 0, x, y, rad);
+            blob.addColorStop(0, `rgba(255, 255, 255, ${0.35 + r() * 0.3})`);
+            blob.addColorStop(1, "rgba(255, 255, 255, 0)");
+            g.fillStyle = blob;
+            for (const dx of [-512, 0, 512]) for (const dy of [-512, 0, 512]) g.fillRect(x - rad + dx, y - rad + dy, rad * 2, rad * 2);
+          }
+        }
+      });
+      brokenTex.repeat.set(5, 5);
+      const brokenMat = new THREE.MeshBasicMaterial({ map: brokenTex, color: 0x1c2026, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide, fog: false });
+      const broken = new THREE.Mesh(new THREE.CircleGeometry(2800, 64), brokenMat);
+      broken.rotation.x = Math.PI / 2;
+      broken.position.y = 560;
+      T.add(broken);
+      // Low scud: soft, ragged billboards circling the headland on the
+      // wind, each at its own height and distance, kept clear of the band
+      // the giant walks in so none of them passes through it.
+      const scudTex = canvasTex(256, 128, (g) => {
+        const r = rng(1323);
+        for (let i = 0; i < 40; i++) {
+          const x = 30 + r() * 196;
+          const y = 50 + r() * 40 - (Math.abs(128 - (30 + r() * 196)) / 128) * 10;
+          const rad = 10 + r() * 30;
+          const blob = g.createRadialGradient(x, y, 0, x, y, rad);
+          blob.addColorStop(0, `rgba(255, 255, 255, ${0.25 + r() * 0.25})`);
+          blob.addColorStop(1, "rgba(255, 255, 255, 0)");
+          g.fillStyle = blob;
+          g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+        }
+      }, { repeat: false });
+      const scudMats = [0x262b32, 0x1e2228, 0x2e333a].map((c) => new THREE.SpriteMaterial({ map: scudTex, color: c, transparent: true, depthWrite: false, fog: false, opacity: 0.75 }));
+      const scud = [];
+      {
+        const r = rng(1324);
+        const N = D < 0.5 ? 30 : 64;
+        for (let i = 0; i < N; i++) {
+          const front = i % 3 !== 0;
+          const rad = front ? 420 + r() * 560 : 1550 + r() * 1000;
+          const sp = new THREE.Sprite(scudMats[i % 3]);
+          const w = (front ? 220 : 420) + r() * (front ? 380 : 600);
+          sp.scale.set(w, w * (0.3 + r() * 0.15), 1);
+          T.add(sp);
+          scud.push({ sp, a: r() * TAU, rad, y: (front ? 140 : 200) + r() * (front ? 200 : 260), w: (0.004 + r() * 0.004) * (900 / rad) });
+        }
+      }
       R.add(skyGroup);
       // Lightning: a jagged bolt somewhere out over the sea, the sky and sea
       // flashing with it, and the thunder after it as far behind as the
@@ -1412,7 +1476,7 @@
         let px = x;
         let pz = z;
         for (let i = 0; i < 60; i++) {
-          const y = 160 - (i / 59) * (160 - SEA);
+          const y = 560 - (i / 59) * (560 - SEA);
           px += (r() - 0.5) * 14;
           pz += (r() - 0.5) * 14;
           pos.setXYZ(i, px, y, pz);
@@ -1786,6 +1850,8 @@
           dome.material.uniforms.mid.value.copy(domeBase.mid).lerp(new THREE.Color(0xa8b8d0), f * 0.8);
           dome.material.uniforms.low.value.copy(domeBase.low).lerp(new THREE.Color(0x8a98a8), f * 0.6);
           cloudMat.color.setHex(0x2a3038).lerp(new THREE.Color(0xb8c4dc), f);
+          brokenMat.color.setHex(0x1c2026).lerp(new THREE.Color(0x9aa6be), f);
+          scudMats.forEach((m, k) => m.color.setHex([0x262b32, 0x1e2228, 0x2e333a][k]).lerp(new THREE.Color(0x8a96aa), f));
 
           // Sea, rain, clouds, glass.
           seaUniforms.uTime.value = t;
@@ -1795,8 +1861,14 @@
           // drum angles 0 and pi.
           rain.material.uniforms.uBeam.value = -drum.rotation.y;
           rain.material.uniforms.uCam.value.set(you.x, camY + 1.62, yz);
-          cloudTex.offset.x = (t * 0.004) % 1;
-          cloudTex.offset.y = (t * 0.0025) % 1;
+          cloudTex.offset.x = (t * 0.0015) % 1;
+          cloudTex.offset.y = (t * 0.001) % 1;
+          brokenTex.offset.x = (t * 0.004) % 1;
+          brokenTex.offset.y = (t * 0.0025) % 1;
+          for (const c of scud) {
+            const a = c.a + t * c.w;
+            c.sp.position.set(Math.cos(a) * c.rad, c.y, Math.sin(a) * c.rad);
+          }
           rainGlassTex.offset.y = (t * 0.12) % 1;
           skyGroup.position.copy(R.camLocal);
 

@@ -9,9 +9,11 @@
   // The train runs along a track that keeps turning: five cars, each
   // straight, laid along a curve whose bend changes as you go, easing from
   // straight into a turn one way, back through straight, into a turn the
-  // other. The middle car is the one you step into and stays square to the
-  // doorway; the others swing out round it, and you ride along with
-  // whichever car you're in.
+  // other. The bends are fixed in the track, not in time: the cars ahead
+  // go into a turn first, and the bend you've just been through stays
+  // behind you and streams away. The middle car is the one you step into
+  // and stays square to the doorway; the others swing out round it, and
+  // you ride along with whichever car you're in.
   const SUBWAY = (() => {
     const CW = 2.9; // car width (z from 0 to CW, car-local)
     const CL = 15; // car length (x from -CL/2 to CL/2)
@@ -19,19 +21,49 @@
     const L = CL + GAP; // from one car's centre to the next
     const N = 5;
     const MID = 2;
-    const S = { k: 0 }; // the track's curvature right now (1 / radius)
-    // The bend between one car and the next, in radians, over time.
-    // Smooth, steady turning: one way, through straight, the other way,
-    // about every 25 seconds, with a smaller wander on top.
+    // The bend between one car and the next, in radians, as the track
+    // passes under you: one way, through straight, the other way, about
+    // every 25 seconds, with a smaller wander on top.
     const bendAt = (t) => 0.1 * Math.sin(t * 0.25) + 0.03 * Math.sin(t * 0.61 + 1);
+    // The speed follows from the tightest curve. The bend never exceeds
+    // 0.1 + 0.03 = 0.13 rad per 15.6 m, a radius of 15.6 / 0.13 = 120 m.
+    // An old elevated line has little or no banking, so all of v²/r is
+    // felt sideways, and 1.0 m/s² is the usual comfort limit for standing
+    // passengers: v = √(1.0 × 120) = 10.95 m/s, about 39 km/h (24.5 mph).
+    // It holds that steadily, so it never takes a curve too fast.
+    const BEND_MAX = 0.13;
+    const A_LAT = 1.0;
+    const SPEED = Math.sqrt(A_LAT * (L / BEND_MAX));
+    // The track's curvature `s` metres along from the middle car's centre,
+    // at time t: the bend that will reach you s / SPEED seconds from now.
+    const kappa = (t, s) => bendAt(t + s / SPEED) / L;
+    // The track's shape right now, worked out every metre from the middle
+    // car's centre out to EXT either way: heading, then position.
+    const EXT = 200;
+    const NS = 2 * EXT + 1;
+    const TX = new Float64Array(NS), TZ = new Float64Array(NS), TA = new Float64Array(NS);
+    const S = { k: 0 }; // the curvature under the middle car (1 / radius)
+    function shape(t) {
+      S.k = kappa(t, 0);
+      for (const dir of [1, -1]) {
+        for (let i = EXT; i !== (dir > 0 ? NS - 1 : 0); i += dir) {
+          const k = kappa(t, i - EXT + dir / 2);
+          const mid = TA[i] + (dir * k) / 2;
+          TA[i + dir] = TA[i] + dir * k;
+          TX[i + dir] = TX[i] + dir * Math.cos(mid);
+          TZ[i + dir] = TZ[i] + dir * Math.sin(mid);
+        }
+      }
+    }
     // A point on the track: `s` metres along from the middle car's centre,
-    // `n` metres to the side (toward the curve's inside when it bends to +z).
+    // `n` metres to the side (+z, which is to the right going forward).
     const track = (s, n) => {
-      const k = S.k;
-      const a = k * s;
-      let x, z;
-      if (Math.abs(k) < 1e-7) { x = s; z = (k * s * s) / 2; }
-      else { x = Math.sin(a) / k; z = (1 - Math.cos(a)) / k; }
+      const f = Math.min(NS - 1.001, Math.max(0, s + EXT));
+      const i = Math.floor(f);
+      const u = f - i;
+      const x = TX[i] + (TX[i + 1] - TX[i]) * u;
+      const z = TZ[i] + (TZ[i + 1] - TZ[i]) * u;
+      const a = TA[i] + (TA[i + 1] - TA[i]) * u;
       return { x: x - Math.sin(a) * n, z: CW / 2 + z + Math.cos(a) * n, yaw: -a };
     };
     // A car's frame: where its centre sits and which way it points.
@@ -52,7 +84,7 @@
       const dz = Z - f.z;
       return { x: dx * c - dz * s, z: dx * s + dz * c + CW / 2 };
     };
-    return { CW, CL, GAP, L, N, MID, S, bendAt, track, frame, toCar, fromCar };
+    return { CW, CL, GAP, L, N, MID, S, SPEED, BEND_MAX, bendAt, shape, track, frame, toCar, fromCar };
   })();
 
   ROOMS.subway = {
@@ -77,8 +109,8 @@
       },
     },
     build(R) {
-      const { CW, CL, L, N, MID, S, bendAt, track, frame, toCar, fromCar } = SUBWAY;
-      S.k = bendAt(performance.now() / 1000) / L;
+      const { CW, CL, L, N, MID, S, SPEED, BEND_MAX, bendAt, shape, track, frame, toCar, fromCar } = SUBWAY;
+      shape(performance.now() / 1000);
       const CH = 2.5; // wall height
       const TOP = CH + 0.12; // the ceiling
       const OFFSETS = Array.from({ length: N }, (_, i) => i - MID);
@@ -717,7 +749,6 @@
       // The viaduct's posts, each with an arm over the track and a lamp,
       // streaming past along the curve; two real lights ride with whichever
       // is nearest, so bands of light sweep through the car.
-      const SPEED = 17;
       const lamps = [];
       const postMat = new THREE.MeshStandardMaterial({ color: 0x2d3034, metalness: 0.6, roughness: 0.6 });
       const lampMat = new THREE.MeshBasicMaterial({ color: 0xffe2b0 });
@@ -766,6 +797,7 @@
       const flash = new THREE.PointLight(0xfff0d0, 0, 14, 1.3);
       tunnel.add(flash);
       const passing = { next: 14, start: -100 };
+      const PASS = 140 / (2 * SPEED); // seconds to pass, both trains at full speed
 
       // ---------- The city ----------
       // Laid out in a straight frame along the middle car (x along the line,
@@ -1246,14 +1278,14 @@
           const dBend = (bend - s.bend) / Math.max(dt, 1e-3);
           s.bend = bend;
           const before = info.here ? riding() : null;
-          S.k = bend / L;
+          shape(performance.now() / 1000);
           layout();
           if (before) {
             const now = toCar(before.o, before.l.x, before.l.z);
             const you = R.player;
             R.nudgePlayer(now.x - you.x, now.z - you.z, frame(before.o).yaw - before.yaw);
           }
-          s.screech = Math.min(1, Math.abs(bend) * 6 + Math.abs(dBend) * 20);
+          s.screech = Math.min(1, Math.max(0, (Math.abs(bend) / BEND_MAX - 0.75) / 0.25));
           // Snapping into a turn gives everyone a shove.
           if (Math.abs(dBend) > 0.05) s.jolt = Math.max(s.jolt, 0.8);
           s.swayV += dBend * dt * 25;
@@ -1271,7 +1303,7 @@
           });
           // Straps swing out toward the outside of the turn.
           for (const st of straps) {
-            st.strap.rotation.x = (-s.sway * 0.35 - bend * 2.5 + Math.sin(t * 3 + st.phase) * 0.03) * st.k * m + s.jolt * 0.25 * Math.sin(t * 20 + st.phase) * m;
+            st.strap.rotation.x = (-s.sway * 0.35 + bend * 2.5 + Math.sin(t * 3 + st.phase) * 0.03) * st.k * m + s.jolt * 0.25 * Math.sin(t * 20 + st.phase) * m;
             st.strap.rotation.z = Math.sin(t * 2.2 + st.phase) * 0.06 * m;
           }
           strapper.fig.root.rotation.z = -s.sway * 0.03 * m;
@@ -1300,8 +1332,8 @@
           }
           if (t > passing.next) { passing.start = t; passing.next = t + 25 + Math.random() * 25; api.passes.forEach((fn) => fn()); }
           const pa = t - passing.start;
-          if (pa < 3) {
-            const centre = 70 - pa * 55;
+          if (pa < PASS) {
+            const centre = 70 - pa * 2 * SPEED;
             layStrip(other, centre);
             flash.position.copy(at(centre, N_OTHER - 1.4, 1.2));
             flash.intensity = 30 * Math.max(0, 1 - Math.abs(centre) / 30);
@@ -1320,41 +1352,61 @@
     },
     sound(A, R, api) {
       const s = api.ride;
-      // A low rumble, the hum of the motors, the wheels clacking over rail
-      // joints, a screech on the curves, and an announcement now and then.
+      const V0 = SUBWAY.SPEED;
+      // A low rumble and the roar of wheels on rail, a soft motor hum, the
+      // wheels clacking over rail joints, a grinding hiss on the tightest
+      // curves, and an announcement now and then. Nothing pure and high:
+      // a steady high tone is what reads as a whine.
       const rumble = A.gain(0.18);
       A.hiss().connect(A.filter("lowpass", 140, 0.7)).connect(rumble).connect(A.bus);
-      const motor = A.gain(0.03);
-      A.osc("sawtooth", 46).connect(A.filter("lowpass", 220)).connect(motor).connect(A.bus);
-      const clackTone = A.filter("bandpass", 1600, 2.5);
+      const roar = A.gain(0.05);
+      A.hiss().connect(A.filter("bandpass", 380, 0.6)).connect(A.filter("lowpass", 900)).connect(roar).connect(A.bus);
+      const motor = A.gain(0.025);
+      A.osc("triangle", 46).connect(A.filter("lowpass", 110)).connect(motor).connect(A.bus);
+      const clackTone = A.filter("bandpass", 1500, 1.6);
       const clackAmp = A.gain(0);
-      A.hiss().connect(clackTone).connect(clackAmp).connect(A.bus);
+      A.hiss().connect(clackTone).connect(A.filter("lowpass", 3000)).connect(clackAmp).connect(A.bus);
       const thump = A.osc("sine", 70);
       const thumpAmp = A.gain(0);
       thump.connect(thumpAmp).connect(A.bus);
+      // The clacks, worked out rather than guessed: jointed rail comes in
+      // 39 ft (11.89 m) lengths, so a joint passes every 11.89 / v seconds.
+      // Each car rides on two trucks 10.5 m apart, each with two axles 2.1 m
+      // apart, and every axle clacks over every joint. Your own car's axles
+      // are loudest; the nearest trucks of the cars either side, 5.1 m past
+      // each end, are softer.
+      const RAIL = 11.89;
+      const PERIOD = RAIL / V0;
+      const axles = [];
+      for (const [truck, gain] of [[5.25, 1], [-5.25, 1], [SUBWAY.L - 5.25, 0.4], [-(SUBWAY.L - 5.25), 0.4]]) {
+        for (const a of [-1.05, 1.05]) axles.push([truck + a, gain]);
+      }
+      const front = Math.max(...axles.map(([x]) => x));
+      // When each axle reaches a joint, after the front one does, folded
+      // into one joint's period; the pattern repeats every period.
+      const beats = axles.map(([x, g]) => [((front - x) / V0) % PERIOD, g]).sort((a, b) => a[0] - b[0]);
       let joint = A.ctx.currentTime + 0.3;
       A.extras.push((until) => {
         joint = Math.max(joint, A.ctx.currentTime);
         while (joint < until) {
-          // Two trucks over each joint: clack-clack ... clack-clack.
-          for (const dt of [0, 0.13, 0.82, 0.95]) {
+          for (const [dt, g] of beats) {
             const t = joint + dt;
+            const v = g * (0.85 + A.chance() * 0.3);
             clackAmp.gain.setValueAtTime(0.0001, t);
-            clackAmp.gain.linearRampToValueAtTime(0.22, t + 0.005);
-            clackAmp.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+            clackAmp.gain.linearRampToValueAtTime(0.2 * v, t + 0.004);
+            clackAmp.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
             thumpAmp.gain.setValueAtTime(0.0001, t);
-            thumpAmp.gain.linearRampToValueAtTime(0.25, t + 0.008);
-            thumpAmp.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+            thumpAmp.gain.linearRampToValueAtTime(0.22 * v, t + 0.008);
+            thumpAmp.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
           }
-          joint += 1.06 + A.chance() * 0.08;
+          joint += PERIOD;
         }
       });
-      const screechTone = A.filter("bandpass", 3600, 18);
-      const screechAmp = A.gain(0);
-      A.hiss().connect(screechTone).connect(screechAmp).connect(A.bus);
-      const squeal = A.osc("sine", 3300);
-      const squealAmp = A.gain(0);
-      squeal.connect(squealAmp).connect(A.bus);
+      // Flange grind: only on the tightest stretch of a curve, a broad,
+      // wandering band of noise rather than a tone.
+      const grindTone = A.filter("bandpass", 2200, 2.5);
+      const grindAmp = A.gain(0);
+      A.hiss().connect(grindTone).connect(A.filter("lowpass", 3500)).connect(grindAmp).connect(A.bus);
 
       // The announcement: a two-note chime, then a muffled voice through a
       // tinny speaker.
@@ -1386,16 +1438,19 @@
       A.hiss().connect(A.filter("bandpass", 500, 0.6)).connect(whoosh).connect(A.bus);
       api.passes.push(() => {
         const now = A.ctx.currentTime;
-        whoosh.gain.setTargetAtTime(0.4, now + 0.6, 0.3);
-        whoosh.gain.setTargetAtTime(0, now + 1.8, 0.4);
+        // Loudest while its 48 m flank is going by, 70 m out at twice our speed.
+        const at = 70 / (2 * V0);
+        const len = 48 / (2 * V0);
+        whoosh.gain.setTargetAtTime(0.4, now + at - len / 2 - 0.3, 0.3);
+        whoosh.gain.setTargetAtTime(0, now + at + len / 2, 0.4);
       });
       return {
         update() {
           const now = A.ctx.currentTime;
-          screechAmp.gain.setTargetAtTime(s.screech * 0.05, now, 0.3);
-          squealAmp.gain.setTargetAtTime(s.screech * 0.012, now, 0.3);
-          squeal.frequency.setTargetAtTime(3100 + Math.sin(now * 3) * 200, now, 0.2);
+          grindAmp.gain.setTargetAtTime(s.screech * 0.03 * (0.7 + 0.3 * Math.sin(now * 1.7)), now, 0.4);
+          grindTone.frequency.setTargetAtTime(2000 + Math.sin(now * 0.9) * 300 + Math.sin(now * 2.3) * 150, now, 0.3);
           rumble.gain.setTargetAtTime(0.16 + Math.abs(s.sway) * 0.08, now, 0.2);
+          roar.gain.setTargetAtTime(0.045 + Math.abs(s.bend) * 0.15, now, 0.4);
         },
       };
     },

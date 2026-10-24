@@ -91,7 +91,8 @@
       },
       get gallery() {
         const phi = LH.PHI_G + 0.3;
-        return lhSpot({ name: "Out on the Gallery", x: Math.cos(phi) * 4.3, z: LH.ZC + Math.sin(phi) * 4.3, yaw: lhYaw(Math.cos(phi) - Math.sin(phi) * 0.9, Math.sin(phi) + Math.cos(phi) * 0.9), pitch: -0.15 }, "top");
+        // At the railing, looking out to sea with the tower at your shoulder.
+        return lhSpot({ name: "Out on the Gallery", x: Math.cos(phi) * 4.05, z: LH.ZC + Math.sin(phi) * 4.05, yaw: lhYaw(Math.cos(phi) - Math.sin(phi) * 0.35, Math.sin(phi) + Math.cos(phi) * 0.35), pitch: -0.2 }, "top");
       },
     },
     build(R) {

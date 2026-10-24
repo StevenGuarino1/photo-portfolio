@@ -11,5 +11,7 @@
     me.pitch = s.pitch;
   }
   enter(regions.lobby, { quiet: true });
+  // You start out on the lighthouse gallery, at the railing in the storm.
+  goTo("lighthouse", "gallery");
   syncMenu();
   renderer.setAnimationLoop(frame);

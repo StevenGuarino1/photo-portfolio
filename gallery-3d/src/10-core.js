@@ -301,7 +301,7 @@
   const SLOTS = [
     { angle: 0, room: "gallery" },
     { angle: 45, room: "overlook" },
-    { angle: 90, room: "pool" },
+    { angle: 90, room: "lighthouse" },
     { angle: 135, room: "drivein" },
     { angle: 180, entrance: true },
     { angle: 225, room: "subway" },

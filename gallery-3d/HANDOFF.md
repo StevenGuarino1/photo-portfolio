@@ -18,13 +18,14 @@ Serve the repo root (`python3 -m http.server 8000`) and open `/crowd-lab/v2/` to
 - **Lobby:** an octagonal lobby with a signed vestibule out to each room:
   - Gallery, with the Globe Room behind it
   - Moor
-  - Pool
+  - Lighthouse (east, where the Pool was; the Pool code is still in `src/60-pool.js`)
   - Hawk Watch
   - Night Train (subway)
   - Nature Train (north-west)
   - Drive-in
 - **How rooms draw:** each room is its own scene, seen only through its doorway (stencil plus per-material clipping planes). Rooms load when you come near.
 - **Night Train:** five cars on a curving track whose bends are fixed in the track and stream past (`bendAt` in `src/80-subway.js`), at a calculated 10.95 m/s, with a grimy, realistic interior and an elevated night city with traffic outside, built in layers for distance.
+- **Lighthouse:** a stone tower in a storm (`src/65-lighthouse.js`): spiral stair up five turns, the keeper's landing, the lamp room with a turning lens, and the gallery outside. The room tracks which level you're on itself, since the floor height alone can't tell turns of a spiral apart.
 - **Nature Train:** five wooden coaches entered from the back (`src/85-naturetrain.js`), plants everywhere, a golden-hour valley outside that stays lined up through the bends.
 
 ## How Steven likes to work

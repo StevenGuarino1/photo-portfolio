@@ -8,7 +8,7 @@ time.sleep(1.5)
 print("audio state:", page.eval("window.__app.audio && window.__app.audio.ctx.state"))
 page.eval("""(() => { const A = window.__app.audio; const an = A.ctx.createAnalyser(); an.fftSize = 2048; A.master.connect(an); window.__an = an; })()""")
 res = {}
-for room, spot in [("lobby", "spawn"), ("gallery", "spawn"), ("gallery", "osprey"), ("gallery", "globes"), ("moor", "spawn"), ("pool", "spawn"), ("pool", "deep"), ("overlook", "spawn"), ("subway", "car"), ("drivein", "spawn"), ("drivein", "front")]:
+for room, spot in [("lobby", "spawn"), ("gallery", "spawn"), ("gallery", "osprey"), ("gallery", "globes"), ("moor", "spawn"), ("lighthouse", "spawn"), ("lighthouse", "gallery"), ("overlook", "spawn"), ("subway", "car"), ("drivein", "spawn"), ("drivein", "front")]:
     page.eval(f"window.__app.goTo('{room}', '{spot}')")
     time.sleep(4)
     rms = page.eval("""new Promise((res) => { const an = window.__an; const buf = new Float32Array(an.fftSize); let sum = 0, n = 0, peak = 0; const iv = setInterval(() => { an.getFloatTimeDomainData(buf); for (const v of buf) { sum += v * v; peak = Math.max(peak, Math.abs(v)); } n += buf.length; }, 40); setTimeout(() => { clearInterval(iv); res([Math.sqrt(sum / n), peak]); }, 5000); })""")

@@ -57,7 +57,7 @@ This is everything relevant from the long Windows session, which built this gall
   - There's a bench at the best view, track lights, and light pools painted on the walls.
   - The Globe Room has a big globe of photos in rings (14 round the middle, then 5 rings each side, never fewer than 4 to a ring) plus small bouncing globes.
 - **Moor:** a lone doorframe in a broken fence; moonlit and dark, with dead trees, mist, fireflies, bats, a shooting star, standing stones with a lantern, and seven night photos floating in the air.
-- **Pool:** a big drained pool (22 × 10 m) lying lengthways toward an eerily distant house with one lit window. A dim blue lamp in the deep end; photos set into the tile. Rain starts after about a minute (or at the deep end) and slowly fills the pool; R or the button drains it. Gate lamp, lounge chair, a pool ring in the deep end, and leaves blowing in gusts.
+- **Pool** (`60-pool.js`; no longer in the lobby, its door went to the Lighthouse, but the code is still there): a big drained pool (22 × 10 m) lying lengthways toward an eerily distant house with one lit window. A dim blue lamp in the deep end; photos set into the tile. Rain starts after about a minute (or at the deep end) and slowly fills the pool; R or the button drains it. Gate lamp, lounge chair, a pool ring in the deep end, and leaves blowing in gusts.
 - **Hawk Watch:** a golden-hour ridge with layered valley ridges and a river. Raptors circle, with an occasional eye-level fly-by. Grass bends in gusts, there's a snapping flag, and bird photos stand on posts and a board.
 - **Night Train** (`80-subway.js`):
   - Five cars on a smoothly curving track: `bendAt(t) = 0.1 sin(0.25t) + 0.03 sin(0.61t+1)`, about 25 seconds per left-right cycle.
@@ -75,6 +75,12 @@ This is everything relevant from the long Windows session, which built this gall
   - Inside: plank floor and jute runner, panelled wainscot, arched board roof with ribs, brass lamps, facing slatted or cane benches, brass luggage racks with trailing vines, ferns and big-leaved plants in terracotta, moss, windows dropped open, a dog. Landscape, Wildlife and Close-Up photos framed in wood in the vestibules.
   - Outside, golden hour. Near things (ballast, sleepers, rails, telegraph poles and sagging wires, trees, grass, deer) are placed along the track so they follow the bends. Further out the land is in world coordinates (forest band, a winding river, hills, snowy mountains, sky and sun) and the train's integrated heading and position carry you through it, so the view swings as it turns.
   - Sound: wind through the windows, leaves, birdsong phrases, a wood pigeon, creaks, clacks timed from the speed.
+- **Lighthouse** (`65-lighthouse.js`; behind the east door, where the Pool was): a stone lighthouse on a headland in a storm at night.
+  - Foot of the tower: whitewashed stone, an easel photo, barrels, an oilskin coat by the door. Stone steps spiral five turns up the wall (3.2 m a turn) round an open well, with an iron-and-brass railing, a rope along the wall, oil lamps, splayed rain-streaked windows, puddles and cobwebs. Photos all the way up: shore at the foot, sea and birds on the stair, night skies at the top (Falling Stars biggest).
+  - At the top: a landing over the well with the keeper writing the log at his desk, a stove; a steep wooden stair up through a hatch to the lamp room: an eight-panel lens (two bullseyes) turning every 12 s on a fluted pedestal, diagonal glazing, a domed roof. A door leads out to the gallery.
+  - Outside: storm swells with streaky foam (a shader on a bunched grid, ripples from a normal map), white water round the rocks, spray bursts, rain that never falls inside the tower, lightning with thunder delayed by distance, two light-shaft beams with spotlights, a ship's lights far out, the keeper's cottage.
+  - Heights: the engine's floor height only depends on where you stand, so the room keeps a state (`LH_STATE`: ground, stair with an unwrapped angle, landing, top) and changes its walls with it. Teleport spots are getters that tell it where you land.
+  - Sound: the storm through a filter that opens as you climb and go outside; wave booms, thunder, drips with a stone echo, the lens clockwork ticking, a distant ship's horn. No steady high tones.
 - **Drive-in:** a giant weathered screen running a slideshow of landscape photos every 12 seconds with flicker and grain. Projector beam with dust and moths, booth and snack bar, a half-lit marquee, speaker poles, fog and fireflies. An old car with two people on the hood.
 
 ## His taste and how to work with him
@@ -97,6 +103,7 @@ This is everything relevant from the long Windows session, which built this gall
 
 ## Ideas not done yet
 - Nature Train: trestle bridges, tunnels, light shafts through the trees.
+- Lighthouse: the Pool needs a new home if he wants it back (a second hall, or another door).
 - Use real CC0 ambient recordings instead of synthesized sound.
 - Captions for photos (each card already has an empty caption field, filled from photos.js).
 - A nightclub room with dancing rigged characters.

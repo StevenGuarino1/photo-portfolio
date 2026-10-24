@@ -8,7 +8,7 @@ sys.path.insert(0, ".")
 from cdp import Page
 
 URL = "http://localhost:8000/crowd-lab/v2/"
-SPOTS = [("lobby", "spawn"), ("gallery", "spawn"), ("gallery", "osprey"), ("gallery", "globes"), ("moor", "spawn"), ("pool", "spawn"), ("overlook", "spawn"), ("subway", "car"), ("drivein", "front")]
+SPOTS = [("lobby", "spawn"), ("gallery", "spawn"), ("gallery", "osprey"), ("gallery", "globes"), ("moor", "spawn"), ("lighthouse", "spawn"), ("lighthouse", "gallery"), ("overlook", "spawn"), ("subway", "car"), ("drivein", "front")]
 out = {}
 for mode in ("desktop", "phone"):
     page = Page(1400, 800)

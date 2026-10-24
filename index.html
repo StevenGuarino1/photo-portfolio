@@ -133,11 +133,11 @@
 
   .gallery-row.is-centered { justify-content: center; }
 
-  /* The tile holds the placeholder color while its photo fades in. */
-  .tile {
-    min-width: 0;
-    background: #1c1c1c;
-  }
+  /* The tile is the photo's fixed spot in the grid; the card inside it is
+     what lifts and tilts on hover, so the hover area never moves. The card
+     holds the placeholder color while its photo fades in. */
+  .tile { min-width: 0; }
+  .card { background: #1c1c1c; }
 
   .gallery img {
     display: block;
@@ -154,60 +154,71 @@
     .gallery img { transition: none; }
   }
 
-  /* ---------- Hover (mouse only) ----------
-     vanilla-tilt (loaded at the end of the page) lifts the photo under the
-     cursor: it tilts toward it and springs up larger. A deep shadow slides
-     with the tilt, as if lit from above, over a tight contact shadow (the
-     offsets come from the tilt's tiltChange events); a fine edge catches
-     the light; and the photo casts a glow of its own colors onto the page. */
+  /* Everything fades: the header and footer as the page opens, each photo as
+     it scrolls into view (layout() adds is-in and staggers a row), and the
+     whole grid out and back when the category changes. */
+  @media (prefers-reduced-motion: no-preference) {
+    .site-header,
+    .site-footer { animation: fade-in 700ms ease both; }
 
-  /* How much a hovered photo enlarges. The tilt setup reads it, and so does
-     layout(), to load thumbnails sharp enough for the enlarged size. */
+    .gallery { transition: opacity 240ms ease; }
+    .gallery.is-leaving { opacity: 0; pointer-events: none; }
+
+    .tile {
+      opacity: 0;
+      transform: translateY(18px);
+      transition:
+        opacity 700ms ease var(--reveal-delay, 0ms),
+        transform 700ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--reveal-delay, 0ms);
+    }
+
+    .tile.is-in {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+  }
+
+  /* ---------- Hover (mouse only) ----------
+     The photo under the cursor lifts off the page: it glides up a little and
+     grows slightly over a deep, soft shadow. Nothing else is drawn on or
+     around it, and it doesn't follow the cursor. */
+
+  /* How much a hovered photo enlarges. layout() reads it too, to load
+     thumbnails sharp enough for the enlarged size. */
   :root { --hover-scale: 1; }
 
   @media (hover: hover) and (pointer: fine) {
-    :root { --hover-scale: 1.18; }
-
     .tile {
-      position: relative; /* holds the glow and the edge */
+      position: relative;
       z-index: 0;
-      transition: box-shadow 300ms ease;
     }
 
-    .tile:hover {
-      z-index: 2;
-      box-shadow:
-        calc(var(--shx, 0) * 1px) calc(var(--shy, 30) * 1px) 60px -12px rgba(0, 0, 0, 0.85),
-        calc(var(--shx, 0) * 0.35px) calc(var(--shy, 30) * 0.35px) 16px -4px rgba(0, 0, 0, 0.6);
+    .tile:hover { z-index: 2; }
+
+    .card { transition: box-shadow 300ms ease; }
+
+    .tile:hover .card { box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.85); }
+  }
+
+  /* The glide itself, skipped for reduced motion (the shadow still shows). */
+  @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+    :root { --hover-scale: 1.06; }
+
+    .card {
+      transition:
+        scale 500ms cubic-bezier(0.22, 1, 0.36, 1),
+        translate 500ms cubic-bezier(0.22, 1, 0.36, 1),
+        box-shadow 300ms ease;
     }
 
-    /* The glow: a blurred copy of the photo spilling out behind it. */
-    .tile::before {
-      content: "";
-      position: absolute;
-      inset: 4%;
-      z-index: -1;
-      background: var(--glow) center / cover;
-      filter: blur(40px) saturate(1.6);
-      opacity: 0;
-      transition: opacity 400ms ease;
-      pointer-events: none;
+    .tile:hover .card {
+      scale: var(--hover-scale);
+      translate: 0 -14px;
     }
-
-    .tile:hover::before { opacity: 0.8; }
-
-    /* The fine edge. */
-    .tile::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
-      opacity: 0;
-      transition: opacity 300ms ease;
-      pointer-events: none;
-    }
-
-    .tile:hover::after { opacity: 1; }
   }
 
   /* ---------- Footer ---------- */
@@ -285,6 +296,7 @@
   #lightbox-img {
     display: block;
     border: 1px solid rgba(255, 255, 255, 0.12);
+    cursor: zoom-out; /* clicking it closes the view */
   }
 
   /* Opening and closing morph the photo between its grid tile and the big
@@ -337,7 +349,16 @@
 
   .lightbox-btn svg { width: 22px; height: 22px; }
 
-  .lightbox-close { top: 14px; right: 14px; }
+  /* Quiet: clicking the photo or the backdrop closes too, so the x is only
+     a hint. */
+  .lightbox-close {
+    top: 14px;
+    right: 14px;
+    background: none;
+    opacity: 0.35;
+  }
+
+  .lightbox-close svg { width: 16px; height: 16px; }
 
   .lightbox-prev,
   .lightbox-next {
@@ -398,13 +419,6 @@
   </div>
 
   <script src="js/photos.js?v=4"></script>
-  <script
-    src="https://cdnjs.cloudflare.com/ajax/libs/vanilla-tilt/1.8.1/vanilla-tilt.min.js"
-    integrity="sha512-wC/cunGGDjXSl9OHUH0RuqSyW4YNLlsPwhcLxwWW1CR4OeC2E1xpcdZz2DeQkEmums41laI+eGMw95IJ15SS3g=="
-    crossorigin="anonymous"
-    referrerpolicy="no-referrer"
-    defer
-  ></script>
   <script>
     // ---------- Gallery ----------
 
@@ -443,7 +457,8 @@
     // full-size files.
     const THUMB_WIDTHS = [480, 800, 1200]; // keep in sync with tools/make_thumbs.py
 
-    // How much a hovered photo enlarges (1 on touch screens); see --hover-scale.
+    // How much a hovered photo enlarges (1 on touch screens and with reduced
+    // motion); see --hover-scale.
     const HOVER_SCALE =
       parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hover-scale")) || 1;
 
@@ -456,10 +471,13 @@
       return sources.join(", ");
     }
 
-    const tileFor = new Map();
+    const tileFor = new Map(); // photo -> its tile, the fixed spot in the grid
+    const thumbFor = new Map(); // photo -> the <img> in it
     orderedPhotos.forEach((photo, index) => {
       const tile = document.createElement("div");
       tile.className = "tile";
+      const card = document.createElement("div"); // what lifts and tilts on hover
+      card.className = "card";
 
       const img = document.createElement("img");
       img.alt = photo.alt || "";
@@ -470,11 +488,7 @@
       }
       img.loading = index < 6 ? "eager" : "lazy";
       img.decoding = "async";
-      img.addEventListener("load", () => {
-        img.classList.add("is-loaded");
-        // The hover glow is a blurred copy of whichever file loaded.
-        tile.style.setProperty("--glow", `url("${img.currentSrc}")`);
-      });
+      img.addEventListener("load", () => img.classList.add("is-loaded"));
       // No thumbnails yet (make_thumbs.py not run): use the full-size files.
       img.addEventListener(
         "error",
@@ -489,21 +503,36 @@
       img.src = photo.file;
       img.addEventListener("click", () => openLightbox(photo));
 
-      tile.appendChild(img);
+      card.appendChild(img);
+      tile.appendChild(card);
       tileFor.set(photo, tile);
+      thumbFor.set(photo, img);
     });
 
     // Row size follows a repeating pattern of photos-per-row, so the page
-    // alternates between bands of three larger frames and bands of four or five
+    // alternates between bands of two large frames and bands of three or four
     // smaller ones. Fitting rows to target heights instead collapses toward a
     // single height, because most of this set shares one aspect ratio.
     function rowPlanFor(width) {
       if (width < 560) return { pattern: [1, 2, 2], maxH: width * 1.2, minH: width * 0.3 };
-      if (width < 860) return { pattern: [2, 3, 3, 4], maxH: width * 0.5, minH: width * 0.15 };
-      return { pattern: [3, 5, 4, 3, 4, 5], maxH: width * 0.32, minH: width * 0.1 };
+      if (width < 860) return { pattern: [1, 2, 2, 3], maxH: width * 0.8, minH: width * 0.2 };
+      return { pattern: [2, 3, 2, 4, 3], maxH: width * 0.5, minH: width * 0.14 };
     }
 
-    function layout(photos) {
+    // Each photo fades and rises in the first time it scrolls into view.
+    const revealer = new IntersectionObserver(
+      (entries) =>
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          entry.target.classList.add("is-in");
+          revealer.unobserve(entry.target);
+        }),
+      { rootMargin: "0px 0px -6% 0px" }
+    );
+
+    // `reveal` replays that fade for a fresh set of photos; a re-layout on
+    // resize leaves the ones already showing alone.
+    function layout(photos, reveal = false) {
       const width = grid.clientWidth;
       if (!width) return;
 
@@ -558,9 +587,16 @@
 
         const row = document.createElement("div");
         row.className = loose && lone ? "gallery-row is-centered" : "gallery-row";
-        rowPhotos.forEach((photo) => {
+        rowPhotos.forEach((photo, column) => {
           const tile = tileFor.get(photo);
           const tileWidth = (loose ? cap : height) * ratioOf(photo);
+          // Photos in a row fade in one after another, left to right.
+          tile.style.setProperty("--reveal-delay", `${column * 70}ms`);
+          if (reveal) {
+            tile.classList.remove("is-in");
+            revealer.unobserve(tile);
+            revealer.observe(tile);
+          }
           if (loose) {
             tile.style.flex = "0 0 auto";
             tile.style.width = `${Math.round(tileWidth)}px`;
@@ -570,7 +606,7 @@
           }
           // Lets the browser pick the smallest thumbnail that stays sharp,
           // including when the photo is enlarged on hover.
-          tile.firstChild.sizes = `${Math.ceil(tileWidth * HOVER_SCALE)}px`;
+          thumbFor.get(photo).sizes = `${Math.ceil(tileWidth * HOVER_SCALE)}px`;
           row.appendChild(tile);
         });
         grid.appendChild(row);
@@ -584,10 +620,22 @@
         .querySelectorAll("#siteNav .nav-link")
         .forEach((el) => el.classList.toggle("is-active", el.dataset.filter === filter));
 
-      visiblePhotos =
-        filter === "all" ? orderedPhotos : mixed(PHOTOS.filter((p) => p.category === filter));
-      layout(visiblePhotos);
+      const swap = () => {
+        visiblePhotos =
+          filter === "all" ? orderedPhotos : mixed(PHOTOS.filter((p) => p.category === filter));
+        layout(visiblePhotos, true);
+        grid.classList.remove("is-leaving");
+      };
+
+      // Fade the current photos out before the new set fades in.
+      clearTimeout(swapTimer);
+      const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (!grid.childElementCount || still) return swap();
+      grid.classList.add("is-leaving");
+      swapTimer = setTimeout(swap, 240);
     }
+
+    let swapTimer;
 
     // The category lives in the URL (#night-sky), so a link can open straight
     // to it and a reload keeps it.
@@ -625,50 +673,6 @@
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => layout(visiblePhotos), 150);
     });
-
-    // ---------- Hover ----------
-
-    // With a mouse, vanilla-tilt tilts the photo under the cursor and lifts
-    // it, and each tilt moves its shadow. It loads deferred, so this runs once
-    // it's there; if the CDN can't be reached (or motion is reduced), photos
-    // still lift on hover, just without tilting.
-    document.addEventListener("DOMContentLoaded", () => {
-      const mouse = matchMedia("(hover: hover) and (pointer: fine)").matches;
-      const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (!window.VanillaTilt || !mouse || reducedMotion) return;
-
-      const tiles = [...tileFor.values()];
-      VanillaTilt.init(tiles, {
-        max: 10,
-        speed: 450,
-        scale: HOVER_SCALE,
-        // A slight overshoot, so the photo springs up off the page.
-        easing: "cubic-bezier(0.34, 1.4, 0.64, 1)",
-        gyroscope: false,
-      });
-
-      tiles.forEach((tile) => tile.addEventListener("tiltChange", moveShadow));
-
-      // vanilla-tilt leaves will-change: transform on every tile it has set
-      // up or touched, keeping each as its own GPU layer. Only the one in
-      // motion needs that, so drop it once a tile has settled.
-      const settle = (tile) => {
-        if (!tile.matches(":hover")) tile.style.willChange = "";
-      };
-      tiles.forEach((tile) => {
-        settle(tile);
-        tile.addEventListener("mouseleave", () => setTimeout(() => settle(tile), 500));
-      });
-    });
-
-    // The side under the cursor rises toward you, so its shadow falls further
-    // out: slide the shadow toward the cursor, and lengthen it as the bottom
-    // rises.
-    function moveShadow(e) {
-      const { percentageX: px, percentageY: py } = e.detail;
-      e.currentTarget.style.setProperty("--shx", ((px - 50) * 0.5).toFixed(1));
-      e.currentTarget.style.setProperty("--shy", (30 + (py - 50) * 0.3).toFixed(1));
-    }
 
     // ---------- Lightbox ----------
 
@@ -717,7 +721,7 @@
 
       // Show the grid's already-loaded copy straight away, then swap in the
       // full-size file once it's decoded, so there's never a blank frame.
-      const thumb = tileFor.get(photo).firstChild;
+      const thumb = thumbFor.get(photo);
       if (thumb.complete && thumb.currentSrc) {
         lightboxImg.removeAttribute("srcset");
         lightboxImg.src = thumb.currentSrc;
@@ -808,7 +812,7 @@
       };
 
       if (canMorph()) {
-        morph(tileFor.get(photo).firstChild, lightboxImg, () => {
+        morph(thumbFor.get(photo), lightboxImg, () => {
           reveal();
           lightbox.classList.add("is-open");
         });
@@ -826,7 +830,7 @@
       if (lightbox.contains(document.activeElement)) document.activeElement.blur();
 
       // Fly back into the tile of whichever photo is showing now.
-      const thumb = tileFor.get(visiblePhotos[current])?.firstChild;
+      const thumb = thumbFor.get(visiblePhotos[current]);
       if (canMorph() && thumb && thumb.isConnected && onScreen(thumb)) {
         morph(lightboxImg, thumb, () => {
           lightbox.classList.remove("is-open");
@@ -861,6 +865,7 @@
     });
 
     closeBtn.addEventListener("click", closeLightbox);
+    lightboxImg.addEventListener("click", closeLightbox);
     prevBtn.addEventListener("click", () => showPhoto(current - 1));
     nextBtn.addEventListener("click", () => showPhoto(current + 1));
 

@@ -1,0 +1,16 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>
+  window.__errors = [];
+  addEventListener("error", (e) => { window.__errors.push(e.message + " @" + e.lineno); });
+  addEventListener("unhandledrejection", (e) => window.__errors.push("REJ " + e.reason));
+  window.__fps = (s) => new Promise((res) => {
+    const times = [];
+    const t0 = performance.now();
+    const f = (now) => { times.push(now); if (now - t0 < s * 1000) requestAnimationFrame(f); else {
+      const gaps = times.slice(1).map((t, i) => t - times[i]).sort((a, b) => a - b);
+      res({ fps: Math.round((times.length - 1) / ((times.at(-1) - times[0]) / 1000)), p95ms: Math.round(gaps[Math.floor(gaps.length * 0.95)] || 0) });
+    } };
+    requestAnimationFrame(f);
+  });
+</script>

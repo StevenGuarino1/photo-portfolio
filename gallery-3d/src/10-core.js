@@ -305,7 +305,7 @@
     { angle: 135, room: "drivein" },
     { angle: 180, entrance: true },
     { angle: 225, room: "subway" },
-    { angle: 270, room: "moor" },
+    { angle: 270, room: "apartments" },
     { angle: 315, room: "nature" },
   ];
 

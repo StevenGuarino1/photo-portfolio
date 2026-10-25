@@ -17,7 +17,7 @@ Serve the repo root (`python3 -m http.server 8000`) and open `/crowd-lab/v2/` to
 ## Layout
 - **Lobby:** an octagonal lobby with a signed vestibule out to each room:
   - Gallery, with the Globe Room behind it
-  - Moor
+  - Apartments (west, where the Moor was; the Moor code is still in `src/50-moor.js`)
   - Lighthouse (east, where the Pool was; the Pool code is still in `src/60-pool.js`)
   - Hawk Watch
   - Night Train (subway)

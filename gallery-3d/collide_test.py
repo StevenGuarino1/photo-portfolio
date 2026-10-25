@@ -12,7 +12,7 @@ from cdp import Page
 URL = "http://localhost:8000/crowd-lab/v2/"
 BOUNDS = {
     "gallery": (-9, 9, 0, 28),
-    "moor": (-48, -8.6, -16, 32),
+    "apartments": (-33.2, 39.2, -0.3, 36.2),
     "lighthouse": (-5.1, 5.1, -0.3, 9.1),
     "overlook": (-11, 11, -0.3, 21),
     "subway": (-23.2, 23.2, -0.3, 2.95),

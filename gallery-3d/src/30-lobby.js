@@ -287,35 +287,6 @@
         for (const k of [-0.6, 0, 0.6]) blockers.push({ x: 0, z: z + k, r: 0.3 });
       }
 
-      // Something waits in the dark at the far end of the hall, whichever
-      // end you're not at: tall, thin, black, long arms, two faint points
-      // for eyes. Walk toward it and it's gone; it only comes back once
-      // you've gone a long way off.
-      const shade = (() => {
-        const m = new THREE.MeshBasicMaterial({ color: 0x030303, transparent: true, opacity: 0, depthWrite: false });
-        const g = new THREE.Group();
-        const add = (geo, x, y, z, rx = 0, rz = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.set(rx, 0, rz); g.add(o); };
-        add(new THREE.CylinderGeometry(0.16, 0.1, 1.2, 6), 0, 1.75, 0, 0.12); // body
-        add(new THREE.CylinderGeometry(0.07, 0.05, 1.3, 5), -0.09, 0.65, 0); // legs
-        add(new THREE.CylinderGeometry(0.07, 0.05, 1.3, 5), 0.09, 0.65, 0);
-        add(new THREE.CylinderGeometry(0.045, 0.03, 1.5, 5), -0.24, 1.55, 0.05, 0.1, -0.12); // arms, to the knees
-        add(new THREE.CylinderGeometry(0.045, 0.03, 1.5, 5), 0.24, 1.55, 0.05, 0.1, 0.12);
-        add(new THREE.SphereGeometry(0.13, 8, 6), 0, 2.48, 0.08); // head, craned forward
-        const eyes = [-1, 1].map((s) => {
-          const e = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xcfd6e0, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
-          e.scale.setScalar(0.09);
-          e.position.set(s * 0.045, 2.5, 0.2);
-          g.add(e);
-          return e;
-        });
-        R.add(g);
-        // A faint glow on the end wall behind it, so it stands out as a
-        // shape against the dark.
-        const glow = new THREE.PointLight(0x9aa0aa, 0, 9, 1.4);
-        R.add(glow);
-        return { g, m, eyes, glow, a: 0, gone: false, end: 1 };
-      })();
-
       // A doorway whose room isn't built yet is closed for the moment.
       const barriers = () => doors.filter((door) => !regions[door.room].loaded).map((door) => {
         const p0 = door.center.clone().addScaledVector(door.tangent, -DOOR_HALF - 0.1);
@@ -330,28 +301,6 @@
         update(t, dt, { cor }) {
           // The lamps follow you down the hall.
           const you = R.player;
-          // The thing in the dark: at the far end from you, against a wall.
-          {
-            const sh = shade;
-            if (sh.gone && Math.abs(you.z - (sh.end > 0 ? LEN : Z0)) > LEN * 0.75) {
-              // Gone a long way off: it's back, at the other end now.
-              sh.gone = false;
-              sh.end = you.z < (LEN + Z0) / 2 ? 1 : -1;
-              sh.g.position.set((Math.random() - 0.5) * 2.4, 0, sh.end > 0 ? LEN - 2.2 : Z0 + 2.4);
-            }
-            if (!sh.placed) { sh.placed = true; sh.g.position.set(0.9, 0, LEN - 2.2); }
-            const d = Math.hypot(you.x - sh.g.position.x, you.z - sh.g.position.z);
-            if (d < 10) sh.gone = true;
-            sh.a += ((sh.gone ? 0 : 1) - sh.a) * Math.min(1, dt * (sh.gone ? 2.5 : 0.4));
-            sh.m.opacity = sh.a * 0.92;
-            sh.eyes.forEach((e) => (e.material.opacity = sh.a * (0.75 + 0.25 * Math.sin(t * 1.3))));
-            const endZ = sh.g.position.z > (LEN + Z0) / 2 ? LEN - 0.4 : Z0 + 0.4;
-            sh.glow.position.set(sh.g.position.x * 0.5, 1.6, endZ);
-            sh.glow.intensity = 11 * sh.a;
-            sh.g.visible = sh.a > 0.01;
-            sh.g.rotation.y = Math.atan2(you.x - sh.g.position.x, you.z - sh.g.position.z);
-            sh.g.rotation.z = Math.sin(t * 0.4) * 0.02;
-          }
           lamps.forEach((l, k) => { l.position.z = clamp(Math.round(you.z / LOBBY.spacing) * LOBBY.spacing + 2 + (k - 1) * LOBBY.spacing, 2, LEN - 2); });
           // Walking down a vestibule, the air takes on the room's colour.
           const target = cor?.room ? fogBase.clone().lerp(new THREE.Color(ROOMS[cor.room].fogColor ?? 0x0a0a0a), smooth(cor.progress, 0, 1) * 0.8) : fogBase;

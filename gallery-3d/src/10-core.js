@@ -223,13 +223,16 @@
     ad: { bg: "#f6f4ee", stripe: "#d6402b", title: "#141414", text: "#5a5a5a" },
     film: { bg: "#100e0b", border: "#c9a463", title: "#f3d79c", text: "#b8a37b" },
     brass: { bg: "#1b1916", border: "#b8955a", title: "#ead9b0", text: "#b9a682" },
-    // The hall: white on matte black, no frame.
-    minimal: { bg: "#0d0d0d", title: "#ededed", text: "#7a7a7a" },
+    // The hall: no panel at all, just the words on the wall. A null bg leaves
+    // the canvas transparent, which labelMesh turns into a see-through plane.
+    minimal: { bg: null, title: "#ededed", text: "#7a7a7a" },
   };
   function drawLabel(g, W, H, lines, style) {
     const S = LABEL_STYLES[style];
-    g.fillStyle = S.bg;
-    g.fillRect(0, 0, W, H);
+    if (S.bg) {
+      g.fillStyle = S.bg;
+      g.fillRect(0, 0, W, H);
+    }
     if (S.grain) {
       const r = rng(lines[0].length * 7);
       for (let i = 0; i < 26; i++) {
@@ -258,7 +261,13 @@
   // A label as a small panel: 32 by 16 cm unless told otherwise.
   function labelMesh(lines, style, width = 0.32) {
     const make = () => canvasTex(640, 320, (g, w, h) => drawLabel(g, w, h, lines, style), { repeat: false });
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(width, width / 2), new THREE.MeshBasicMaterial({ map: make(), toneMapped: false, fog: false }));
+    // A style with no bg leaves everything but the glyphs transparent, so the
+    // plane has to blend rather than read as a panel the colour of the wall.
+    const bare = !LABEL_STYLES[style].bg;
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, width / 2),
+      new THREE.MeshBasicMaterial({ map: make(), toneMapped: false, fog: false, transparent: bare, depthWrite: !bare }),
+    );
     fontsReady.then(() => { m.material.map.dispose(); m.material.map = make(); });
     return m;
   }

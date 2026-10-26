@@ -242,13 +242,20 @@
       };
       const head = [[0.24, 0.26, 0.24, 0, 0, 0, SKIN], [0.27, 0.12, 0.27, 0, 0.12, -0.02, HAIR]];
       const at = (list, dx, dy, dz) => list.map(([w, h, d, x, y, z, c, rx, rz]) => [w, h, d, x + dx, y + dy, z + dz, c, rx, rz]);
-      // Kneeling, bent forward, arms reaching out on the ground.
-      const kneelGeo = figure([
+      // Kneeling in two pieces, so the bow bends at the hips rather than
+      // tipping the whole figure over like a board: the legs and the hands
+      // planted on the ground stay put, and the torso and head swing above
+      // them. The upper half is modelled about the hip, standing upright, so
+      // a pitch on its instance reads straight off as how deep the bow is.
+      const KNEEL_HIP = 0.24;
+      const kneelLowGeo = figure([
         [0.36, 0.2, 0.55, 0, 0.12, -0.1, SKIN],
-        [0.4, 0.55, 0.26, 0, 0.5, 0.05, HIDE, 0.9],
-        ...at(head, 0, 0.62, 0.42),
         [0.1, 0.1, 0.6, -0.18, 0.18, 0.55, SKIN],
         [0.1, 0.1, 0.6, 0.18, 0.18, 0.55, SKIN],
+      ]);
+      const kneelUpGeo = figure([
+        [0.4, 0.56, 0.26, 0, 0.28, 0, HIDE],
+        ...at(head, 0, 0.69, 0),
       ]);
       // Standing, arms raised to the picture.
       const raiseGeo = figure([
@@ -284,13 +291,13 @@
       const crowdMat = new THREE.MeshLambertMaterial({ vertexColors: true });
       const scale = D < 0.5 ? 0.55 : 1;
       const groups = [];
-      const crowdGroup = (geo, list) => {
+      const crowdGroup = (geo, list, { animated = true } = {}) => {
         const mesh = new THREE.InstancedMesh(geo, crowdMat, Math.max(1, list.length));
         mesh.count = list.length;
         mesh.frustumCulled = false;
         list.forEach((p, i) => mesh.setColorAt(i, new THREE.Color().setHSL(0.07, 0.25 + p.c * 0.3, 0.45 + p.c * 0.35)));
         R.add(mesh);
-        groups.push({ mesh, list });
+        if (animated) groups.push({ mesh, list });
         return { mesh, list };
       };
       const r = rng(3301);
@@ -303,7 +310,9 @@
         const spread = 25 + (PZ - z) * 0.45;
         const x = (r() - 0.5) * 2 * spread;
         if (nearFire(x, z)) continue;
-        kneelers.push({ x, z, yaw: toPhoto(x, z) + (r() - 0.5) * 0.3, ph: r() * 6, sp: 0.6 + r() * 0.5, c: r() });
+        // sp is the bow's angular speed: 1.2 to 1.8 is one bow every 3.5 to
+        // 5 seconds, so the crowd is never in step but never dawdles either.
+        kneelers.push({ x, z, yaw: toPhoto(x, z) + (r() - 0.5) * 0.3, ph: r() * 6, sp: 1.2 + r() * 0.6, c: r() });
       }
       // Standing worshippers further back, arms raised.
       const raisers = [];
@@ -327,7 +336,8 @@
         const cz = 40 + r() * 80;
         for (const s of [0, 1]) fighters.push({ cx, cz, s, ph: r() * 6, c: r() });
       }
-      const gK = crowdGroup(kneelGeo, kneelers);
+      const gKLow = crowdGroup(kneelLowGeo, kneelers, { animated: false });
+      const gK = crowdGroup(kneelUpGeo, kneelers);
       const gR = crowdGroup(raiseGeo, raisers);
       const gD = crowdGroup(danceGeo, dancers);
       const gF = crowdGroup(fightGeo, fighters);
@@ -342,6 +352,10 @@
         m4.compose(v.set(x, y, z), q, one.set(s, s, s));
         mesh.setMatrixAt(i, m4);
       };
+      // The kneeling legs and planted hands hold still, so they are placed
+      // once here rather than rewritten every frame with the bowing halves.
+      kneelers.forEach((p, i) => put(gKLow.mesh, i, p.x, FLOOR, p.z, p.yaw));
+      gKLow.mesh.instanceMatrix.needsUpdate = true;
 
       // ---------- Where you can walk ----------
       const walls = [[-5, 0, -0.8, 0], [0.8, 0, 5, 0], [-5, 0, -5, 6], [5, 0, 5, 6], [-5, 5.9, 5, 5.9]];
@@ -401,9 +415,13 @@
             return w > 0 ? Math.exp(-w * w * 1.5) : 0;
           };
           gK.list.forEach((p, i) => {
-            const bow = 0.5 + 0.5 * Math.sin(t * p.sp + p.ph);
-            const up = wave(p.z);
-            put(gK.mesh, i, p.x, FLOOR, p.z, p.yaw, bow * 0.35 - up * 0.6);
+            // Eased, so each bow holds a beat down and up instead of sliding
+            // evenly through both the way a plain sine would.
+            const s = 0.5 + 0.5 * Math.sin(t * p.sp + p.ph);
+            const bow = s * s * (3 - 2 * s);
+            // The roar lifts them off the bow to look, wherever they had got
+            // to in it.
+            put(gK.mesh, i, p.x, FLOOR + KNEEL_HIP, p.z, p.yaw, lerp(0.42 + bow * 0.85, -0.3, wave(p.z)));
           });
           gR.list.forEach((p, i) => {
             const up = wave(p.z);

@@ -18,7 +18,9 @@
   const PERSON = 0.3; // everyone else's
   const DOOR_H = 2.4; // every doorway is 1.6 m wide and 2.4 m tall
   const DOOR_HALF = 0.8;
-  const LOBBY = { apothem: 8, height: 5, corridor: 5, corridorHalf: 1.2, corridorH: 3.1 };
+  // The lobby is a long hall, doors down both sides every SPACING metres;
+  // each opens onto a short vestibule leading to its room.
+  const LOBBY = { half: 4, height: 5, spacing: 7, start: 4, corridor: 5, corridorHalf: 1.2, corridorH: 3.1 };
 
   // ---------- Settings, remembered between visits ----------
 
@@ -296,18 +298,10 @@
   let here = null; // the region you're in
   const doors = []; // the lobby's doorways, one per room
 
-  // Around the octagonal lobby, clockwise from north. The south side is the
-  // way you came in.
-  const SLOTS = [
-    { angle: 0, room: "gallery" },
-    { angle: 45, room: "overlook" },
-    { angle: 90, room: "lighthouse" },
-    { angle: 135, room: "drivein" },
-    { angle: 180, entrance: true },
-    { angle: 225, room: "subway" },
-    { angle: 270, room: "apartments" },
-    { angle: 315, room: "nature" },
-  ];
+  // Down the hall from the entrance, left and right in turn, photo rooms
+  // first.
+  const SLOTS = ["gallery", "gathering", "lighthouse", "overlook", "nature", "subway", "pool", "apartments", "moor", "drivein"].map((room) => ({ room }));
+
 
   const heading = (x, z) => Math.atan2(x, z);
   function makeRegion(id, def, pos, rot) {
@@ -328,12 +322,16 @@
     regions.lobby = makeRegion("lobby", ROOMS.lobby, new THREE.Vector3(), 0);
     regions.lobby.ref = 1;
     let ref = 2;
+    SLOTS.forEach((slot, i) => {
+      const side = i % 2 ? 1 : -1;
+      slot.dir = new THREE.Vector3(side, 0, 0);
+      slot.base = new THREE.Vector3(side * LOBBY.half, 0, LOBBY.start + Math.floor(i / 2) * LOBBY.spacing);
+    });
+    LOBBY.length = LOBBY.start + Math.ceil(SLOTS.length / 2) * LOBBY.spacing;
     for (const slot of SLOTS) {
-      const a = THREE.MathUtils.degToRad(slot.angle);
-      slot.dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
       if (!slot.room || !ROOMS[slot.room]) continue;
       const def = ROOMS[slot.room];
-      const at = slot.dir.clone().multiplyScalar(LOBBY.apothem + LOBBY.corridor);
+      const at = slot.base.clone().addScaledVector(slot.dir, LOBBY.corridor);
       const e = def.entrance;
       const rot = heading(-slot.dir.x, -slot.dir.z) - heading(e.nx, e.nz);
       const c = Math.cos(rot);
@@ -604,10 +602,12 @@
   function corridorInfo() {
     if (here !== regions.lobby) return null;
     for (const slot of SLOTS) {
-      const along = me.x * slot.dir.x + me.z * slot.dir.z;
-      const across = me.x * slot.dir.z - me.z * slot.dir.x;
-      if (along > LOBBY.apothem - 0.4 && Math.abs(across) < LOBBY.corridorHalf + 0.2) {
-        return { slot, room: slot.room, progress: clamp((along - LOBBY.apothem) / LOBBY.corridor, 0, 1) };
+      const dx = me.x - slot.base.x;
+      const dz = me.z - slot.base.z;
+      const along = dx * slot.dir.x + dz * slot.dir.z;
+      const across = dx * slot.dir.z - dz * slot.dir.x;
+      if (along > -0.4 && Math.abs(across) < LOBBY.corridorHalf + 0.2) {
+        return { slot, room: slot.room, progress: clamp(along / LOBBY.corridor, 0, 1) };
       }
     }
     return null;

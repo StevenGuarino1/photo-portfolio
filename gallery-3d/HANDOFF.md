@@ -15,7 +15,7 @@ python3 build.py --test   # also writes ../crowd-lab/v2/ with test hooks (window
 Serve the repo root (`python3 -m http.server 8000`) and open `/crowd-lab/v2/` to test locally. The tests (`ui_test.py`, `collide_test.py`, `perf_after.py`, `sound_test.py`) drive headless Chrome through `cdp.py`.
 
 ## Layout
-- **Lobby:** an octagonal lobby with a signed vestibule out to each room:
+- **Lobby:** a long hall with a signed door and vestibule to each room down both sides (order in `SLOTS`, `10-core.js`):
   - Gallery, with the Globe Room behind it
   - Apartments (west, where the Moor was; the Moor code is still in `src/50-moor.js`)
   - Lighthouse (east, where the Pool was; the Pool code is still in `src/60-pool.js`)

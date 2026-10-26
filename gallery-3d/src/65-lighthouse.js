@@ -1060,9 +1060,10 @@
       // ---------- Photos ----------
       // The shore at the foot, the sea and its birds up the stair, the night
       // sky at the top.
-      const base = ["3", "Cruise-5", "Cruise-10"];
-      const climb = ["DSC05025", "DSC04972", "Cruise-11", "Cruise-12", "Cruise-6", "DSC05238", "DSC05512", "DSC04824", "2", "4", "DSC05429", "4-alt", "5-alt", "2-alt", "DSC06060"];
-      const top = ["DSC06067", "DSC06051", "DSC06058", "DSC06061", "DSC06052"];
+      // (None for now: only rooms whose story is a photo show them.)
+      const base = [];
+      const climb = [];
+      const top = [];
       const hang = (stem, phi, y, long = 0.75, rOff = 0.04) => {
         if (!PHOTO[stem]) return;
         const piece = R.photo(stem, { long, frame: 0x2a2420, border: 0.035, depth: 0.03, label: "card", labelSide: 0, labelWidth: 0.34 });
@@ -1082,10 +1083,6 @@
         const back = box(easel, 0.04, 1.7, 0.04, woodMat, 0, 0.82, 0.35);
         back.rotation.x = -0.25;
         box(easel, 0.8, 0.04, 0.08, woodMat, 0, 0.95, -0.04);
-        const piece = R.photo(base[2], { long: 0.8, frame: 0x2a2420, border: 0.035, depth: 0.03, label: "card", labelSide: 0, labelWidth: 0.34 });
-        piece.position.set(0, 1.28, -0.05);
-        piece.rotation.x = -0.1;
-        easel.add(piece);
         easel.position.set(-0.75, 0, -0.55);
         easel.rotation.y = Math.PI + 0.35;
         T.add(easel);

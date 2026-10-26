@@ -452,29 +452,6 @@
       gate(SX0, SA1, (FLOORS - 1) * H + 0.15);
       gate(SB0, SX1, -H + 1.5 + 9 * 0.15);
 
-      // Photos in some of the open flats nearest the way in, hung on the
-      // wall facing the door, and one on each walkable landing.
-      const stems = ["DSC06067", "4", "Cruise-6", "DSC05995", "DSC04739", "2-alt", "DSC06060", "a2", "5", "DSC05429", "Cruise-12", "DSC04807"];
-      openFlats
-        .slice()
-        .sort((p, q) => p.F - q.F || Math.hypot((p.f.x0 + p.f.x1) / 2, p.f.row.z0) - Math.hypot((q.f.x0 + q.f.x1) / 2, q.f.row.z0))
-        .slice(0, stems.length)
-        .forEach(({ F, f }, i) => {
-          if (!PHOTO[stems[i]]) return;
-          const far = f.row.door === f.row.z0 ? f.row.z1 : f.row.z0;
-          const into = far > f.row.door ? -1 : 1;
-          const piece = R.photo(stems[i], { long: 0.9, frame: 0x2a241e, border: 0.04, depth: 0.03, label: "card", labelSide: 0, labelWidth: 0.34 });
-          piece.position.set(f.x0 + 1.4, F * H + 1.55, far + into * (WT / 2 + 0.02));
-          piece.rotation.y = into > 0 ? 0 : Math.PI;
-          R.add(piece);
-        });
-      for (let F = 0; F < FLOORS; F++) {
-        const st = ["DSC06051", "DSC05238", "Cruise-5", "DSC04824", "1"][F];
-        if (!PHOTO[st]) continue;
-        const piece = R.photo(st, { long: 0.75, frame: 0x2a241e, border: 0.04, depth: 0.03, label: "card", labelSide: 0, labelWidth: 0.3 });
-        piece.position.set(35.6, F * H + 1.5, 10 + WT / 2 + 0.02);
-        R.add(piece);
-      }
 
       for (const g of floors) mergeStatic(g);
       mergeStatic(stairs);

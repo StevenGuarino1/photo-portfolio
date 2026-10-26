@@ -87,6 +87,8 @@ This is everything relevant from the long Windows session, which built this gall
 
 - **Step back from the site** (`95-site.js` plus a block at the end of the root `index.html`; pass 1 done): on the flat site, holding S for 0.65 s (or the "step inside" link in the footer) loads the gallery in an iframe with `?from=site`, sends it a snapshot of the screen (visible photo rects and URLs, header/footer text with fonts), and the gallery paints that onto a window on the lobby's entrance wall. The camera starts exactly where the window fills the screen, the page fades to the iframe, then the camera eases back into the hall. Walk up to the window and press E (or "Back to the site") to glide back in and hand back. Preview artifact with both sites: https://claude.ai/artifact/8XygPFzG71m9A7yMzVKcUA. Pass 2 (not done): fix an ~8 px offset at the hand-off, phone long-press, loading feedback.
 
+- **Photos only where they're the point** (his call): photos stay in the Gallery (Osprey room and Globe Room), the Gathering, the Drive-in screen and the Moor's floating photos. Removed from the lobby, Lighthouse, Hawk Watch, Nature Train, Night Train (adverts only now), Pool and Apartments; their photo code is left in place with empty lists.
+
 ## His taste and how to work with him
 - He's casual and types fast with typos. Change of direction mid-task is normal: fold it in and keep going.
 - He wants things to look good and feel alive; "a sense of distance" and atmosphere matter to him.

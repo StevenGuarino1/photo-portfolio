@@ -679,18 +679,6 @@
         gangways.push({ g, o });
       }
 
-      // Photos: the landscapes, wildlife and close-ups, framed in wood in
-      // the vestibules, filling the coach you come into first.
-      const firstPhotos = ["4", "DSC05752", "Cruise-6", "DSC05851"];
-      const natural = PHOTOS.filter((p) => ["Landscape", "Wildlife", "Close-Up"].includes(p.category)).map((p) => p.stem);
-      const stems = [...firstPhotos.filter((s) => natural.includes(s)), ...natural.filter((s) => !firstPhotos.includes(s))];
-      photoSlots.sort((p, q) => p.o - q.o || (p.small ? 1 : 0) - (q.small ? 1 : 0));
-      photoSlots.slice(0, stems.length).forEach((slot, i) => {
-        const piece = R.photo(stems[i], { long: slot.small ? 0.62 : 1.0, frame: 0x4a2e1a, border: 0.045, depth: 0.03, label: "wood", labelSide: 0, labelWidth: slot.small ? 0.3 : 0.4 });
-        piece.position.set(slot.x, slot.small ? 1.5 : 1.62, slot.z);
-        piece.rotation.y = slot.ry;
-        slot.car.add(piece);
-      });
 
       for (const car of carGroups) mergeStatic(car);
       carGroups[0].add(...lampLights);

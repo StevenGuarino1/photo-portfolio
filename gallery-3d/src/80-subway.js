@@ -625,9 +625,9 @@
       // Photos: every one of them somewhere along the train, in the ad frames
       // above the seats, and a few as posters by the end doors. Spare frames
       // carry the line's own adverts.
-      const posterStems = ["DSC05238", "1", "DSC04734", "DSC05995", "DSC05025", "DSC04824"];
+      const posterStems = [];
       const firstAds = ["DSC05752", "DSC05851", "5-alt", "2-alt", "DSC06067", "Cruise-5", "DSC06051", "DSC06058"];
-      const adStems = [...firstAds, ...PHOTOS.map((p) => p.stem).filter((st) => !firstAds.includes(st) && !posterStems.includes(st))];
+      const adStems = [];
       // Fill the car you arrive in first, then outward.
       adSlots.sort((p, q) => Math.abs(p.o) - Math.abs(q.o) || p.o - q.o);
       const FILLERS = [["Night Line", "Mind the gap between", "the car and the platform"], ["See something?", "Say something.", ""], ["Night Line", "Last train 1:12 am", "Every 20 minutes after midnight"]];

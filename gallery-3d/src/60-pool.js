@@ -312,18 +312,7 @@
 
       // Photos set into the tile like murals, mostly down in the deep end where
       // the light reaches them: [photo, wall, along, centre height, longer edge].
-      const POOL_PHOTOS = [
-        ["DSC04809", "deep", -2.8, -1.5, 1.3],
-        ["3", "deep", 2.8, -1.5, 1.3],
-        ["DSC05512", "far", 5.5, -1.6, 1.2],
-        ["Cruise-12", "far", 8.5, -1.6, 1.2],
-        ["2", "far", 1.5, -1.25, 1.0],
-        ["DSC04972", "near", 5.5, -1.6, 1.2],
-        ["DSC05025", "near", 8.5, -1.6, 1.2],
-        ["Cruise-5", "near", 1.5, -1.25, 1.0],
-        ["Cruise-10", "far", -6, -0.55, 0.6],
-        ["DSC05429", "near", -6, -0.55, 0.6],
-      ];
+      const POOL_PHOTOS = [];
       for (const [stem, wall, along, y, long] of POOL_PHOTOS) {
         const mural = R.photo(stem, { long, frame: 0x1b3a5c, border: 0.06, depth: 0.012, label: "tile", labelSide: long < 0.8 ? 0 : 1, labelWidth: 0.3 });
         if (wall === "deep") { mural.position.set(HL - 0.006, y, along); mural.rotation.y = -Math.PI / 2; }

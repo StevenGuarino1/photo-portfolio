@@ -337,35 +337,6 @@
         R.add(p);
         blockers.push({ x, z, r: 0.18 });
       };
-      {
-        const B = { x: -1.2, z: 16.9 };
-        const y0 = ground(B.x, B.z);
-        const board = new THREE.Group();
-        board.position.set(B.x, y0, B.z);
-        board.rotation.y = Math.PI;
-        board.add(part(new THREE.BoxGeometry(4.6, 1.15, 0.07), 0x6b5440, 0, 1.55, -0.04));
-        for (const x of [-2.1, 2.1]) {
-          const leg = part(new THREE.BoxGeometry(0.13, 2.2, 0.13), 0x4c3a2a, x, 1.0, -0.1);
-          board.add(leg);
-        }
-        ["4", "Cruise-6", "DSC05429"].forEach((stem, i) => {
-          const pic = R.photo(stem, { long: 1.15, frame: 0x2a2018, border: 0.03, depth: 0.03, label: "wood", labelSide: 0, labelWidth: 0.34 });
-          pic.position.set((i - 1) * 1.5, 1.72, 0.02);
-          board.add(pic);
-        });
-        board.traverse((o) => { if (o.isMesh) o.castShadow = Q.shadow > 0; });
-        R.add(board);
-        for (const x of [-2.1, 2.1]) blockers.push({ x: B.x - x, z: B.z, r: 0.2 });
-        blockers.push({ x: B.x, z: B.z, r: 0.25 }, { x: B.x - 1.1, z: B.z, r: 0.2 }, { x: B.x + 1.1, z: B.z, r: 0.2 });
-      }
-      for (const [stem, x, z] of [["Cruise-12", -7.4, 12.6], ["DSC04809", 5.2, 13.2], ["Cruise-11", -4.6, 18.1], ["DSC05238", 7.6, 9.4]]) {
-        const y0 = ground(x, z);
-        post(x, z, 1.6);
-        const pic = R.photo(stem, { long: 1.1, frame: 0x2a2018, border: 0.03, depth: 0.03, label: "wood", labelSide: 0, labelWidth: 0.32 });
-        pic.position.set(x, y0 + 1.95, z - 0.08);
-        pic.rotation.y = facing(x, z);
-        R.add(pic);
-      }
 
       // Raptors: most circling in wide spirals at different heights and
       // distances, a few far off as specks, and now and then one gliding

@@ -178,16 +178,11 @@
       walls.push([-W, Z0, W, Z0]);
       {
         // The way in: a window onto the portfolio site (see 95-site.js),
-        // under the gallery's name, between two featured photos.
+        // under the gallery's name.
         SITE.attach(R, Z0);
         const sign = labelMesh(["Steven Guarino", "Photographs", ""], "brass", 2.4);
         sign.position.set(0, 4.25, Z0 + 0.07);
         R.add(sign);
-        for (const [stem, s] of [["DSC06067", -1], ["Cruise-5", 1]]) {
-          const pic = R.photo(stem, { long: 0.9, label: "card", labelSide: 0 });
-          pic.position.set(s * 3.1, 1.72, Z0 + 0.03);
-          R.add(pic);
-        }
       }
 
       const leaks = [];

@@ -377,7 +377,7 @@
 
   body.lightbox-open { overflow: hidden; }
 
-  /* Holding W steps back into the 3D gallery. */
+  /* Holding S steps back into the 3D gallery. */
   .stepback-tip { margin-top: 6px; color: #6a6a6a; font-size: 0.78rem; }
   .stepback-tip kbd {
     font: inherit; padding: 0 5px; border: 1px solid #3a3a3a; border-radius: 4px; color: #9a9a9a;
@@ -423,7 +423,7 @@
 
   <footer class="site-footer">
     <p>Sony a6700 · Sigma 17-40mm f/1.8 · Sigma 150-600mm DG DN Sports</p>
-    <p class="stepback-tip">Hold <kbd>W</kbd> to step back into the gallery · <button type="button" id="stepInside">or step inside</button></p>
+    <p class="stepback-tip">Hold <kbd>S</kbd> to step back into the gallery · <button type="button" id="stepInside">or step inside</button></p>
   </footer>
   <div class="stepback" id="stepback" hidden>Stepping back…<i></i></div>
 
@@ -935,7 +935,7 @@
     });
 
     // ---------- Step back into the gallery ----------
-    // Hold W and the page pulls back to become a window on the wall of the
+    // Hold S (back, as in the gallery) and the page pulls back to become a window on the wall of the
     // 3D gallery's lobby, and you can walk about. The gallery runs in a
     // frame over the page, loaded the first time; we send it a snapshot of
     // what's on screen so its window shows exactly this, then fade the page
@@ -1041,10 +1041,10 @@
       if (!inGallery) stepbackEl.hidden = true;
     }
     addEventListener("keydown", (e) => {
-      if (e.code !== "KeyW" || e.repeat || hold || inGallery || lightboxOpen || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.code !== "KeyS" || e.repeat || hold || inGallery || lightboxOpen || e.ctrlKey || e.metaKey || e.altKey) return;
       const t0 = performance.now();
       stepbackEl.hidden = false;
-      stepbackEl.firstChild.textContent = "Keep holding W to step back";
+      stepbackEl.firstChild.textContent = "Keep holding S to step back";
       hold = { raf: 0 };
       const tick = (now) => {
         const p = Math.min(1, (now - t0) / HOLD_MS);
@@ -1054,7 +1054,7 @@
       };
       hold.raf = requestAnimationFrame(tick);
     });
-    addEventListener("keyup", (e) => { if (e.code === "KeyW") endHold(); });
+    addEventListener("keyup", (e) => { if (e.code === "KeyS") endHold(); });
     addEventListener("blur", endHold);
     document.getElementById("stepInside").addEventListener("click", openGallery);
     window.__gallery = { snapshot, frame: () => galleryFrame }; // for tests

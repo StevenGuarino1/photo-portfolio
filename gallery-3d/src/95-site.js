@@ -1,6 +1,6 @@
   // ---------- The site's window ----------
   // When the flat portfolio site opens the gallery (it loads this page in
-  // a frame with ?from=site after you hold W), the site becomes a window on
+  // a frame with ?from=site after you hold S), the site becomes a window on
   // the lobby's entrance wall. The camera starts pressed right up against
   // it, so the window fills the screen exactly as the site did; then it
   // eases back into the hall and you can walk about. Walk back up to the

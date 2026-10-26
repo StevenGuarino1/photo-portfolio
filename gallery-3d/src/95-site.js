@@ -12,7 +12,11 @@
   // photo was and its image URL, and each bit of header text with its font
   // and colour. The window's picture is drawn from that.
 
-  const EMBED = new URLSearchParams(location.search).get("from") === "site";
+  // Opened from the site: marked in the address (some hosts drop the
+  // query, so the hash too), or the page around us is the site itself.
+  const EMBED = /from=site/.test(location.search + location.hash) || (() => {
+    try { return parent !== window && !!parent.__gallery; } catch { return false; }
+  })();
   const SITE = (() => {
     const canvas = document.createElement("canvas");
     canvas.width = 1280;

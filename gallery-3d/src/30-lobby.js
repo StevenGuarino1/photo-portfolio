@@ -82,8 +82,10 @@
   }
 
   // ---------- The lobby ----------
-  // A long, wide hall. Doors down both sides, each with the room's name
-  // over it and a short vestibule beyond, whose walls take on the room's
+  // A long, wide hall in matte black: plain dark walls, floor and ceiling,
+  // a thin line of light down the middle of the ceiling. Doors down both
+  // sides, each with the room's name over it in white and a short
+  // vestibule beyond, whose walls take on the room's
   // colour as you go and whose floor catches its light. The way in is at
   // the near end, between two featured photos.
 
@@ -91,7 +93,7 @@
     name: "The Lobby",
     tagline: "Every room starts here",
     color: 0xe7c27d,
-    fogColor: 0x15130f,
+    fogColor: 0x0a0a0a,
     loudness: 1.75,
     ground: "wood",
     spawn: { x: 0, z: 0.6, yaw: Math.PI, pitch: -0.03 },
@@ -100,56 +102,45 @@
       const H = LOBBY.height;
       const LEN = LOBBY.length;
       const Z0 = -1; // the entrance wall
-      R.scene.fog = new THREE.FogExp2(0x15130f, 0.012);
-      const fogBase = new THREE.Color(0x15130f);
+      R.scene.fog = new THREE.FogExp2(0x0a0a0a, 0.012);
+      const fogBase = new THREE.Color(0x0a0a0a);
 
-      R.add(new THREE.HemisphereLight(0xfff1dc, 0x2a2118, 0.9));
-      // Pendant lamps down the middle; real lights on a few.
-      const lampGeo = new THREE.CylinderGeometry(0.35, 0.5, 0.3, 16, 1, true);
-      for (let z = 2; z < LEN; z += LOBBY.spacing) {
-        const shade = new THREE.Mesh(lampGeo, new THREE.MeshStandardMaterial({ color: 0x2a2420, side: THREE.DoubleSide }));
-        shade.position.set(0, H - 1.0, z);
-        R.add(shade);
-        R.add(part(new THREE.CylinderGeometry(0.008, 0.008, 0.85, 4), 0x2a2420, 0, H - 0.43, z));
-        const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffe2b0 }));
-        bulb.position.set(0, H - 1.1, z);
-        R.add(bulb);
-      }
+      R.add(new THREE.HemisphereLight(0xffffff, 0x0a0a0a, 0.35));
+      // A thin strip of light down the middle of the ceiling; real lights
+      // follow you along under it.
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, LEN - Z0 - 2), new THREE.MeshBasicMaterial({ color: 0xf4f4f4, toneMapped: false }));
+      strip.position.set(0, H - 0.01, (LEN + Z0) / 2);
+      R.add(strip);
       const lamps = [0, 1, 2].map((k) => {
-        const l = new THREE.PointLight(0xffd9a6, 14, 16, 1.6);
+        const l = new THREE.PointLight(0xf2f2f2, 10, 14, 1.6);
         l.position.set(0, H - 1.2, 2 + k * LOBBY.spacing * 2);
         R.add(l);
         return l;
       });
 
-      // Floor and ceiling: wide boards, a dark ceiling, a long runner.
-      const boards = boardsTexture(11, [58, 44, 32]);
+      // Floor and ceiling: matte black, the floor with the faintest sheen.
       const floorGeo = new THREE.PlaneGeometry(W * 2, LEN - Z0);
       floorGeo.rotateX(-Math.PI / 2);
-      scaleUV(floorGeo, (W * 2) / 4, (LEN - Z0) / 4);
-      const floorMat = new THREE.MeshStandardMaterial({ map: boards, roughness: 0.7 });
+      const floorMat = new THREE.MeshStandardMaterial({ color: 0x121212, roughness: 0.82 });
       const floor = new THREE.Mesh(floorGeo, floorMat);
       floor.position.set(0, 0, (LEN + Z0) / 2);
       floor.receiveShadow = true;
       const ceilGeo = new THREE.PlaneGeometry(W * 2, LEN - Z0);
       ceilGeo.rotateX(Math.PI / 2);
-      const ceilMat = new THREE.MeshStandardMaterial({ color: 0x221d18, roughness: 1 });
+      const ceilMat = new THREE.MeshStandardMaterial({ color: 0x0b0b0b, roughness: 1 });
       const ceiling = new THREE.Mesh(ceilGeo, ceilMat);
       ceiling.position.set(0, H, (LEN + Z0) / 2);
-      const runner = new THREE.Mesh(new THREE.PlaneGeometry(2.2, LEN - Z0 - 1.5), new THREE.MeshStandardMaterial({ color: 0x5a2622, roughness: 1 }));
-      runner.rotation.x = -Math.PI / 2;
-      runner.position.set(0, 0.004, (LEN + Z0) / 2);
-      R.add(floor, ceiling, runner);
+      R.add(floor, ceiling);
 
       const walls = [];
-      const wallMat = new THREE.MeshStandardMaterial({ color: 0x4a423a, roughness: 0.95 });
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0x171717, roughness: 1 });
       // The two long walls, with a doorway at each slot on that side.
       for (const side of [-1, 1]) {
         const mine = SLOTS.filter((sl) => sl.dir.x === side && ROOMS[sl.room]).map((sl) => sl.base.z).sort((p, q) => p - q);
         let z = Z0;
         const piece = (z0, z1) => {
           if (z1 - z0 < 0.01) return;
-          const w = wallFaces(z1 - z0, H, wallMat, null, 0x1d1915);
+          const w = wallFaces(z1 - z0, H, wallMat, null, null);
           w.position.set(side * W, 0, (z0 + z1) / 2);
           w.rotation.y = -side * Math.PI / 2;
           R.add(w);
@@ -167,12 +158,12 @@
         piece(z, LEN);
       }
       // The far end, and the entrance end.
-      const far = wallFaces(W * 2, H, wallMat, null, 0x1d1915);
+      const far = wallFaces(W * 2, H, wallMat, null, null);
       far.position.set(0, 0, LEN);
       far.rotation.y = Math.PI;
       R.add(far);
       walls.push([-W, LEN, W, LEN]);
-      const near = wallFaces(W * 2, H, wallMat, null, 0x1d1915);
+      const near = wallFaces(W * 2, H, wallMat, null, null);
       near.position.set(0, 0, Z0);
       R.add(near);
       walls.push([-W, Z0, W, Z0]);
@@ -180,29 +171,30 @@
         // The way in: a window onto the portfolio site (see 95-site.js),
         // under the gallery's name.
         SITE.attach(R, Z0);
-        const sign = labelMesh(["Steven Guarino", "Photographs", ""], "brass", 2.4);
+        const sign = labelMesh(["Steven Guarino", "Photographs", ""], "minimal", 2.4);
         sign.position.set(0, 4.25, Z0 + 0.07);
         R.add(sign);
       }
 
       const leaks = [];
-      const lobbyTone = new THREE.Color(0x4a423a);
+      const lobbyTone = new THREE.Color(0x171717);
       for (const slot of SLOTS) {
         const def = ROOMS[slot.room];
         if (!def) continue;
         const d = slot.dir;
         const t = new THREE.Vector3(d.z, 0, -d.x); // across the doorway
         const turn = Math.atan2(d.x, d.z);
-        const frame = doorFrame(0x2b2119);
+        const frame = doorFrame(0x0c0c0c, DOOR_HALF, DOOR_H, 0.2, 0.04);
         frame.position.copy(slot.base);
         frame.rotation.y = turn + Math.PI;
         R.add(frame);
         // The room's name over the door, and a stripe in its colour.
-        const plate = labelMesh([def.name, def.tagline ?? "", ""], "brass", 1.5);
+        const plate = labelMesh([def.name, def.tagline ?? "", ""], "minimal", 1.5);
         plate.position.copy(slot.base).addScaledVector(d, -0.02).setY(DOOR_H + 0.62);
         plate.rotation.y = turn + Math.PI;
         R.add(plate);
         const stripe = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.05), new THREE.MeshBasicMaterial({ color: def.color }));
+        stripe.scale.set(0.25, 0.6, 1);
         stripe.position.copy(slot.base).addScaledVector(d, -0.021).setY(DOOR_H + 0.22);
         stripe.rotation.y = turn + Math.PI;
         R.add(stripe);
@@ -256,7 +248,7 @@
         endFrame.position.set(0, 0, L - 0.05);
         endFrame.rotation.y = Math.PI;
         vestibule.add(endFrame);
-        vestibule.add(part(new THREE.BoxGeometry(0.5, 0.04, 0.5), 0x2a2420, 0, CH - 0.02, 1.6));
+        vestibule.add(part(new THREE.BoxGeometry(0.5, 0.04, 0.5), 0x0c0c0c, 0, CH - 0.02, 1.6));
         const bulb = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.4), new THREE.MeshBasicMaterial({ color: 0xfff0d8 }));
         bulb.rotation.x = Math.PI / 2;
         bulb.position.set(0, CH - 0.045, 1.6);
@@ -289,8 +281,7 @@
       const blockers = [];
       for (let z = 5.5; z < LEN - 3; z += LOBBY.spacing * 2) {
         const bench = new THREE.Group();
-        bench.add(part(new THREE.BoxGeometry(0.45, 0.08, 1.8), 0x6b4f36, 0, 0.44, 0));
-        for (const k of [-0.75, 0.75]) bench.add(part(new THREE.BoxGeometry(0.38, 0.4, 0.07), 0x1d1915, 0, 0.2, k));
+        bench.add(part(new THREE.BoxGeometry(0.45, 0.44, 1.8), 0x0e0e0e, 0, 0.22, 0));
         bench.position.set(0, 0, z);
         R.add(bench);
         for (const k of [-0.6, 0, 0.6]) blockers.push({ x: 0, z: z + k, r: 0.3 });
@@ -312,7 +303,7 @@
           const you = R.player;
           lamps.forEach((l, k) => { l.position.z = clamp(Math.round(you.z / LOBBY.spacing) * LOBBY.spacing + 2 + (k - 1) * LOBBY.spacing, 2, LEN - 2); });
           // Walking down a vestibule, the air takes on the room's colour.
-          const target = cor?.room ? fogBase.clone().lerp(new THREE.Color(ROOMS[cor.room].fogColor ?? 0x15130f), smooth(cor.progress, 0, 1) * 0.8) : fogBase;
+          const target = cor?.room ? fogBase.clone().lerp(new THREE.Color(ROOMS[cor.room].fogColor ?? 0x0a0a0a), smooth(cor.progress, 0, 1) * 0.8) : fogBase;
           R.scene.fog.color.lerp(target, Math.min(1, dt * 3));
           R.scene.fog.density = lerp(R.scene.fog.density, cor?.room ? 0.012 + cor.progress * 0.02 : 0.012, Math.min(1, dt * 3));
           // Each room's light flickers or ripples the way its room does.

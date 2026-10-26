@@ -223,6 +223,8 @@
     ad: { bg: "#f6f4ee", stripe: "#d6402b", title: "#141414", text: "#5a5a5a" },
     film: { bg: "#100e0b", border: "#c9a463", title: "#f3d79c", text: "#b8a37b" },
     brass: { bg: "#1b1916", border: "#b8955a", title: "#ead9b0", text: "#b9a682" },
+    // The hall: white on matte black, no frame.
+    minimal: { bg: "#0d0d0d", title: "#ededed", text: "#7a7a7a" },
   };
   function drawLabel(g, W, H, lines, style) {
     const S = LABEL_STYLES[style];

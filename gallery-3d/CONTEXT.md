@@ -51,7 +51,7 @@ This is everything relevant from the long Windows session, which built this gall
 - **Voices and sound** (`35-voices.js` plus each room's `sound`): everything is synthesized with Web Audio (formant-filter babble, laughs, crickets, wind, owl, pump hum and so on). Each room has its own sound bus that crossfades through the corridors, behind a master limiter. No recordings are used.
 
 ## Rooms
-- **Lobby:** a long, wide hall (it used to be an octagon) with doors down both sides every 7 m, so any number of rooms fit; order is set by `SLOTS` in `10-core.js` (photo rooms first). Each door has its name plate, a short vestibule tinted toward the room's colour, and the room's light leaking out. The way in is at the near end between two featured photos.
+- **Lobby:** a long, wide hall in matte black and minimal (thin ceiling light strip, white-on-black name plates; it used to be an octagon) with doors down both sides every 7 m, so any number of rooms fit; order is set by `SLOTS` in `10-core.js` (photo rooms first). Each door has its name plate, a short vestibule tinted toward the room's colour, and the room's light leaking out. The way in is at the near end between two featured photos.
 - **Gallery** (with the Globe Room behind it):
   - The Osprey has a crowd of 13 around it in an arc that keeps the photo visible. A laughing man in a yellow shirt points at the gull photo.
   - There's a bench at the best view, track lights, and light pools painted on the walls.

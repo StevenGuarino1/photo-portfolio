@@ -44,7 +44,7 @@
       plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, fog: false }));
       R.add(plane);
       bars = [0, 1, 2, 3].map(() => {
-        const b = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x1e1712, roughness: 0.6 }));
+        const b = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x0c0c0c, roughness: 0.9 }));
         R.add(b);
         return b;
       });

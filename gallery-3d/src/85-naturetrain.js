@@ -578,7 +578,9 @@
           wallIn(o, -CL / 2, z, B0, z);
           wallIn(o, -B0, z, CL / 2, z);
           // The aisle edge: you walk the aisle; the bays are for sitting.
-          const ae = side ? CW - SEAT_W - 0.04 : SEAT_W + 0.04;
+          // Set a little into the benches, as you're kept 45 cm from any
+          // wall line and the aisle has to fit you.
+          const ae = side ? CW - 0.9 : 0.9;
           wallIn(o, B0, ae, -B0, ae);
           // The luggage rack: brass rods on wooden brackets, a pot or two
           // with vines spilling down.
@@ -1306,6 +1308,7 @@
         people,
         noShove: true,
         ride: motionState,
+        debug: { track },
         cameraFx() {
           const s = motionState;
           const lean = s.bend * 0.3;

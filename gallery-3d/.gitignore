@@ -1,2 +1,3 @@
-out/
+# out/ is committed: GitHub Pages serves the built gallery straight from the
+# repo, and index.html's step-back iframe loads out/index.html by path.
 __pycache__/

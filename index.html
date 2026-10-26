@@ -376,6 +376,31 @@
   }
 
   body.lightbox-open { overflow: hidden; }
+
+  /* Holding W steps back into the 3D gallery. */
+  .stepback-tip { margin-top: 6px; color: #6a6a6a; font-size: 0.78rem; }
+  .stepback-tip kbd {
+    font: inherit; padding: 0 5px; border: 1px solid #3a3a3a; border-radius: 4px; color: #9a9a9a;
+  }
+  .stepback-tip button {
+    font: inherit; color: #9a9a9a; background: none; border: 0; padding: 0; cursor: pointer;
+    text-decoration: underline; text-underline-offset: 3px;
+  }
+  .stepback {
+    position: fixed; left: 50%; bottom: 28px; z-index: 40; transform: translateX(-50%);
+    padding: 9px 16px 11px; border-radius: 999px; background: rgba(18, 18, 18, 0.86);
+    color: #d8d8d8; font-size: 0.8rem; letter-spacing: 0.02em; pointer-events: none;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  }
+  .stepback i {
+    position: absolute; left: 16px; right: 16px; bottom: 5px; height: 2px; border-radius: 2px;
+    background: #e8e8e8; transform-origin: left; transform: scaleX(var(--p, 0));
+  }
+  .gallery-frame {
+    position: fixed; inset: 0; width: 100%; height: 100%; border: 0; z-index: 60;
+    opacity: 0; pointer-events: none; transition: opacity 0.35s ease; background: #121212;
+  }
+  .gallery-frame.is-on { opacity: 1; pointer-events: auto; }
 </style>
 </head>
 <body>
@@ -398,7 +423,9 @@
 
   <footer class="site-footer">
     <p>Sony a6700 · Sigma 17-40mm f/1.8 · Sigma 150-600mm DG DN Sports</p>
+    <p class="stepback-tip">Hold <kbd>W</kbd> to step back into the gallery · <button type="button" id="stepInside">or step inside</button></p>
   </footer>
+  <div class="stepback" id="stepback" hidden>Stepping back…<i></i></div>
 
   <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer" hidden>
     <button class="lightbox-btn lightbox-close" type="button" aria-label="Close">
@@ -906,6 +933,131 @@
     window.addEventListener("resize", () => {
       if (lightboxOpen) fitLightboxImage(visiblePhotos[current]);
     });
+
+    // ---------- Step back into the gallery ----------
+    // Hold W and the page pulls back to become a window on the wall of the
+    // 3D gallery's lobby, and you can walk about. The gallery runs in a
+    // frame over the page, loaded the first time; we send it a snapshot of
+    // what's on screen so its window shows exactly this, then fade the page
+    // away once the gallery has drawn it. It hands back when you walk up to
+    // the window and press E.
+    const GALLERY_URL = "gallery-3d/out/index.html?from=site";
+    const HOLD_MS = 650;
+    const stepbackEl = document.getElementById("stepback");
+    let galleryFrame = null;
+    let galleryReady = null;
+    let inGallery = false;
+    let hold = null;
+
+    function snapshot() {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const onScreen = (r) => r.bottom > 0 && r.top < vh && r.right > 0 && r.left < vw && r.width > 0;
+      const items = [];
+      for (const img of document.querySelectorAll("#grid img")) {
+        const r = img.getBoundingClientRect();
+        if (!onScreen(r) || img.closest(".tile")?.hidden) continue;
+        items.push({ x: r.left, y: r.top, w: r.width, h: r.height, src: img.currentSrc || img.src });
+      }
+      const texts = [];
+      // Each piece of text: its own words, font and colour, where it sits.
+      const addText = (node, el) => {
+        const text = node.textContent.trim();
+        if (!text) return;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const r = range.getBoundingClientRect();
+        if (!onScreen(r)) return;
+        const cs = getComputedStyle(el);
+        const size = parseFloat(cs.fontSize);
+        texts.push({
+          text, x: r.left, base: r.top + (r.height + size * 0.72) / 2, w: r.width,
+          font: `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`, color: cs.color,
+          under: el.classList.contains("is-active") ? r.bottom + 3 : 0,
+        });
+      };
+      const walk = (el) => {
+        for (const n of el.childNodes) {
+          if (n.nodeType === 3) addText(n, el);
+          else if (n.nodeType === 1 && getComputedStyle(n).display !== "none") walk(n);
+        }
+      };
+      document.querySelectorAll(".site-header, .site-footer").forEach(walk);
+      return { w: vw, h: vh, dpr: window.devicePixelRatio || 1, bg: getComputedStyle(document.body).backgroundColor, items, texts };
+    }
+
+    function openGallery() {
+      if (inGallery) return;
+      inGallery = true;
+      stepbackEl.hidden = false;
+      stepbackEl.firstChild.textContent = "Stepping back…";
+      if (!galleryFrame) {
+        galleryFrame = document.createElement("iframe");
+        galleryFrame.className = "gallery-frame";
+        galleryFrame.title = "3D gallery";
+        galleryFrame.allow = "autoplay; fullscreen";
+        galleryReady = new Promise((res) => {
+          addEventListener("message", function ready(e) {
+            if (e.source === galleryFrame.contentWindow && e.data?.type === "gallery:ready") {
+              removeEventListener("message", ready);
+              res();
+            }
+          });
+        });
+        galleryFrame.src = GALLERY_URL;
+        document.body.appendChild(galleryFrame);
+      }
+      const snap = snapshot();
+      galleryReady.then(() => galleryFrame.contentWindow.postMessage({ type: "gallery:enter", snap }, "*"));
+    }
+
+    addEventListener("message", (e) => {
+      if (!galleryFrame || e.source !== galleryFrame.contentWindow) return;
+      const type = e.data?.type;
+      if (type === "gallery:shown") {
+        // The gallery is showing this page in its window, so trade places,
+        // then let it pull back.
+        galleryFrame.classList.add("is-on");
+        stepbackEl.hidden = true;
+        setTimeout(() => {
+          galleryFrame.focus();
+          galleryFrame.contentWindow.focus();
+          galleryFrame.contentWindow.postMessage({ type: "gallery:go" }, "*");
+        }, 380);
+      } else if (type === "gallery:return") {
+        galleryFrame.classList.remove("is-on");
+        setTimeout(() => {
+          galleryFrame.contentWindow.postMessage({ type: "gallery:pause" }, "*");
+          inGallery = false;
+          window.focus();
+        }, 380);
+      }
+    });
+
+    function endHold() {
+      if (!hold) return;
+      cancelAnimationFrame(hold.raf);
+      hold = null;
+      if (!inGallery) stepbackEl.hidden = true;
+    }
+    addEventListener("keydown", (e) => {
+      if (e.code !== "KeyW" || e.repeat || hold || inGallery || lightboxOpen || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t0 = performance.now();
+      stepbackEl.hidden = false;
+      stepbackEl.firstChild.textContent = "Keep holding W to step back";
+      hold = { raf: 0 };
+      const tick = (now) => {
+        const p = Math.min(1, (now - t0) / HOLD_MS);
+        stepbackEl.style.setProperty("--p", p);
+        if (p >= 1) { hold = null; openGallery(); return; }
+        hold.raf = requestAnimationFrame(tick);
+      };
+      hold.raf = requestAnimationFrame(tick);
+    });
+    addEventListener("keyup", (e) => { if (e.code === "KeyW") endHold(); });
+    addEventListener("blur", endHold);
+    document.getElementById("stepInside").addEventListener("click", openGallery);
+    window.__gallery = { snapshot, frame: () => galleryFrame }; // for tests
 
   </script>
 </body>

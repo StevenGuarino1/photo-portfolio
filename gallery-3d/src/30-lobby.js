@@ -177,22 +177,15 @@
       R.add(near);
       walls.push([-W, Z0, W, Z0]);
       {
-        // The way in: tall double doors, closed, under the gallery's name.
-        const doorsGroup = new THREE.Group();
-        doorsGroup.add(doorFrame(0x2b2119, 1.3, 3.0, 0.25, 0.14));
-        for (const s of [-1, 1]) {
-          const leaf = part(new THREE.BoxGeometry(1.28, 2.98, 0.08), 0x3a2b1f, s * 0.65, 1.49, 0);
-          leaf.add(part(new THREE.BoxGeometry(0.05, 0.4, 0.05), 0xb8955a, -s * 0.5, 0, 0.07));
-          doorsGroup.add(leaf);
-        }
+        // The way in: a window onto the portfolio site (see 95-site.js),
+        // under the gallery's name, between two featured photos.
+        SITE.attach(R, Z0);
         const sign = labelMesh(["Steven Guarino", "Photographs", ""], "brass", 2.4);
-        sign.position.set(0, 3.75, 0.02);
-        doorsGroup.add(sign);
-        doorsGroup.position.set(0, 0, Z0 + 0.05);
-        R.add(doorsGroup);
+        sign.position.set(0, 4.25, Z0 + 0.07);
+        R.add(sign);
         for (const [stem, s] of [["DSC06067", -1], ["Cruise-5", 1]]) {
-          const pic = R.photo(stem, { long: 1.15, label: "card", labelSide: 0 });
-          pic.position.set(s * 2.4, 1.72, Z0 + 0.03);
+          const pic = R.photo(stem, { long: 0.9, label: "card", labelSide: 0 });
+          pic.position.set(s * 3.1, 1.72, Z0 + 0.03);
           R.add(pic);
         }
       }

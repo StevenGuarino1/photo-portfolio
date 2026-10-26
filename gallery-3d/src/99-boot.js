@@ -11,7 +11,16 @@
     me.pitch = s.pitch;
   }
   enter(regions.lobby, { quiet: true });
-  // You start out on the lighthouse gallery, at the railing in the storm.
-  goTo("lighthouse", "gallery");
-  syncMenu();
-  renderer.setAnimationLoop(frame);
+  if (EMBED) {
+    // Opened from the site: no title screen; wait in the lobby, facing the
+    // window, until the site hands over (95-site.js).
+    titleEl.hidden = true;
+    syncMenu();
+    renderer.setAnimationLoop(frame);
+    parent.postMessage({ type: "gallery:ready" }, "*");
+  } else {
+    // You start out on the lighthouse gallery, at the railing in the storm.
+    goTo("lighthouse", "gallery");
+    syncMenu();
+    renderer.setAnimationLoop(frame);
+  }

@@ -167,14 +167,8 @@
       near.position.set(0, 0, Z0);
       R.add(near);
       walls.push([-W, Z0, W, Z0]);
-      {
-        // The way in: a window onto the portfolio site (see 95-site.js),
-        // under the gallery's name.
-        SITE.attach(R, Z0);
-        const sign = labelMesh(["Steven Guarino", "Photographs", ""], "minimal", 2.4);
-        sign.position.set(0, 4.25, Z0 + 0.07);
-        R.add(sign);
-      }
+      // The way in: a window onto the portfolio site (see 95-site.js).
+      SITE.attach(R, Z0);
 
       const leaks = [];
       const lobbyTone = new THREE.Color(0x171717);
@@ -189,7 +183,7 @@
         frame.rotation.y = turn + Math.PI;
         R.add(frame);
         // The room's name over the door, and a stripe in its colour.
-        const plate = labelMesh([def.name, def.tagline ?? "", ""], "minimal", 1.5);
+        const plate = labelMesh([def.name], "minimal", 1.5);
         plate.position.copy(slot.base).addScaledVector(d, -0.02).setY(DOOR_H + 0.62);
         plate.rotation.y = turn + Math.PI;
         R.add(plate);

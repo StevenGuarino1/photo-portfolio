@@ -10976,7 +10976,7 @@
       function drawTrees() {
         for (let i = 0; i < NT; i++) {
           const tr = trees[i];
-          if (!tr.on) {
+          if (!tr.on || underHill(tr.s, tr.n)) {
             trunks.setMatrixAt(i, zero);
             for (let k = 0; k < 3; k++) { cones.setMatrixAt(i * 3 + k, zero); blobs.setMatrixAt(i * 3 + k, zero); }
             continue;
@@ -11021,6 +11021,7 @@
       function drawGrowth() {
         for (let i = 0; i < NU; i++) {
           const g = growth[i];
+          if (underHill(g.s, g.n)) { tufts.setMatrixAt(i, zero); continue; }
           const p = track(g.s, g.n);
           // On the bank, it sits on the slope down from the ballast.
           const y = g.bank ? -1.0 + (GROUND + 0.02 + 1.0) * ((Math.abs(g.n) - 2.1) / 3.4) : 0;
@@ -11050,6 +11051,7 @@
       function drawPoles() {
         poles.sort((a, b) => a.s - b.s);
         poles.forEach((pl, i) => {
+          if (underHill(pl.s, poleN)) { poleMesh.setMatrixAt(i, zero); armMesh.setMatrixAt(i, zero); return; }
           const p = track(pl.s, poleN);
           m4.makeRotationY(p.yaw).scale(new THREE.Vector3(1, POLE_H, 1)).setPosition(p.x, GROUND, p.z);
           poleMesh.setMatrixAt(i, m4);
@@ -11061,6 +11063,12 @@
         for (let i = 0; i < NP - 1; i++) {
           const a = poles[i].s;
           const b = poles[i + 1].s;
+          // No wires through the hill.
+          if (underHill(a, poleN) || underHill(b, poleN)) {
+            wirePos.fill(0, k, k + WIRES.length * SAGSEG * 6);
+            k += WIRES.length * SAGSEG * 6;
+            continue;
+          }
           for (const w of WIRES) {
             for (let j = 0; j < SAGSEG; j++) {
               for (const jj of [j, j + 1]) {
@@ -11104,6 +11112,224 @@
         d.yaw = pick() * 6;
       }
       deer.forEach((d, i) => { seedDeer(d, 40 + i * 6); d.n = (i % 2 ? 1 : -1) * (30 + i * 6); });
+
+      // ---------- A tunnel ----------
+      // Every minute or two a wooded hill comes up the line and the train
+      // runs through it: a stone portal, a long tube of sooty blocks with a
+      // lamp every 22 m, and out the far end. Like everything close by it's
+      // laid along the track, so it bends with it. Inside, the sun is gone
+      // and the coach lamps carry the light, the tunnel lamps sweep bands of
+      // it through the coach, and the wheels get loud.
+      const TUN = { s: 380, len: 130, on: false, fade: 0 };
+      const EXT_NEAR = 250; // how far ahead it can be laid along the track
+      const HILL_W = 55; // half its width across the line
+      const HILL_H = 18; // its height over the line
+      const hillAt = (sl, n) => {
+        const a = Math.abs(n) / HILL_W;
+        if (a >= 1) return 0;
+        return HILL_H * Math.pow(1 - a * a, 0.8) * (0.85 + 0.15 * Math.sin(sl * 0.06 + n * 0.11)) + 1.6 * Math.sin(n * 0.37 + sl * 0.13) * (1 - a);
+      };
+      // Trees, poles and the rest have no business inside the hill.
+      const underHill = (s, n) => TUN.on && s > TUN.s - 1 && s < TUN.s + TUN.len + 1 && Math.abs(n) < HILL_W * 0.9;
+      const stoneTex = canvasTex(256, 256, (g) => {
+        const r = rng(951);
+        g.fillStyle = "#4a443c";
+        g.fillRect(0, 0, 256, 256);
+        for (let row = 0; row < 8; row++) {
+          for (let k = 0; k < 4; k++) {
+            const v = r() * 22 - 11;
+            g.fillStyle = `rgb(${84 + v}, ${76 + v}, ${66 + v})`;
+            g.fillRect(k * 64 + (row % 2) * 32 + 2, row * 32 + 2, 60, 28);
+          }
+        }
+        for (let i = 0; i < 40; i++) {
+          g.fillStyle = `rgba(20, 16, 12, ${0.15 + r() * 0.25})`;
+          g.fillRect(r() * 256, r() * 256, 10 + r() * 60, 4 + r() * 30);
+        }
+      });
+      const stoneMat = new THREE.MeshLambertMaterial({ map: stoneTex, flatShading: true, side: THREE.DoubleSide });
+      // A grid laid along the track every frame: `rows` sections along it,
+      // each through the points of a cross-section.
+      const tunnelGroup = new THREE.Group();
+      tunnelGroup.visible = false;
+      near.add(tunnelGroup);
+      function sweep(rows, cols, material, { colors = null, uv = null } = {}) {
+        const n = rows * cols;
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+        geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(n * 3).fill(0).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
+        if (colors) geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+        if (uv) geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+        const idx = [];
+        for (let r = 0; r < rows - 1; r++) {
+          for (let c = 0; c < cols - 1; c++) {
+            const a = r * cols + c;
+            idx.push(a, a + cols, a + 1, a + 1, a + cols, a + cols + 1);
+          }
+        }
+        geo.setIndex(idx);
+        const mesh = new THREE.Mesh(geo, material);
+        mesh.frustumCulled = false;
+        mesh.receiveShadow = true;
+        tunnelGroup.add(mesh);
+        return mesh;
+      }
+      // The tube: walls, then a flattened arch.
+      const SECTION = [[-2.5, -1.0], [-2.5, 3.0], [-1.9, 4.3], [-0.8, 4.9], [0.8, 4.9], [1.9, 4.3], [2.5, 3.0], [2.5, -1.0]];
+      const TROWS = 34;
+      const tubeUV = new Float32Array(TROWS * SECTION.length * 2);
+      {
+        let k = 0;
+        for (let r = 0; r < TROWS; r++) {
+          let around = 0;
+          SECTION.forEach(([n, y], c) => {
+            if (c) around += Math.hypot(n - SECTION[c - 1][0], y - SECTION[c - 1][1]);
+            tubeUV[k++] = (r / (TROWS - 1)) * TUN.len / 4;
+            tubeUV[k++] = around / 4;
+          });
+        }
+      }
+      const tube = sweep(TROWS, SECTION.length, stoneMat, { uv: tubeUV });
+      // The hill over it: grass on top, rock where it's steep.
+      const HROWS = 28;
+      const HCOLS = 17;
+      const hillH = new Float32Array(HROWS * HCOLS);
+      const hillCols = new Float32Array(HROWS * HCOLS * 3);
+      {
+        const grass = new THREE.Color(0x5f7a34);
+        const dark = new THREE.Color(0x40552a);
+        const rock = new THREE.Color(0x77705f);
+        const c = new THREE.Color();
+        const r = rng(952);
+        for (let i = 0; i < HROWS; i++) {
+          for (let j = 0; j < HCOLS; j++) {
+            const sl = (i / (HROWS - 1)) * TUN.len;
+            const n = -HILL_W + (j / (HCOLS - 1)) * HILL_W * 2;
+            const h = hillAt(sl, n);
+            hillH[i * HCOLS + j] = h;
+            const steep = THREE.MathUtils.smoothstep(Math.abs(n) / HILL_W, 0.55, 0.95);
+            c.copy(grass).lerp(dark, r() * 0.6).lerp(rock, steep * 0.6 + (i === 0 || i === HROWS - 1 ? 0.35 : 0));
+            c.toArray(hillCols, (i * HCOLS + j) * 3);
+          }
+        }
+      }
+      const hill = sweep(HROWS, HCOLS, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide }), { colors: hillCols });
+      // The portals: the hill cut off square at each end, a stone face with
+      // an arched opening for the line.
+      function portalFace(sl) {
+        const shape = new THREE.Shape();
+        shape.moveTo(-HILL_W, GROUND);
+        for (let j = 0; j <= 24; j++) {
+          const n = -HILL_W + (j / 24) * HILL_W * 2;
+          shape.lineTo(n, GROUND + hillAt(sl, n));
+        }
+        shape.lineTo(HILL_W, GROUND);
+        shape.closePath();
+        const hole = new THREE.Path();
+        hole.moveTo(-2.5, -1.0);
+        hole.lineTo(-2.5, 3.0);
+        hole.absellipse(0, 3.0, 2.5, 1.9, Math.PI, 0, true);
+        hole.lineTo(2.5, -1.0);
+        hole.closePath();
+        shape.holes.push(hole);
+        const geo = new THREE.ShapeGeometry(shape, 6);
+        scaleUV(geo, 1 / 4, 1 / 4);
+        geo.rotateY(-Math.PI / 2);
+        const face = new THREE.Mesh(geo, stoneMat);
+        face.frustumCulled = false;
+        tunnelGroup.add(face);
+        return face;
+      }
+      const faces = [portalFace(0), portalFace(TUN.len)];
+      // A stone rim round each opening.
+      const rimMat = new THREE.MeshLambertMaterial({ color: 0x8a8274, flatShading: true });
+      const rims = [0, 1].map(() => {
+        const g = new THREE.Group();
+        for (const s of [-1, 1]) {
+          const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4.2, 0.7), rimMat);
+          post.position.set(0, 0.95, s * 2.75);
+          g.add(post);
+        }
+        const arch = new THREE.Mesh(new THREE.TorusGeometry(2.75, 0.32, 5, 14, Math.PI), rimMat);
+        arch.rotation.y = Math.PI / 2;
+        arch.position.y = 3.0;
+        arch.scale.set(1, 0.72, 1);
+        g.add(arch);
+        tunnelGroup.add(g);
+        return g;
+      });
+      // Lamps down the tube, and one real light that rides with whichever
+      // is passing the coach you're in.
+      const tunnelLampMat = new THREE.MeshBasicMaterial({ color: 0xffd08a });
+      const tunnelLamps = Array.from({ length: Math.floor(TUN.len / 22) }, (_, i) => {
+        const g = new THREE.Group();
+        g.add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.14, 0.1), tunnelLampMat));
+        const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffb860, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+        glow.scale.set(1.6, 1.1, 1);
+        g.add(glow);
+        tunnelGroup.add(g);
+        return { g, sl: 11 + i * 22, n: i % 2 ? 2.38 : -2.38 };
+      });
+      const tunnelLight = new THREE.PointLight(0xffc070, 0, 9, 1.4);
+      R.add(tunnelLight);
+
+      function layTunnel(scale) {
+        const pos = tube.geometry.attributes.position;
+        for (let r = 0; r < TROWS; r++) {
+          const s = TUN.s + (r / (TROWS - 1)) * TUN.len;
+          SECTION.forEach(([n, y], c) => {
+            const p = track(s, n);
+            pos.setXYZ(r * SECTION.length + c, p.x, y, p.z);
+          });
+        }
+        pos.needsUpdate = true;
+        const hp = hill.geometry.attributes.position;
+        for (let i = 0; i < HROWS; i++) {
+          const sl = (i / (HROWS - 1)) * TUN.len;
+          for (let j = 0; j < HCOLS; j++) {
+            const n = -HILL_W + (j / (HCOLS - 1)) * HILL_W * 2;
+            const p = track(TUN.s + sl, n);
+            hp.setXYZ(i * HCOLS + j, p.x, GROUND + hillH[i * HCOLS + j] * scale, p.z);
+          }
+        }
+        hp.needsUpdate = true;
+        [0, TUN.len].forEach((sl, k) => {
+          const p = track(TUN.s + sl, 0);
+          faces[k].position.set(p.x, 0, p.z);
+          faces[k].rotation.y = p.yaw;
+          faces[k].scale.y = scale;
+          faces[k].position.y = GROUND * (1 - scale);
+          rims[k].position.set(p.x, 0, p.z);
+          rims[k].rotation.y = p.yaw;
+          rims[k].visible = scale > 0.99;
+        });
+        for (const L of tunnelLamps) {
+          const p = track(TUN.s + L.sl, L.n);
+          L.g.position.set(p.x, 2.7, p.z);
+          L.g.rotation.y = p.yaw;
+        }
+      }
+      // Where along the line the coach you're in is (0 is the one you came
+      // in by), and how far into the tunnel that puts you.
+      function tunnelTick(step, at) {
+        TUN.s -= step;
+        if (TUN.s + TUN.len < S_MIN) {
+          TUN.s += 1100 + pick() * 700;
+          TUN.len = 110 + Math.round(pick() * 50 / 22) * 22;
+        }
+        TUN.on = TUN.s < EXT_NEAR;
+        tunnelGroup.visible = TUN.on;
+        if (TUN.on) layTunnel(THREE.MathUtils.smoothstep(EXT_NEAR - TUN.s, 0, 80));
+        const inside = TUN.on ? THREE.MathUtils.smoothstep(at, TUN.s - 3, TUN.s + 7) * (1 - THREE.MathUtils.smoothstep(at, TUN.s + TUN.len - 7, TUN.s + TUN.len + 3)) : 0;
+        TUN.fade = inside;
+        let best = null;
+        if (inside > 0) for (const L of tunnelLamps) if (!best || Math.abs(TUN.s + L.sl - at) < Math.abs(TUN.s + best.sl - at)) best = L;
+        if (best) {
+          tunnelLight.position.copy(best.g.position);
+          tunnelLight.intensity = 7 * inside * Math.max(0, 1 - Math.abs(TUN.s + best.sl - at) / 12);
+        } else tunnelLight.intensity = 0;
+        return inside;
+      }
 
       // The land further out, laid out in the world. `world` turns with the
       // train's heading about the coach you came in by, `land` carries the
@@ -11383,7 +11609,7 @@
       }
 
       // The ride: a gentle sway, a lean into the bends, the odd bump.
-      const motionState = { bend: 0, sway: 0, swayV: 0, jolt: 0, nextJolt: 3, grind: 0 };
+      const motionState = { bend: 0, sway: 0, swayV: 0, jolt: 0, nextJolt: 3, grind: 0, dark: 0 };
       const sunWorld = new THREE.Vector3();
       const api = {
         floor: () => 0,
@@ -11462,10 +11688,19 @@
             d.s -= step;
             if (d.s < S_MIN) seedDeer(d, d.s + WRAP + 300);
             const p = track(d.s, d.n);
+            d.g.visible = !underHill(d.s, d.n);
             d.g.position.set(p.x, GROUND, p.z);
             d.g.rotation.y = p.yaw + d.yaw;
             d.neck.rotation.z = -0.9 + 0.9 * Math.max(0, Math.sin(t * 0.4 + d.phase)) ** 3;
           }
+          // The tunnel, by where the coach you're in is along the line:
+          // inside, the sun's gone and the coach lamps carry the light.
+          const dark = tunnelTick(step, before ? before.o * L + before.l.x : 0);
+          s.dark = dark;
+          hemi.intensity = 1.0 * (1 - 0.94 * dark);
+          sun.intensity = 2.4 * (1 - dark);
+          R.scene.environmentIntensity = 1 - 0.9 * dark;
+          for (const l of lampLights) l.intensity = 1.6 * (1 + 1.2 * dark);
           // The world: the train's heading by time, its position by
           // integrating speed along that heading.
           const H = heading(now);
@@ -11565,13 +11800,16 @@
       // Birdsong: short phrases of quick chirps from either side, with
       // gaps between; a wood pigeon's soft call now and then.
       const birdOut = A.ctx.createStereoPanner ? A.ctx.createStereoPanner() : A.gain(1);
-      birdOut.connect(A.bus);
+      // Outdoor sounds, silenced in a tunnel.
+      const outdoors = A.gain(1);
+      outdoors.connect(A.bus);
+      birdOut.connect(outdoors);
       const bird = A.osc("sine", 3000);
       const birdAmp = A.gain(0);
       bird.connect(birdAmp).connect(birdOut);
       const dove = A.osc("sine", 520);
       const doveAmp = A.gain(0);
-      dove.connect(A.filter("lowpass", 900)).connect(doveAmp).connect(A.bus);
+      dove.connect(A.filter("lowpass", 900)).connect(doveAmp).connect(outdoors);
       let song = A.ctx.currentTime + 1.5;
       A.extras.push((until) => {
         song = Math.max(song, A.ctx.currentTime);
@@ -11615,11 +11853,13 @@
         update() {
           const now = A.ctx.currentTime;
           const gust = 0.5 + 0.5 * Math.sin(now * 0.31) * Math.sin(now * 0.13 + 1);
-          wind.gain.setTargetAtTime(0.035 + gust * 0.045, now, 0.5);
+          const dark = s.dark;
+          wind.gain.setTargetAtTime((0.035 + gust * 0.045) * (1 - 0.7 * dark), now, 0.3);
           windTone.frequency.setTargetAtTime(500 + gust * 300, now, 0.5);
-          leaves.gain.setTargetAtTime(0.004 + gust * 0.01, now, 0.5);
-          rumble.gain.setTargetAtTime(0.12 + Math.abs(s.sway) * 0.06, now, 0.2);
-          roar.gain.setTargetAtTime(0.03 + Math.abs(s.bend) * 0.12, now, 0.4);
+          leaves.gain.setTargetAtTime((0.004 + gust * 0.01) * (1 - dark), now, 0.3);
+          outdoors.gain.setTargetAtTime(1 - dark, now, 0.3);
+          rumble.gain.setTargetAtTime((0.12 + Math.abs(s.sway) * 0.06) * (1 + 1.3 * dark), now, 0.2);
+          roar.gain.setTargetAtTime((0.03 + Math.abs(s.bend) * 0.12) * (1 + 3 * dark), now, 0.25);
           grindAmp.gain.setTargetAtTime(s.grind * 0.025, now, 0.4);
           grindTone.frequency.setTargetAtTime(1900 + Math.sin(now * 0.9) * 250, now, 0.3);
         },

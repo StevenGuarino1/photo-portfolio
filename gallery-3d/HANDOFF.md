@@ -5,7 +5,8 @@ Steven's 3D walk-through photo gallery: a three.js page built from
 claude.ai artifact. Read this and `CONTEXT.md` before doing anything. Where the
 two disagree, this file is newer.
 
-Last updated at the end of the 2026-10-26 Mac session.
+Last updated at the end of the 2026-10-29 PC session (Windows, worktree
+`photo-portfolio-3d` on branch `gallery-3d`).
 
 ## Start here
 
@@ -81,8 +82,7 @@ matrices — that is precise and needs no frame loop.
 - **Lobby:** a long matte-black hall, a signed door and vestibule to each room
   down both sides (order in `SLOTS`, `10-core.js`):
   Gallery (Globe Room behind it), the Gathering, Lighthouse, Hawk Watch,
-  Nature Train, Night Train, Apartments, Drive-in. The Moor and Pool code is
-  still in `src/50-moor.js` and `src/60-pool.js`.
+  Nature Train, Night Train, Pool, Apartments, Moor, Drive-in, Range.
 - **How rooms draw:** each room is its own scene, seen only through its doorway
   (stencil plus per-material clipping planes). Rooms load when you come near.
 - **Night Train:** five cars on a curving track whose bends are fixed in the
@@ -102,39 +102,70 @@ matrices — that is precise and needs no frame loop.
   a board. Bow sweeps roughly 24° to 73°, one every 3.5–5 s, eased to hold a
   beat at the bottom.
 
-## Changed this session
+## Changed in the 2026-10-29 PC session
 
-- Lobby door plates show **only the room name** — no tagline under it — and the
-  sign that hung over the window onto the site is gone entirely.
-- Those plates have **no panel behind them**. The `minimal` label style now has
-  `bg: null`, which leaves the canvas transparent, and `labelMesh` turns that
-  into a blended plane. Only the glyphs show.
-- The Gathering's kneelers bow from the hips (see above).
+All on `gallery-3d` (commits e57501b, 3aaaed6, c5c8bbd and the Range before
+them), published to both artifacts. **Not on `main`**: the live site is behind
+until he says "push it" (fast-forward `main` to `gallery-3d`, then push).
+
+- **The Range** (`src/92-range.js`), new: a launcher on the bench, a town of
+  block buildings 150–380 m out that blow apart, crumble and topple. Smoke,
+  dust, fire and glass are one instanced particle system (two draw calls);
+  collapses push out a rolling dust surge; windows burst into glints.
+- **Frame rate, measured not guessed** (`10-core.js`):
+  - `cull()` / `openingRect()`: a room seen through a doorway is drawn only
+    inside the screen rectangle where it can show (its door, cut down to the
+    hall doorway in front), with a scissor; skipped when that's empty. The
+    lobby spawn went from 1,791 draw calls / 747k triangles to 98 / 2k.
+  - Shadows: `renderer.shadowMap.autoUpdate = false`; the room you're in
+    redraws them at ~30 Hz, rooms through doorways at ~7 Hz.
+  - `govern()`: on Auto, frame times are judged every 50 frames (or 1.5 s);
+    slow frames step the resolution down a notch (`SCALES`), a long smooth run
+    tries one back up, a failed notch isn't retried for a minute; skipped when
+    the CPU is the bottleneck. The notch is saved (`settings.autoLevel`,
+    `autoTier`). `hush()` stops it judging hitches (builds, resizes, pauses).
+  - `keep` on High is 6 rooms, not 9. Nothing draws while a photo is full screen.
+  - `bakeLimbs()` (`20-people.js`): once posed, arms merge into the chest and
+    legs into the pelvis: ~5 draws a person instead of ~17.
+  - The lobby's static pieces are merged (`mergeStatic`).
+- **Step-back** (`index.html`, `95-site.js`):
+  - The 8 px offset was the gallery page's default body margin (it's served
+    raw in the frame). `00-head.html` now sets `margin: 0`.
+  - The snapshot covers the frame's area (`clientWidth`), waits for the page
+    fonts, and carries opacity, borders (nav underline, the S key), underlines
+    and the logo's CSS slash; `stepback_test.py` measures it at 0 px off.
+  - Phone: press and hold the page (not a photo, link or text) to step back.
+  - The gallery starts loading 0.2 s into a hold; a "Loading the gallery…"
+    pill shows if it isn't ready, with a 25 s give-up. The frame draws nothing
+    until it's shown; rooms wait to build until the camera has pulled back;
+    the hand-over frame is drawn at full sharpness.
+  - Standalone, the lobby window shows a sketch of the site (`siteSketch()`).
+- Room toasts show **the name only**, plus a `hint` where a room needs one
+  (only the Range has one).
+- **Night Train**: the far city and the sky swing with the train's heading
+  (`headingAt`); the blocks right below stay square to the viaduct.
+- **Nature Train**: a tunnel through a wooded hill every minute or two (`TUN`
+  in `85-naturetrain.js`), laid along the track; inside, the sun, sky light and
+  reflections fade, tunnel lamps sweep through the coach, the sound closes in.
+- Homepage: photos reachable and openable from the keyboard (focus ring clear
+  of the photo), focus returns to the grid, description and theme-colour meta.
+- Tests read `GALLERY_URL` (default `http://localhost:8000/crowd-lab/v2/`) and
+  `SITE_URL` (default `http://localhost:8000/`). New: `tour_test.py` (every
+  room, two laps: fps, GPU/CPU ms, draw calls, GPU memory, leaks),
+  `range_test.py`, `stepback_test.py`.
 
 ## Open, in rough priority order
 
-1. **Framerate.** Steven's M1 Air lags badly and gets worse the longer he
-   walks. `autoQuality()` guesses from `hardwareConcurrency` and
-   `deviceMemory` before drawing a frame, so an M1 Air gets **High**: `dpr 2`
-   (full Retina, ~4× the pixels), 2048px shadows, and `keep: 9` rooms resident
-   at once on 8 GB of shared memory. Workaround is Esc → Quality → Medium.
-   The real fix is to measure rather than guess: start at Medium, judge on a
-   rolling median of frame times, climb or drop with hysteresis, ignore frames
-   just after a room builds, and drop `dpr` first since it is quadratic. `keep`
-   should be bounded by memory separately — it is a footprint problem, not a
-   per-frame one, and it is what makes things degrade over time.
-2. **The toast still shows taglines.** Entering a room pops the room name with
-   its tagline underneath (`toast()`, `10-core.js`) — the same name-plus-flavour
-   -text pattern he just had stripped off the door plates. He has not decided
-   whether to trim it to names, drop it, or leave it.
-3. **Step-back pass 2:** an ~8 px offset at the hand-off, phone long-press, and
-   loading feedback.
-4. Night Train: the city layers travel in a straight line while the train bends.
-5. Nature Train extras: trestle bridges, tunnels, light shafts through trees.
-6. Photo captions (each card already has an empty caption field), a nightclub
-   room with dancing characters, a "Walk the gallery" link on the real site,
-   real CC0 ambient recordings instead of synthesized sound, and bringing the
-   characters closer to the newer, more realistic train interiors.
+1. Check the frame rate on his M1 Air for real; Esc → Quality shows the
+   resolution Auto settled on.
+2. Nature Train: trestle bridges and light shafts through the trees (the
+   tunnel is done).
+3. A slow leak of about four geometries per full lap of every room; harmless
+   so far, not yet traced.
+4. Photo captions (each card already has an empty caption field), a nightclub
+   room with dancing characters, real CC0 ambient recordings instead of
+   synthesized sound, and bringing the characters closer to the newer, more
+   realistic train interiors.
 
 ## How Steven likes to work
 

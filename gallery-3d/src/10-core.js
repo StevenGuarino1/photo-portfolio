@@ -311,7 +311,7 @@
 
   // Down the hall from the entrance, left and right in turn, photo rooms
   // first.
-  const SLOTS = ["gallery", "gathering", "lighthouse", "overlook", "nature", "subway", "pool", "apartments", "moor", "drivein"].map((room) => ({ room }));
+  const SLOTS = ["gallery", "gathering", "lighthouse", "overlook", "nature", "subway", "pool", "apartments", "moor", "drivein", "range"].map((room) => ({ room }));
 
 
   const heading = (x, z) => Math.atan2(x, z);
@@ -732,6 +732,20 @@
   // Dragging looks around (touch everywhere but the joystick; mouse when
   // it isn't captured).
   let look = null;
+  // Rooms with something to fire: a click while the mouse is captured, or a
+  // quick tap on a touch screen.
+  canvas.addEventListener("mousedown", (e) => {
+    if (running && locked && !menuOpen && !viewerOpen && e.button === 0) here?.api?.onFire?.();
+  });
+  let tap = null;
+  canvas.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch") tap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
+  });
+  canvas.addEventListener("pointerup", (e) => {
+    if (!tap || e.pointerId !== tap.id) return;
+    if (Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 12 && performance.now() - tap.t < 300 && running && !menuOpen) here?.api?.onFire?.();
+    tap = null;
+  });
   canvas.addEventListener("pointerdown", (e) => {
     if (!running || locked) return;
     look = { id: e.pointerId, x: e.clientX, y: e.clientY };
@@ -1332,6 +1346,7 @@
       reg.api.update?.(t, dt, { cor, here: reg === here });
       animatePeople(reg, t, dt);
     }
+    crosshair.hidden = !(locked || (running && here?.api?.crosshair));
     if (++cardCheck % 5 === 0) showCard(running && !menuOpen && !viewerOpen ? findPhoto() : null);
     mixSound(t, dt);
     draw();

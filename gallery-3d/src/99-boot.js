@@ -19,6 +19,8 @@
     syncMenu();
     parent.postMessage({ type: "gallery:ready" }, "*");
   } else {
+    // On its own, the lobby's window shows a sketch of the site instead.
+    siteSketch().then((snap) => SITE.paint(snap));
     // You start out on the lighthouse gallery, at the railing in the storm.
     goTo("lighthouse", "gallery");
     syncMenu();

@@ -353,6 +353,42 @@
     return fig;
   }
 
+  // Once posed, arms never move on their own (only the chest they hang
+  // from breathes), and nor do legs (only the pelvis carries them), so each
+  // limb joins the body part it hangs from: about five draws a person
+  // instead of seventeen. Anything special (kept, two-sided, textured)
+  // stays as it is.
+  function bakeLimbs(fig) {
+    const shared = MATS.get("baked");
+    const plain = (o) => o.isMesh && !o.userData.keep && o.material.side !== THREE.DoubleSide
+      && (o.material === shared || (o.material.isMeshStandardMaterial && o.material.flatShading && !o.material.map && !o.material.vertexColors));
+    for (const [host, limbs] of [["pelvis", ["lHip", "rHip"]], ["chest", ["lShoulder", "rShoulder"]]]) {
+      const H = fig.J[host];
+      H.updateMatrixWorld(true);
+      const inv = new THREE.Matrix4().copy(H.matrixWorld).invert();
+      const parts = H.children.filter(plain);
+      for (const name of limbs) fig.J[name]?.traverse((o) => { if (plain(o)) parts.push(o); });
+      if (parts.length < 2) continue;
+      const geos = parts.map((m) => {
+        const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+        g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
+        for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal" && k !== "color") g.deleteAttribute(k);
+        if (!g.attributes.color) {
+          const c = m.material.color;
+          const col = new Float32Array(g.attributes.position.count * 3);
+          for (let i = 0; i < col.length; i += 3) { col[i] = c.r; col[i + 1] = c.g; col[i + 2] = c.b; }
+          g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+        }
+        return g;
+      });
+      const merged = new THREE.Mesh(mergeGeometries(geos), shared);
+      merged.castShadow = true;
+      for (const m of parts) { m.parent.remove(m); m.geometry.dispose(); }
+      H.add(merged);
+    }
+    return fig;
+  }
+
   // Sitting, sleeping, reading, holding on: poses for the newer rooms.
   const SEATED = { lHip: [-1.5, 0, 0.07], rHip: [-1.5, 0, -0.07], lKnee: [1.5, 0, 0], rKnee: [1.5, 0, 0] };
   POSES.push(

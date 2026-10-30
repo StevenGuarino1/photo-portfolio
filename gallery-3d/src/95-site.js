@@ -157,6 +157,59 @@
     return { attach, paint, fillPose, get Z0() { return Z0; } };
   })();
 
+  // Opened on its own (not from the site), the lobby's window still shows
+  // the site: its header and the first rows of its photo grid, laid out the
+  // way the site lays them out on a laptop screen.
+  async function siteSketch(W = 1440, H = 900) {
+    const face = (size) => `400 ${size}px Poppins, system-ui, sans-serif`;
+    await Promise.race([
+      Promise.all([25, 20.5, 16].map((size) => document.fonts.load(face(size)).catch(() => {}))),
+      new Promise((r) => setTimeout(r, 1500)),
+    ]);
+    const g = document.createElement("canvas").getContext("2d");
+    const side = Math.round(W * 0.06);
+    const gap = Math.min(24, Math.max(10, W * 0.016));
+    const base = 70;
+    const texts = [];
+    const boxes = [];
+    const add = (text, x, size, color, alpha = 1) => {
+      g.font = face(size);
+      const w = g.measureText(text).width;
+      texts.push({ text, x, base, w, font: face(size), color, alpha });
+      return w;
+    };
+    let x = side + add("Steven Guarino", side, 25, "#e8e8e8") + 7;
+    x += add("/", x, 20.5, "#8a8a8a", 0.45) + 10;
+    add("Archive", x, 20.5, "#8a8a8a");
+    const nav = ["All", "Wildlife", "Night Sky", "Landscape", "Close-Up", "Aviation"];
+    let right = W - side;
+    for (let i = nav.length - 1; i >= 0; i--) {
+      g.font = face(16);
+      right -= g.measureText(nav[i]).width;
+      const w = add(nav[i], right, 16, "#e8e8e8", i === 0 ? 1 : 0.75);
+      if (i === 0) boxes.push({ x: right, y: base + 7, w, h: 1, radius: 0, sides: [null, null, { w: 1, c: "#e8e8e8" }, null], alpha: 1 });
+      right -= 26;
+    }
+    // Rows of 2, 3, 2, 4 and 3 photos, each as tall as fills the width.
+    const items = [];
+    const inner = W - side * 2;
+    const pattern = [2, 3, 2, 4, 3];
+    let y = 160;
+    for (let row = 0, k = 0; y < H && k < PHOTOS.length; row++) {
+      const list = PHOTOS.slice(k, k + pattern[row % pattern.length]);
+      k += list.length;
+      const h = (inner - gap * (list.length - 1)) / list.reduce((a, p) => a + p.w / p.h, 0);
+      let px = side;
+      for (const p of list) {
+        const w = h * (p.w / p.h);
+        items.push({ x: px, y, w, h, src: `img/${p.stem}.jpg`, card: 1, alpha: 1 });
+        px += w + gap;
+      }
+      y += h + gap;
+    }
+    return { w: W, h: H, dpr: 2, bg: "#121212", items, texts, boxes };
+  }
+
   if (EMBED) {
     const post = (msg) => parent.postMessage(msg, "*");
     const back = document.createElement("button");

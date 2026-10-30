@@ -1514,7 +1514,12 @@
     renderer.info.reset();
     renderer.setScissorTest(false);
     renderer.clear();
-    renderer.shadowMap.needsUpdate = true;
+    // Shadows in the room you're in redraw about thirty times a second,
+    // which nothing that moves here can outrun; at 60 frames a second
+    // that's every other frame.
+    const due = !(now - (here.shadowAt ?? -1e9) < 30);
+    if (due) here.shadowAt = now;
+    renderer.shadowMap.needsUpdate = due;
     renderer.render(here.scene, camera);
     for (const v of views) {
       const [x0, y0, x1, y1] = v.rect;
@@ -1524,9 +1529,9 @@
       renderer.render(v.portal.scene, camera);
       // A room seen through a doorway redraws its shadows a few times a
       // second, not every frame: nobody can tell from out here.
-      const due = !(now - (v.reg.shadowAt ?? -1e9) < 150);
-      if (due) v.reg.shadowAt = now;
-      renderer.shadowMap.needsUpdate = due;
+      const seen = !(now - (v.reg.shadowAt ?? -1e9) < 150);
+      if (seen) v.reg.shadowAt = now;
+      renderer.shadowMap.needsUpdate = seen;
       renderer.render(v.reg.scene, camera);
     }
     renderer.setScissorTest(false);
@@ -1568,7 +1573,7 @@
     if (focus) fig.root.rotation.y = Math.atan2(focus.x - at.x, focus.z - at.z) + lean;
     R.add(fig.root);
     pose(fig, typeof poseName === "string" ? POSES.find((q) => q.name === poseName) : poseName);
-    if (doBake) bake(fig);
+    if (doBake) bakeLimbs(bake(fig));
     fig.root.traverse((o) => { if (o.isMesh) o.castShadow = Q.shadow > 0; });
     const entry = { fig, focus, lean, phase, glance, bump: 0 };
     R.reg.people ??= [];
@@ -2315,6 +2320,42 @@
       merged.castShadow = true;
       for (const m of parts) { j.remove(m); m.geometry.dispose(); }
       j.add(merged);
+    }
+    return fig;
+  }
+
+  // Once posed, arms never move on their own (only the chest they hang
+  // from breathes), and nor do legs (only the pelvis carries them), so each
+  // limb joins the body part it hangs from: about five draws a person
+  // instead of seventeen. Anything special (kept, two-sided, textured)
+  // stays as it is.
+  function bakeLimbs(fig) {
+    const shared = MATS.get("baked");
+    const plain = (o) => o.isMesh && !o.userData.keep && o.material.side !== THREE.DoubleSide
+      && (o.material === shared || (o.material.isMeshStandardMaterial && o.material.flatShading && !o.material.map && !o.material.vertexColors));
+    for (const [host, limbs] of [["pelvis", ["lHip", "rHip"]], ["chest", ["lShoulder", "rShoulder"]]]) {
+      const H = fig.J[host];
+      H.updateMatrixWorld(true);
+      const inv = new THREE.Matrix4().copy(H.matrixWorld).invert();
+      const parts = H.children.filter(plain);
+      for (const name of limbs) fig.J[name]?.traverse((o) => { if (plain(o)) parts.push(o); });
+      if (parts.length < 2) continue;
+      const geos = parts.map((m) => {
+        const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+        g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
+        for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal" && k !== "color") g.deleteAttribute(k);
+        if (!g.attributes.color) {
+          const c = m.material.color;
+          const col = new Float32Array(g.attributes.position.count * 3);
+          for (let i = 0; i < col.length; i += 3) { col[i] = c.r; col[i + 1] = c.g; col[i + 2] = c.b; }
+          g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+        }
+        return g;
+      });
+      const merged = new THREE.Mesh(mergeGeometries(geos), shared);
+      merged.castShadow = true;
+      for (const m of parts) { m.parent.remove(m); m.geometry.dispose(); }
+      H.add(merged);
     }
     return fig;
   }
@@ -13447,6 +13488,59 @@
     return { attach, paint, fillPose, get Z0() { return Z0; } };
   })();
 
+  // Opened on its own (not from the site), the lobby's window still shows
+  // the site: its header and the first rows of its photo grid, laid out the
+  // way the site lays them out on a laptop screen.
+  async function siteSketch(W = 1440, H = 900) {
+    const face = (size) => `400 ${size}px Poppins, system-ui, sans-serif`;
+    await Promise.race([
+      Promise.all([25, 20.5, 16].map((size) => document.fonts.load(face(size)).catch(() => {}))),
+      new Promise((r) => setTimeout(r, 1500)),
+    ]);
+    const g = document.createElement("canvas").getContext("2d");
+    const side = Math.round(W * 0.06);
+    const gap = Math.min(24, Math.max(10, W * 0.016));
+    const base = 70;
+    const texts = [];
+    const boxes = [];
+    const add = (text, x, size, color, alpha = 1) => {
+      g.font = face(size);
+      const w = g.measureText(text).width;
+      texts.push({ text, x, base, w, font: face(size), color, alpha });
+      return w;
+    };
+    let x = side + add("Steven Guarino", side, 25, "#e8e8e8") + 7;
+    x += add("/", x, 20.5, "#8a8a8a", 0.45) + 10;
+    add("Archive", x, 20.5, "#8a8a8a");
+    const nav = ["All", "Wildlife", "Night Sky", "Landscape", "Close-Up", "Aviation"];
+    let right = W - side;
+    for (let i = nav.length - 1; i >= 0; i--) {
+      g.font = face(16);
+      right -= g.measureText(nav[i]).width;
+      const w = add(nav[i], right, 16, "#e8e8e8", i === 0 ? 1 : 0.75);
+      if (i === 0) boxes.push({ x: right, y: base + 7, w, h: 1, radius: 0, sides: [null, null, { w: 1, c: "#e8e8e8" }, null], alpha: 1 });
+      right -= 26;
+    }
+    // Rows of 2, 3, 2, 4 and 3 photos, each as tall as fills the width.
+    const items = [];
+    const inner = W - side * 2;
+    const pattern = [2, 3, 2, 4, 3];
+    let y = 160;
+    for (let row = 0, k = 0; y < H && k < PHOTOS.length; row++) {
+      const list = PHOTOS.slice(k, k + pattern[row % pattern.length]);
+      k += list.length;
+      const h = (inner - gap * (list.length - 1)) / list.reduce((a, p) => a + p.w / p.h, 0);
+      let px = side;
+      for (const p of list) {
+        const w = h * (p.w / p.h);
+        items.push({ x: px, y, w, h, src: `img/${p.stem}.jpg`, card: 1, alpha: 1 });
+        px += w + gap;
+      }
+      y += h + gap;
+    }
+    return { w: W, h: H, dpr: 2, bg: "#121212", items, texts, boxes };
+  }
+
   if (EMBED) {
     const post = (msg) => parent.postMessage(msg, "*");
     const back = document.createElement("button");
@@ -13578,6 +13672,8 @@
     syncMenu();
     parent.postMessage({ type: "gallery:ready" }, "*");
   } else {
+    // On its own, the lobby's window shows a sketch of the site instead.
+    siteSketch().then((snap) => SITE.paint(snap));
     // You start out on the lighthouse gallery, at the railing in the storm.
     goTo("lighthouse", "gallery");
     syncMenu();

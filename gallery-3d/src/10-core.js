@@ -1042,7 +1042,12 @@
     renderer.info.reset();
     renderer.setScissorTest(false);
     renderer.clear();
-    renderer.shadowMap.needsUpdate = true;
+    // Shadows in the room you're in redraw about thirty times a second,
+    // which nothing that moves here can outrun; at 60 frames a second
+    // that's every other frame.
+    const due = !(now - (here.shadowAt ?? -1e9) < 30);
+    if (due) here.shadowAt = now;
+    renderer.shadowMap.needsUpdate = due;
     renderer.render(here.scene, camera);
     for (const v of views) {
       const [x0, y0, x1, y1] = v.rect;
@@ -1052,9 +1057,9 @@
       renderer.render(v.portal.scene, camera);
       // A room seen through a doorway redraws its shadows a few times a
       // second, not every frame: nobody can tell from out here.
-      const due = !(now - (v.reg.shadowAt ?? -1e9) < 150);
-      if (due) v.reg.shadowAt = now;
-      renderer.shadowMap.needsUpdate = due;
+      const seen = !(now - (v.reg.shadowAt ?? -1e9) < 150);
+      if (seen) v.reg.shadowAt = now;
+      renderer.shadowMap.needsUpdate = seen;
       renderer.render(v.reg.scene, camera);
     }
     renderer.setScissorTest(false);
@@ -1096,7 +1101,7 @@
     if (focus) fig.root.rotation.y = Math.atan2(focus.x - at.x, focus.z - at.z) + lean;
     R.add(fig.root);
     pose(fig, typeof poseName === "string" ? POSES.find((q) => q.name === poseName) : poseName);
-    if (doBake) bake(fig);
+    if (doBake) bakeLimbs(bake(fig));
     fig.root.traverse((o) => { if (o.isMesh) o.castShadow = Q.shadow > 0; });
     const entry = { fig, focus, lean, phase, glance, bump: 0 };
     R.reg.people ??= [];

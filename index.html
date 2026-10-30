@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Steven Guarino — Photography</title>
+<meta name="description" content="Wildlife, astrophotography, macro, and street photography by Steven Guarino." />
+<meta name="theme-color" content="#121212" />
 
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png" />
@@ -149,6 +151,11 @@
   }
 
   .gallery img.is-loaded { opacity: 1; }
+
+  /* Tabbing through the photos: a hairline round the one in focus, clear
+     of its edge. */
+  .gallery img:focus { outline: none; }
+  .gallery img:focus-visible { outline: 1px solid rgba(232, 232, 232, 0.7); outline-offset: 4px; }
 
   @media (prefers-reduced-motion: reduce) {
     .gallery img { transition: none; }
@@ -538,6 +545,14 @@
       img.srcset = gridSrcset(photo);
       img.src = photo.file;
       img.addEventListener("click", () => openLightbox(photo));
+      // Reachable from the keyboard too: Tab to it, Enter or Space opens it.
+      img.tabIndex = 0;
+      img.setAttribute("role", "button");
+      img.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        openLightbox(photo);
+      });
 
       card.appendChild(img);
       tile.appendChild(card);
@@ -863,10 +878,15 @@
 
     function closeLightbox() {
       lightboxOpen = false;
-      if (lightbox.contains(document.activeElement)) document.activeElement.blur();
+      const thumb = thumbFor.get(visiblePhotos[current]);
+      // Focus goes back to the photo in the grid, so the keyboard picks up
+      // where it left off.
+      if (lightbox.contains(document.activeElement)) {
+        document.activeElement.blur();
+        if (thumb?.isConnected) thumb.focus({ preventScroll: true });
+      }
 
       // Fly back into the tile of whichever photo is showing now.
-      const thumb = thumbFor.get(visiblePhotos[current]);
       if (canMorph() && thumb && thumb.isConnected && onScreen(thumb)) {
         morph(lightboxImg, thumb, () => {
           lightbox.classList.remove("is-open");

@@ -12,6 +12,7 @@
     name: "The Range",
     short: "Range",
     tagline: "Grab the launcher off the bench",
+    hint: "Walk up to the bench for the launcher",
     color: 0xe39a5a,
     leak: 0xf0a868,
     leakStyle: "sun",
@@ -141,18 +142,24 @@
         side.castShadow = true;
         R.add(side);
       }
-      const roof = part(new THREE.BoxGeometry(22.6, 0.25, 9.4), 0x3d3b38, 0, 3.7, 4.6);
+      const roof = part(new THREE.BoxGeometry(22.6, 0.25, 9.4), 0x5d5953, 0, 3.7, 4.6);
       roof.castShadow = true;
       R.add(roof);
-      // Lights under the roof, lane dividers, the rail, sandbags.
-      for (const x of [-6, 0, 6]) {
-        const lamp = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.05, 0.25), new THREE.MeshBasicMaterial({ color: 0xfff1d6 }));
-        lamp.position.set(x, 3.55, 4);
-        R.add(lamp);
+      // Rafters under the roof, and two rows of strip lights between them.
+      for (let z = 0.8; z < 9.2; z += 1.4) R.add(part(new THREE.BoxGeometry(22.4, 0.16, 0.12), 0x46423d, 0, 3.5, z));
+      const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff1d6 });
+      for (const z of [3.2, 6.9]) {
+        for (const x of [-7.5, -2.5, 2.5, 7.5]) {
+          const lamp = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.05, 0.22), lampMat);
+          lamp.position.set(x, 3.55, z);
+          R.add(lamp);
+        }
       }
-      const under = new THREE.PointLight(0xffe8c8, 6, 14, 1.6);
-      under.position.set(0, 3.2, 4);
-      R.add(under);
+      for (const z of [3.2, 6.9]) {
+        const under = new THREE.PointLight(0xffe8c8, 9, 16, 1.4);
+        under.position.set(0, 3.25, z);
+        R.add(under);
+      }
       for (const x of [-4.5, 4.5]) R.add(part(new THREE.BoxGeometry(0.08, 1.6, 2.4), 0x55524c, x, 0.8, 6.3));
       const rail = new THREE.Group();
       rail.add(part(new THREE.BoxGeometry(22, 0.08, 0.08), 0x9a7a3a, 0, 1.05, 0));
@@ -249,6 +256,7 @@
         const oz = nz;
         const n = W * H * D;
         const state = new Uint8Array(n); // 0 empty, 1 standing
+        const glass = new Uint8Array(n);
         const inst = new Int32Array(n).fill(-1);
         const color = new Float32Array(n * 3);
         const tone = [0.55 + r() * 0.15, 0.52 + r() * 0.14, 0.5 + r() * 0.12];
@@ -261,6 +269,7 @@
           const id = i + W * (k + D * j);
           state[id] = 1;
           const window = shell && !slab && (i + k) % 2 === 1 && j > 0;
+          glass[id] = window ? 1 : 0;
           const v = 0.9 + r() * 0.2;
           if (window) {
             if (r() < 0.12) C.setRGB(0.95, 0.68, 0.35);
@@ -286,7 +295,7 @@
         mesh.frustumCulled = false;
         R.add(mesh);
         const base = cells.filter((id) => id < W * D).length;
-        return { W, H, D, ox, oz, n, state, inst, color, mesh, initial: state.slice(), base, down: false, dirty: false, smoke: 0 };
+        return { W, H, D, ox, oz, n, state, glass, inst, color, mesh, initial: state.slice(), base, down: false, dirty: false, smoke: 0 };
       });
       const cellOf = (b, x, y, z) => {
         const i = Math.floor((x - b.ox) / S);
@@ -314,6 +323,8 @@
       debrisMesh.castShadow = true;
       debrisMesh.frustumCulled = false;
       for (let i = 0; i < MAXD; i++) { debrisMesh.setMatrixAt(i, ZERO); debrisMesh.setColorAt(i, C.setRGB(0.5, 0.5, 0.5)); }
+      // Only the part of the pool that's been used gets drawn.
+      debrisMesh.count = 0;
       R.add(debrisMesh);
       const D_ = {
         p: new Float32Array(MAXD * 3), v: new Float32Array(MAXD * 3), r: new Float32Array(MAXD * 3), w: new Float32Array(MAXD * 3),
@@ -324,6 +335,7 @@
       function spawnDebris(b, id, vx, vy, vz, scale, heavy) {
         const d = nextDebris;
         nextDebris = (nextDebris + 1) % MAXD;
+        debrisMesh.count = Math.max(debrisMesh.count, d + 1);
         if (!D_.live[d]) activeDebris++;
         const c = cellCentre(b, id, tmpA);
         D_.p.set([c.x, c.y, c.z], d * 3);
@@ -417,40 +429,220 @@
             fell++;
           }
           rumble(b, fell);
-        } else if (fell > 40) rumble(b, fell);
+          surge(b, fell);
+        } else if (fell > 40) {
+          rumble(b, fell);
+          surge(b, fell * 0.5);
+        }
+      }
+      // The dust a collapse pushes out along the ground: a ring of it
+      // rolling outward from the foot of the building and slowing, with
+      // more boiling up as the wreckage lands.
+      function surge(b, fell) {
+        const cx = b.ox + (b.W * S) / 2;
+        const cz = b.oz + (b.D * S) / 2;
+        const r0 = (Math.max(b.W, b.D) * S) / 2;
+        const n = Math.min(lowTier ? 18 : 42, 8 + fell / 40);
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2 + Math.random() * 0.3;
+          const sp = 9 + Math.random() * 9;
+          puff(cx + Math.cos(a) * r0, 2 + Math.random() * 4, cz + Math.sin(a) * r0, {
+            size: 10 + Math.random() * 7, grow: 3.4, life: 18 + Math.random() * 12, vy: 0.4 + Math.random() * 1.6,
+            vx: Math.cos(a) * sp, vz: Math.sin(a) * sp, drag: 0.45, color: 0xa09383, spread: 3, peak: 0.6,
+          });
+        }
       }
 
-      // ---------- Effects: fire, smoke, flash ----------
+      // ---------- Effects: fire, smoke, dust, glass, flash ----------
       const flash = new THREE.PointLight(0xffa860, 0, 140, 1.2);
       R.add(flash);
       let flashT = 0;
-      const POOL = lowTier ? 140 : 320;
-      const puffs = Array.from({ length: POOL }, () => {
-        const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0x777777, transparent: true, depthWrite: false, opacity: 0 }));
-        s.visible = false;
-        R.add(s);
-        return { s, life: 0, age: 1, vy: 0, grow: 0, fire: false, c: new THREE.Color() };
-      });
-      let nextPuff = 0;
-      function puff(x, y, z, { size = 6, grow = 3, life = 6, vy = 2, color = 0x6a645e, fire = false, spread = 2 } = {}) {
-        const p = puffs[nextPuff];
-        nextPuff = (nextPuff + 1) % POOL;
-        p.s.position.set(x + (Math.random() - 0.5) * spread, y + (Math.random() - 0.5) * spread * 0.5, z + (Math.random() - 0.5) * spread);
-        p.s.scale.setScalar(size);
-        p.s.material.blending = fire ? THREE.AdditiveBlending : THREE.NormalBlending;
-        p.s.material.color.setHex(color);
-        p.c.setHex(color);
-        p.s.visible = true;
-        Object.assign(p, { life, age: 0, vy, grow, fire, size });
+      // Smoke and dust are drawn from a cluster of soft lumps, so a puff
+      // reads as billowing rather than as a blurred disc.
+      const smokeTex = canvasTex(128, 128, (g) => {
+        const r = rng(83);
+        for (let i = 0; i < 18; i++) {
+          const a = r() * Math.PI * 2;
+          const d = Math.sqrt(r()) * 24;
+          const x = 64 + Math.cos(a) * d;
+          const y = 64 + Math.sin(a) * d;
+          const rad = 16 + r() * 22;
+          const grad = g.createRadialGradient(x, y, 0, x, y, rad);
+          grad.addColorStop(0, `rgba(255, 255, 255, ${0.3 + r() * 0.25})`);
+          grad.addColorStop(1, "rgba(255, 255, 255, 0)");
+          g.fillStyle = grad;
+          g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+        }
+      }, { repeat: false });
+      // Every puff, flame and glint is one instance of a square turned to
+      // face you: one draw for all the smoke and dust, one for all the fire
+      // and glass, however much is in the air. A particle drifts (with drag,
+      // rising or falling), grows, turns slowly and fades; fire cools from
+      // yellow to a dull red, glass twinkles as it tumbles.
+      const STRIDE = 20;
+      function particles(max, additive, map) {
+        const geo = new THREE.InstancedBufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute([-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0], 3));
+        geo.setIndex([0, 1, 2, 0, 2, 3]);
+        const at = new THREE.InstancedBufferAttribute(new Float32Array(max * 4), 4).setUsage(THREE.DynamicDrawUsage);
+        const tint = new THREE.InstancedBufferAttribute(new Float32Array(max * 4), 4).setUsage(THREE.DynamicDrawUsage);
+        const turn = new THREE.InstancedBufferAttribute(new Float32Array(max), 1).setUsage(THREE.DynamicDrawUsage);
+        geo.setAttribute("at", at);
+        geo.setAttribute("tint", tint);
+        geo.setAttribute("turn", turn);
+        geo.instanceCount = 0;
+        const mat = new THREE.ShaderMaterial({
+          uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { map: { value: map } }]),
+          vertexShader: `
+            attribute vec4 at;
+            attribute vec4 tint;
+            attribute float turn;
+            varying vec4 vTint;
+            varying vec2 vUv;
+            varying float vUp;
+            #include <fog_pars_vertex>
+            void main() {
+              vTint = tint;
+              vUv = position.xy + 0.5;
+              float c = cos(turn);
+              float s = sin(turn);
+              vec2 corner = vec2(c * position.x - s * position.y, s * position.x + c * position.y);
+              vUp = corner.y + 0.5;
+              vec4 mvPosition = modelViewMatrix * vec4(at.xyz, 1.0);
+              mvPosition.xy += corner * at.w;
+              gl_Position = projectionMatrix * mvPosition;
+              #include <fog_vertex>
+            }`,
+          fragmentShader: `
+            uniform sampler2D map;
+            varying vec4 vTint;
+            varying vec2 vUv;
+            varying float vUp;
+            #include <fog_pars_fragment>
+            void main() {
+              float lump = texture2D(map, vUv).a;
+              float a = lump * vTint.a;
+              if (a < 0.004) discard;
+              vec3 col = vTint.rgb;
+              ${additive ? "" : "col *= mix(0.72, 1.12, vUp) * (1.0 - 0.18 * lump);"}
+              float f = 0.0;
+              #ifdef USE_FOG
+                f = smoothstep(fogNear, fogFar, vFogDepth);
+              #endif
+              ${additive ? "a *= 1.0 - f;" : "col = mix(col, fogColor, f);"}
+              gl_FragColor = vec4(col, a);
+              #include <colorspace_fragment>
+            }`,
+          transparent: true,
+          depthWrite: false,
+          fog: true,
+          blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+        });
+        mat.userData.noClip = true;
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.frustumCulled = false;
+        mesh.renderOrder = additive ? 2 : 1;
+        R.add(mesh);
+        const d = new Float32Array(max * STRIDE);
+        const col = new THREE.Color();
+        let n = 0;
+        let shown = 0;
+        return {
+          add(x, y, z, o) {
+            if (n >= max) return;
+            const k = n++ * STRIDE;
+            col.setHex(o.color);
+            d[k] = x; d[k + 1] = y; d[k + 2] = z;
+            d[k + 3] = o.vx; d[k + 4] = o.vy; d[k + 5] = o.vz;
+            d[k + 6] = o.size; d[k + 7] = o.grow; d[k + 8] = o.life; d[k + 9] = 0;
+            d[k + 10] = col.r; d[k + 11] = col.g; d[k + 12] = col.b; d[k + 13] = o.peak;
+            d[k + 14] = o.drag; d[k + 15] = o.gravity;
+            d[k + 16] = Math.random() * Math.PI * 2; d[k + 17] = (Math.random() - 0.5) * o.swirl;
+            d[k + 18] = o.kind;
+          },
+          step(dt) {
+            if (!n && !shown) return;
+            const A = at.array;
+            const T = tint.array;
+            const U = turn.array;
+            for (let i = 0; i < n; i++) {
+              const k = i * STRIDE;
+              d[k + 9] += dt;
+              if (d[k + 9] >= d[k + 8]) {
+                // Gone: the last one takes its place.
+                n--;
+                if (i < n) d.copyWithin(k, n * STRIDE, n * STRIDE + STRIDE);
+                i--;
+                continue;
+              }
+              const age = d[k + 9];
+              const u = age / d[k + 8];
+              const drag = Math.exp(-d[k + 14] * dt);
+              d[k + 3] *= drag;
+              d[k + 5] *= drag;
+              d[k + 4] = d[k + 4] * drag - d[k + 15] * dt;
+              d[k] += d[k + 3] * dt;
+              d[k + 1] += d[k + 4] * dt;
+              d[k + 2] += d[k + 5] * dt;
+              d[k + 16] += d[k + 17] * dt;
+              const kind = d[k + 18];
+              const a = kind === 1 ? d[k + 13] * (1 - u)
+                : kind === 2 ? d[k + 13] * (1 - u) * (0.3 + 0.7 * Math.abs(Math.sin(age * 31 + i * 1.7)))
+                  : d[k + 13] * Math.min(1, age * 3) * Math.pow(1 - u, 1.4);
+              const cool = kind === 1 ? u : 0;
+              const j = i * 4;
+              A[j] = d[k]; A[j + 1] = d[k + 1]; A[j + 2] = d[k + 2]; A[j + 3] = d[k + 6] + d[k + 7] * age;
+              T[j] = d[k + 10] + (0.06 - d[k + 10]) * cool;
+              T[j + 1] = d[k + 11] + (0.012 - d[k + 11]) * cool;
+              T[j + 2] = d[k + 12] + (0.003 - d[k + 12]) * cool;
+              T[j + 3] = a;
+              U[i] = d[k + 16];
+            }
+            geo.instanceCount = n;
+            shown = n;
+            for (const attr of [at, tint, turn]) {
+              attr.clearUpdateRanges();
+              attr.addUpdateRange(0, Math.max(1, n) * attr.itemSize);
+              attr.needsUpdate = true;
+            }
+          },
+          clear() { n = 0; },
+        };
       }
-      // Smoke trails from the missile.
-      const trail = Array.from({ length: 90 }, () => {
-        const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xd8d2c8, transparent: true, depthWrite: false, opacity: 0 }));
-        s.visible = false;
-        R.add(s);
-        return { s, age: 1 };
+      const smoke = particles(lowTier ? 500 : 1400, false, smokeTex);
+      const glow = particles(lowTier ? 300 : 800, true, glowTex);
+      function puff(x, y, z, { size = 6, grow = 3, life = 6, vy = 2, vx = 0, vz = 0, drag = 0.15, color = 0x6a645e, fire = false, spread = 2, peak } = {}) {
+        (fire ? glow : smoke).add(
+          x + (Math.random() - 0.5) * spread, y + (Math.random() - 0.5) * spread * 0.5, z + (Math.random() - 0.5) * spread,
+          { vx, vy, vz, size, grow: grow * (fire ? 1 : 0.8), life, color, peak: peak ?? (fire ? 0.9 : 0.6), drag: fire ? 0 : drag, gravity: fire ? 0 : -0.25, swirl: fire ? 0 : 0.5, kind: fire ? 1 : 0 },
+        );
+      }
+      // A shard of window glass, flashing as it tumbles down.
+      function glint(at, vx, vy, vz) {
+        const k = () => 0.6 + Math.random() * 0.6;
+        glow.add(at.x + (Math.random() - 0.5) * S, at.y + (Math.random() - 0.5) * S, at.z + (Math.random() - 0.5) * S, {
+          vx: vx * k(), vy: vy * k(), vz: vz * k(), size: 0.7 + Math.random() * 0.6, grow: 0, life: 1.5 + Math.random() * 1.8,
+          color: 0xfff4dc, peak: 1, drag: 0.6, gravity: 7, swirl: 0, kind: 2,
+        });
+      }
+      // Scorch marks where a blast hits the ground.
+      const scorchMat = new THREE.MeshBasicMaterial({ map: glowTex, color: 0x000000, transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+      const scorches = Array.from({ length: 10 }, () => {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), scorchMat);
+        m.rotation.x = -Math.PI / 2;
+        m.visible = false;
+        R.add(m);
+        return m;
       });
-      let nextTrail = 0;
+      let nextScorch = 0;
+      function scorch(at) {
+        const m = scorches[nextScorch];
+        nextScorch = (nextScorch + 1) % scorches.length;
+        m.position.set(at.x, 0.12, at.z);
+        m.scale.setScalar(9 + Math.random() * 5);
+        m.rotation.z = Math.random() * Math.PI * 2;
+        m.visible = true;
+      }
 
       // ---------- The missile ----------
       const rocket = new THREE.Group();
@@ -464,6 +656,8 @@
       }
       rocket.visible = false;
       R.add(rocket);
+      const rocketLight = new THREE.PointLight(0xffb060, 0, 45, 1.4);
+      R.add(rocketLight);
       const missiles = [];
       const rootInv = new THREE.Quaternion();
       function fire() {
@@ -482,9 +676,13 @@
         const m = rocket.clone();
         m.visible = true;
         R.add(m);
-        missiles.push({ m, p: from, v: dir.multiplyScalar(140), age: 0 });
+        missiles.push({ m, p: from.clone(), v: dir.clone().multiplyScalar(140), age: 0 });
         api.launches.forEach((f) => f());
-        for (let i = 0; i < 6; i++) puff(from.x, from.y, from.z, { size: 1.2, grow: 2.5, life: 1.6, vy: 0.3, color: 0xd8d2c8, spread: 0.6 });
+        for (let i = 0; i < 5; i++) {
+          const ahead = 2.5 + Math.random() * 4;
+          puff(from.x + dir.x * ahead, from.y + dir.y * ahead, from.z + dir.z * ahead, { size: 0.8, grow: 2, life: 1.4, vy: 0.3, color: 0xd8d2c8, spread: 0.6, peak: 0.35 });
+        }
+        puff(from.x + dir.x * 0.6, from.y + dir.y * 0.6, from.z + dir.z * 0.6, { size: 0.25, grow: 2.5, life: 0.07, vy: 0, color: 0xffd090, fire: true, spread: 0.05, peak: 0.7 });
       }
 
       function explode(at) {
@@ -492,7 +690,15 @@
         flash.intensity = 900;
         flashT = 0;
         for (let i = 0; i < 10; i++) puff(at.x, at.y, at.z, { size: 5 + Math.random() * 5, grow: 9, life: 0.9 + Math.random() * 0.5, vy: 3, color: 0xffa040, fire: true, spread: 4 });
+        for (let i = 0; i < 4; i++) puff(at.x, at.y, at.z, { size: 14, grow: 30, life: 0.25, vy: 0, color: 0xfff0d0, fire: true, spread: 1 });
         for (let i = 0; i < 14; i++) puff(at.x, at.y + 2, at.z, { size: 7, grow: 5, life: 7 + Math.random() * 5, vy: 3 + Math.random() * 3, color: 0x4a4440, spread: 7 });
+        // Dust thrown out by the blast, slowing fast.
+        for (let i = 0; i < 12; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const sp = 14 + Math.random() * 12;
+          puff(at.x, at.y, at.z, { size: 4, grow: 6, life: 4 + Math.random() * 3, vy: 1 + Math.random() * 3, vx: Math.cos(a) * sp, vz: Math.sin(a) * sp, drag: 2.2, color: 0xa89a88, spread: 2, peak: 0.5 });
+        }
+        if (at.y < 1) scorch(at);
         // Blow out the blocks round the blast.
         const RAD = 4.8 * S;
         let hit = false;
@@ -510,10 +716,13 @@
             cellCentre(b, id, tmpA);
             const d = tmpA.distanceTo(at);
             if (d > RAD * (0.8 + Math.random() * 0.35)) continue;
+            const pane = b.glass[id];
             hideCell(b, id);
             const push = (1 - d / RAD) * 34 + 6;
             tmpB.subVectors(tmpA, at).normalize();
             spawnDebris(b, id, tmpB.x * push, tmpB.y * push + 8, tmpB.z * push, 0.45 + Math.random() * 0.3, false);
+            // A window going: a spray of glass catching the low sun.
+            if (pane) for (let g = 0; g < 4; g++) glint(tmpA, tmpB.x * push * 0.8, tmpB.y * push + 6, tmpB.z * push * 0.8);
             hit = true;
           }
           if (hit) { b.dirty = true; b.smoke = 25; b.smokeAt = at.clone(); }
@@ -549,7 +758,10 @@
         activeDebris = 0;
         for (let i = 0; i < MAXD; i++) debrisMesh.setMatrixAt(i, ZERO);
         debrisMesh.instanceMatrix.needsUpdate = true;
-        for (const p of puffs) { p.age = p.life; p.s.visible = false; }
+        smoke.clear();
+        glow.clear();
+        for (const sc of scorches) sc.visible = false;
+        debrisMesh.count = 0;
       }
 
       let shake = 0;
@@ -614,26 +826,16 @@
             }
             M.m.position.copy(M.p);
             M.m.lookAt(tmpA.copy(M.p).sub(M.v));
-            if (Math.random() < 0.9) {
-              const tr = trail[nextTrail];
-              nextTrail = (nextTrail + 1) % trail.length;
-              tr.s.position.copy(M.p);
-              tr.s.visible = true;
-              tr.age = 0;
-            }
+            if (M.age > 0.04) puff(M.p.x, M.p.y, M.p.z, { size: 0.6, grow: 2.2, life: 2.2, vy: 0.2, color: 0xd8d2c8, spread: 0.2, peak: 0.5 });
             if (boom || M.age > 7) {
               if (boom) explode(boom);
               R.root.remove(M.m);
               missiles.splice(mi, 1);
             }
           }
-          for (const tr of trail) {
-            if (!tr.s.visible) continue;
-            tr.age += dt;
-            if (tr.age > 2.2) { tr.s.visible = false; continue; }
-            tr.s.scale.setScalar(0.6 + tr.age * 2.2);
-            tr.s.material.opacity = 0.55 * (1 - tr.age / 2.2);
-          }
+          const lead = missiles[missiles.length - 1];
+          rocketLight.intensity = lead ? 70 : 0;
+          if (lead) rocketLight.position.copy(lead.p);
 
           // Buildings that lost blocks this frame: let loose sections fall.
           for (const b of buildings) if (b.dirty) settle(b);
@@ -642,10 +844,13 @@
           // Debris: gravity, tumbling, landing on the ground or on standing
           // blocks, and heavy pieces smashing what they land on.
           let breaks = 0;
+          let moved = false;
+          let dusts = 0;
           const p = D_.p;
           const v = D_.v;
           for (let d = 0; d < MAXD; d++) {
             if (D_.live[d] !== 1) continue;
+            moved = true;
             const o = d * 3;
             v[o + 1] -= GRAV * dt;
             const drag = D_.heavy[d] ? 1 : Math.exp(-dt * 0.4);
@@ -686,7 +891,18 @@
               D_.w[o] *= 0.5;
               D_.w[o + 1] *= 0.5;
               D_.w[o + 2] *= 0.5;
-              if (speed > 14 && Math.random() < 0.08) puff(p[o], p[o + 1], p[o + 2], { size: 5, grow: 6, life: 5, vy: 1, color: 0x8a7e70, spread: 3 });
+              // A falling section hitting the ground throws up dust that rolls
+              // outward from the building, low and slow: a collapse ends in a
+              // cloud.
+              if (D_.heavy[d] && speed > 7 && dusts < 6 && Math.random() < 0.2) {
+                dusts++;
+                const b = buildings[D_.b[d]];
+                const ox = p[o] - (b.ox + (b.W * S) / 2);
+                const oz = p[o + 2] - (b.oz + (b.D * S) / 2);
+                const l = Math.hypot(ox, oz) || 1;
+                const out = 3 + Math.random() * 6;
+                puff(p[o], Math.max(1.5, p[o + 1]), p[o + 2], { size: 8 + Math.random() * 7, grow: 3.2, life: 14 + Math.random() * 12, vy: 0.3 + Math.random() * 0.8, vx: (ox / l) * out, vz: (oz / l) * out, drag: 0.3, color: 0x9c8f80, spread: 2, peak: 0.55 });
+              } else if (speed > 12 && Math.random() < 0.06) puff(p[o], p[o + 1], p[o + 2], { size: 4, grow: 5, life: 4, vy: 1, color: 0x8a7e70, spread: 2 });
               if (speed < 1.5 && Math.hypot(v[o], v[o + 2]) < 0.6) D_.live[d] = 2; // at rest
             }
             tmpE.set(D_.r[o], D_.r[o + 1], D_.r[o + 2]);
@@ -694,7 +910,7 @@
             tmpS.setScalar(D_.s[d]);
             debrisMesh.setMatrixAt(d, tmpM.compose(tmpA.set(p[o], p[o + 1], p[o + 2]), tmpQ, tmpS));
           }
-          debrisMesh.instanceMatrix.needsUpdate = true;
+          if (moved) debrisMesh.instanceMatrix.needsUpdate = true;
 
           // Smoke rising from damaged buildings for a while.
           for (const b of buildings) {
@@ -703,16 +919,8 @@
             if (Math.random() < dt * 2.2) puff(b.smokeAt.x, Math.max(1, b.smokeAt.y), b.smokeAt.z, { size: 6, grow: 4, life: 9, vy: 4, color: 0x3e3a38, spread: 4 });
             if (Math.random() < dt * 1.5) puff(b.smokeAt.x, Math.max(1, b.smokeAt.y), b.smokeAt.z, { size: 3, grow: 1, life: 0.8, vy: 2, color: 0xff8a30, fire: true, spread: 3 });
           }
-          for (const q of puffs) {
-            if (!q.s.visible) continue;
-            q.age += dt;
-            if (q.age >= q.life) { q.s.visible = false; continue; }
-            const k = q.age / q.life;
-            q.s.position.y += q.vy * dt;
-            q.s.scale.setScalar(q.size + q.grow * q.age * (q.fire ? 1 : 0.8));
-            q.s.material.opacity = q.fire ? (1 - k) * 0.9 : Math.min(1, q.age * 3) * (1 - k) * 0.6;
-            if (q.fire) q.s.material.color.copy(q.c).lerp(C.setHex(0x441a08), k);
-          }
+          smoke.step(dt);
+          glow.step(dt);
           if (flash.intensity > 0) {
             flashT += dt;
             flash.intensity = Math.max(0, 900 * Math.exp(-flashT * 6));
@@ -728,7 +936,6 @@
         const delay = at.distanceTo(R.camLocal) / 343;
         setTimeout(() => api.shakeAt(at, 1.4), delay * 1000);
       });
-      api.debug = () => buildings.map((b) => [b.ox.toFixed(0), b.oz, b.initial.reduce((a, c) => a + c, 0), b.state.reduce((a, c) => a + c, 0), b.down]);
       return api;
     },
     sound(A, R, api) {

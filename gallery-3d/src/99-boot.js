@@ -13,10 +13,10 @@
   enter(regions.lobby, { quiet: true });
   if (EMBED) {
     // Opened from the site: no title screen; wait in the lobby, facing the
-    // window, until the site hands over (95-site.js).
+    // window, until the site hands over (95-site.js). Nothing is drawn till
+    // then: the frame may sit loaded and unseen for a long while.
     titleEl.hidden = true;
     syncMenu();
-    renderer.setAnimationLoop(frame);
     parent.postMessage({ type: "gallery:ready" }, "*");
   } else {
     // You start out on the lighthouse gallery, at the railing in the storm.

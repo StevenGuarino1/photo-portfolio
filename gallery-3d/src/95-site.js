@@ -42,9 +42,11 @@
     function attach(R, z0) {
       Z0 = z0;
       plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, fog: false }));
+      plane.userData.keep = true; // resized as the screen changes shape
       R.add(plane);
       bars = [0, 1, 2, 3].map(() => {
         const b = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x0c0c0c, roughness: 0.9 }));
+        b.userData.keep = true;
         R.add(b);
         return b;
       });
@@ -71,36 +73,79 @@
       im.src = src;
     });
     async function paint(snap) {
-      const k = Math.min(2048 / snap.w, Math.min(snap.dpr || 1, 2));
+      // Sharp enough to fill a Retina screen when the camera is right up
+      // against it.
+      const most = Math.min(renderer.capabilities.maxTextureSize, 4096);
+      const k = Math.min(most / snap.w, most / snap.h, Math.min(snap.dpr || 1, 2));
+      // The page's own fonts, loaded before any text is drawn with them.
+      const fonts = [...new Set(snap.texts.map((t) => t.font))];
+      const [imgs] = await Promise.all([
+        Promise.race([
+          Promise.all(snap.items.map((it) => load(it.src))),
+          new Promise((r) => setTimeout(() => r(null), 2500)),
+        ]),
+        Promise.race([
+          Promise.all(fonts.map((f) => document.fonts.load(f).catch(() => {}))),
+          new Promise((r) => setTimeout(r, 1500)),
+        ]),
+      ]);
       canvas.width = Math.round(snap.w * k);
       canvas.height = Math.round(snap.h * k);
       // A new size needs a new texture on the GPU.
       tex.dispose();
       g.setTransform(k, 0, 0, k, 0, 0);
+      g.imageSmoothingQuality = "high";
+      g.globalAlpha = 1;
       g.fillStyle = snap.bg;
       g.fillRect(0, 0, snap.w, snap.h);
-      const imgs = await Promise.race([
-        Promise.all(snap.items.map((it) => load(it.src))),
-        new Promise((r) => setTimeout(() => r(null), 2500)),
-      ]);
       snap.items.forEach((it, i) => {
+        g.globalAlpha = it.card ?? 1;
         g.fillStyle = "#1c1c1c";
         g.fillRect(it.x, it.y, it.w, it.h);
         const im = imgs?.[i];
         if (!im) return;
+        g.globalAlpha = it.alpha ?? 1;
         // Cropped to fill, as the page does.
         const s = Math.max(it.w / im.width, it.h / im.height);
         const sw = it.w / s;
         const sh = it.h / s;
         g.drawImage(im, (im.width - sw) / 2, (im.height - sh) / 2, sw, sh, it.x, it.y, it.w, it.h);
       });
+      // Borders: the active category's underline, the S key's outline.
+      for (const b of snap.boxes ?? []) {
+        g.globalAlpha = b.alpha;
+        const [top, right, bottom, left] = b.sides;
+        if (b.radius && top && right && bottom && left) {
+          g.strokeStyle = top.c;
+          g.lineWidth = top.w;
+          g.beginPath();
+          g.roundRect?.(b.x + top.w / 2, b.y + top.w / 2, b.w - top.w, b.h - top.w, b.radius);
+          g.stroke();
+          continue;
+        }
+        const side = (s, x, y, w, h) => { if (s) { g.fillStyle = s.c; g.fillRect(x, y, w, h); } };
+        side(top, b.x, b.y, b.w, top?.w);
+        side(bottom, b.x, b.y + b.h - (bottom?.w ?? 0), b.w, bottom?.w);
+        side(left, b.x, b.y, left?.w, b.h);
+        side(right, b.x + b.w - (right?.w ?? 0), b.y, right?.w, b.h);
+      }
       for (const tx of snap.texts) {
+        g.globalAlpha = tx.alpha ?? 1;
         g.font = tx.font;
+        if ("letterSpacing" in g) g.letterSpacing = tx.ls && tx.ls !== "normal" ? tx.ls : "0px";
         g.fillStyle = tx.color;
         g.textBaseline = "alphabetic";
-        g.fillText(tx.text, tx.x, tx.base);
-        if (tx.under) g.fillRect(tx.x, tx.under, tx.w, 1.5);
+        // The baseline sits where the font's own ascent puts it in the box
+        // the page measured, so the words land on the same pixels.
+        const m = g.measureText(tx.text);
+        const asc = m.fontBoundingBoxAscent;
+        const desc = m.fontBoundingBoxDescent;
+        const base = tx.h && asc + desc > 0 ? tx.top + (tx.h * asc) / (asc + desc) : tx.base;
+        g.fillText(tx.text, tx.x, base);
+        if (tx.under) g.fillRect(tx.x, base + tx.under.offset, tx.w, tx.under.thick);
       }
+      g.globalAlpha = 1;
+      if ("letterSpacing" in g) g.letterSpacing = "0px";
       tex.needsUpdate = true;
       layout(snap.w / snap.h);
     }
@@ -151,7 +196,11 @@
     }
     async function stepBack() {
       state = "moving";
+      // Back to the resolution the device can keep up with (see enter).
+      renderer.setPixelRatio(pixelRatio());
+      hush(2400);
       await tween({ x: 0, z: SITE.Z0 + 5.2, y: 0, yaw: 0, pitch: -0.02 }, 1900);
+      roomsOnHold = false;
       state = "walking";
       running = true;
       hudTop.hidden = false;
@@ -182,13 +231,12 @@
     addEventListener("keydown", (e) => {
       if (!audio) startAudio();
       if (e.code === "KeyE" && state === "walking" && here === regions.lobby) {
-        const p = SITE.fillPose();
+        // Near the window and looking at it.
         const dx = 0 - me.x;
         const dz = SITE.Z0 - me.z;
         const d = Math.hypot(dx, dz);
         const facing = (-Math.sin(me.yaw) * dx - Math.cos(me.yaw) * dz) / d;
         if (d < 7 && facing > 0.6) goBack();
-        void p;
       }
     });
     addEventListener("pointerdown", () => { if (!audio) startAudio(); });
@@ -196,6 +244,14 @@
       const m = e.data || {};
       if (m.type === "gallery:enter") {
         await SITE.paint(m.snap);
+        // The moment of handing over is a still picture of the page, so draw
+        // it at the screen's full sharpness, whatever the frame rate needs
+        // once things start moving.
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        hush(4000);
+        // Rooms wait till the camera has pulled back: they're behind you
+        // then, and building one mid-glide would make it stutter.
+        roomsOnHold = true;
         placeAtFill();
         renderer.setAnimationLoop(frame);
         audio?.ctx.resume();

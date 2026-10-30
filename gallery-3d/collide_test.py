@@ -1,6 +1,7 @@
 """Walk blind in every room: hold W, turn to a random heading every so
 often, and record where you go. Check you stay inside each room, don't
 end up in a wall, and don't get stuck; then walk through every doorway."""
+import os
 import json
 import random
 import sys
@@ -9,7 +10,7 @@ import time
 sys.path.insert(0, ".")
 from cdp import Page
 
-URL = "http://localhost:8000/crowd-lab/v2/"
+URL = os.environ.get("GALLERY_URL", "http://localhost:8000/crowd-lab/v2/")
 BOUNDS = {
     "gallery": (-9, 9, 0, 28),
     "apartments": (-33.2, 39.2, -0.3, 36.2),

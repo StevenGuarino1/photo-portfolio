@@ -37,7 +37,8 @@
   // ---------- Quality ----------
   // Auto picks a tier from the device; Low/Medium/High override it. The tier
   // sets render resolution, shadows, how much grass and how many particles a
-  // room makes, and how many rooms stay built at once.
+  // room makes, and how many rooms stay built at once. On Auto the
+  // resolution then follows the frame rate actually measured (see govern()).
 
   const TOUCH = matchMedia("(pointer: coarse)").matches;
   function autoQuality() {
@@ -47,25 +48,29 @@
     if (TOUCH) return small || mem < 6 || cores < 8 ? "low" : "medium";
     return mem <= 4 || cores <= 4 ? "medium" : "high";
   }
+  // `keep` is about memory, not speed: rooms out of sight cost nothing to
+  // draw, but every built room holds its textures, meshes and shadow maps.
   const TIERS = {
     low: { dpr: 1, shadow: 0, density: 0.35, keep: 2, aniso: 2 },
     medium: { dpr: 1.35, shadow: 1024, density: 0.65, keep: 4, aniso: 4 },
-    high: { dpr: 2, shadow: 2048, density: 1, keep: 9, aniso: 8 },
+    high: { dpr: 2, shadow: 2048, density: 1, keep: 6, aniso: 8 },
   };
   let tierName = settings.quality === "auto" ? autoQuality() : settings.quality;
-  let Q = TIERS[tierName];
+  let Q = { ...TIERS[tierName] };
   const motion = () => (settings.reduceMotion ? 0.2 : 1);
 
   // ---------- Renderer and camera ----------
 
   const renderer = new THREE.WebGLRenderer({ antialias: tierName !== "low", stencil: true, powerPreference: "high-performance" });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, Q.dpr));
   renderer.setSize(innerWidth, innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.autoClear = false;
   renderer.localClippingEnabled = true;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // Shadow maps are redrawn when draw() says so: every frame for the room
+  // you're in, now and then for rooms seen through a doorway.
+  renderer.shadowMap.autoUpdate = false;
   renderer.setClearColor(0x0e0f12);
   document.body.prepend(renderer.domElement);
   const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
@@ -84,7 +89,79 @@
   addEventListener("resize", () => {
     renderer.setSize(innerWidth, innerHeight);
     fitCamera();
+    hush();
   });
+
+  // ---------- Keeping the frame rate up ----------
+  // On Auto, the resolution follows how the device is actually coping,
+  // judged on frame times over a second or so. Slow frames step it down a
+  // notch (what it costs goes with the square of it); a long smooth run
+  // tries a notch back up, and a notch that proved too much isn't tried
+  // again for a minute. The notch is remembered for the next visit. Past
+  // the bottom notch, shadow maps get smaller too.
+  const SCALES = [1, 0.85, 0.72, 0.6, 0.5];
+  const gov = { level: 0, times: [], work: [], calm: 0, quiet: 0, failed: new Map() };
+  if (settings.quality === "auto" && settings.autoTier === tierName) gov.level = clamp(settings.autoLevel | 0, 0, SCALES.length - 1);
+  function pixelRatio() {
+    const base = Math.min(devicePixelRatio, Q.dpr);
+    return settings.quality === "auto" ? Math.max(Math.min(base, 0.65), base * SCALES[gov.level]) : base;
+  }
+  renderer.setPixelRatio(pixelRatio());
+  // Don't judge the frame rate on a moment that's slow for other reasons:
+  // a room being built, the window resizing, coming back from a pause.
+  function hush(ms = 1200) {
+    gov.quiet = Math.max(gov.quiet, performance.now() + ms);
+    gov.times.length = gov.work.length = 0;
+  }
+  function setLevel(level) {
+    gov.level = level;
+    gov.calm = 0;
+    Object.assign(settings, { autoLevel: level, autoTier: tierName });
+    saveSettings();
+    renderer.setPixelRatio(pixelRatio());
+    hush(1500);
+  }
+  function shrinkShadows() {
+    if (Q.shadow <= 512) return;
+    Q.shadow /= 2;
+    for (const reg of Object.values(regions)) {
+      reg.scene?.traverse((o) => {
+        if (!o.isLight || !o.castShadow) return;
+        o.shadow.mapSize.set(Q.shadow, Q.shadow);
+        o.shadow.map?.dispose();
+        o.shadow.map = null;
+      });
+    }
+    hush(1500);
+  }
+  // `ms` is the time since the last frame; `work` is how long the last
+  // frame's own code took. When that code is most of the frame, the
+  // processor is the bottleneck and fewer pixels wouldn't help.
+  function govern(ms, work, now) {
+    if (settings.quality !== "auto") return;
+    if (ms > 250) return hush();
+    if (now < gov.quiet) return;
+    gov.times.push(ms);
+    gov.work.push(work);
+    gov.span = (gov.times.length === 1 ? 0 : gov.span) + ms;
+    // Judge on 50 frames, or on a second and a half when they're slow.
+    if (gov.times.length < 50 && !(gov.span > 1500 && gov.times.length >= 8)) return;
+    const s = gov.times.sort((a, b) => a - b);
+    const med = s[s.length >> 1];
+    const p90 = s[Math.floor(s.length * 0.9)];
+    const busy = gov.work.sort((a, b) => a - b)[gov.work.length >> 1];
+    gov.times.length = gov.work.length = 0;
+    if (med > 20 || p90 > 40) {
+      if (busy > med * 0.75) return;
+      gov.failed.set(gov.level, now);
+      // Badly slow: two notches at once.
+      if (gov.level < SCALES.length - 1) setLevel(Math.min(SCALES.length - 1, gov.level + (med > 45 ? 2 : 1)));
+      else shrinkShadows();
+    } else if (med < 17.6 && p90 < 22) {
+      const up = gov.level - 1;
+      if (++gov.calm >= 8 && up >= 0 && now - (gov.failed.get(up) ?? -1e9) > 60000) setLevel(up);
+    } else gov.calm = 0;
+  }
 
   // ---------- Small helpers ----------
 
@@ -491,6 +568,8 @@
     setThrough(reg, reg !== here);
     if (audio) startRoomSound(reg);
     reg.builtMs = Math.round(performance.now() - t0);
+    reg.shadowAt = undefined;
+    hush();
   }
 
   function unloadRegion(reg) {
@@ -637,7 +716,7 @@
     if (prev && prev !== reg) setThrough(prev, true);
     setThrough(reg, false);
     for (const r of Object.values(regions)) if (r !== reg && r.loaded) setThrough(r, true);
-    if (!quiet && reg.def.name) toast(reg.def.name, reg.def.tagline);
+    if (!quiet && reg.def.name) toast(reg.def.name, reg.def.hint ?? "");
     roomActionBtn.hidden = !reg.api?.action;
     if (reg.api?.action) roomActionBtn.textContent = reg.api.action.label;
     renderRoomList();
@@ -871,8 +950,9 @@
   // they show through their doorways. Others come down after a while.
 
   let lastLoadCheck = 0;
+  let roomsOnHold = false; // set while the site's window hands over (95-site.js)
   function manageRooms(now) {
-    if (now - lastLoadCheck < 400) return;
+    if (roomsOnHold || now - lastLoadCheck < 400) return;
     lastLoadCheck = now;
     const want = [];
     if (here && here !== regions.lobby) want.push(here.id);
@@ -901,40 +981,86 @@
 
   // ---------- Drawing ----------
 
-  const frustum = new THREE.Frustum();
-  const viewProj = new THREE.Matrix4();
-  function inView(box) {
-    viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    frustum.setFromProjectionMatrix(viewProj);
-    return frustum.intersectsBox(box);
+  // A room seen through a doorway is drawn only inside the rectangle of
+  // the screen where it can show: its own doorway, cut down to the hall
+  // doorway in front of it while you're out in the hall. From down the
+  // hall the two never line up, so most rooms aren't drawn at all.
+
+  const corner = new THREE.Vector3();
+  const screenSize = new THREE.Vector2();
+  // The screen rectangle of a doorway opening ([x0, y0, x1, y1] in CSS
+  // pixels, from the bottom left as WebGL counts): null if it's out of
+  // sight, the whole screen if you're too close for it to project.
+  function openingRect(center, tangent, half, h) {
+    renderer.getSize(screenSize);
+    const W = screenSize.x;
+    const H = screenSize.y;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, behind = 0;
+    for (let i = 0; i < 4; i++) {
+      const s = i & 1 ? half : -half;
+      corner.set(center.x + tangent.x * s, i & 2 ? h : 0, center.z + tangent.z * s).applyMatrix4(camera.matrixWorldInverse);
+      if (corner.z > -camera.near) { behind++; continue; }
+      corner.applyMatrix4(camera.projectionMatrix);
+      x0 = Math.min(x0, corner.x); x1 = Math.max(x1, corner.x);
+      y0 = Math.min(y0, corner.y); y1 = Math.max(y1, corner.y);
+    }
+    if (behind === 4) return null;
+    if (behind) return [0, 0, W, H];
+    const r = [Math.max(0, (x0 + 1) / 2 * W), Math.max(0, (y0 + 1) / 2 * H), Math.min(W, (x1 + 1) / 2 * W), Math.min(H, (y1 + 1) / 2 * H)];
+    return r[2] - r[0] < 1 || r[3] - r[1] < 1 ? null : r;
   }
-  renderer.info.autoReset = false;
-  function draw() {
-    renderer.info.reset();
-    renderer.clear();
-    const lobby = regions.lobby;
-    renderer.render(here.scene, camera);
-    if (here === lobby) {
+  const meet = (a, b) => {
+    if (!a || !b) return null;
+    const r = [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])];
+    return r[2] - r[0] < 1 || r[3] - r[1] < 1 ? null : r;
+  };
+  const sideOf = (door) => (camera.position.x - door.center.x) * door.normal.x + (camera.position.z - door.center.z) * door.normal.z;
+
+  // What's on screen this frame through doorways: [{ reg, door, portal, rect }].
+  let views = [];
+  function cull() {
+    views = [];
+    if (here === regions.lobby) {
       for (const door of doors) {
-        const room = regions[door.room];
-        if (!room.loaded || !inView(door.box)) continue;
-        const near = Math.abs((camera.position.x - door.center.x) * door.normal.x + (camera.position.z - door.center.z) * door.normal.z);
-        door.into.box.scale.z = near < 1 ? 1 : 0.02;
-        renderer.render(door.into.scene, camera);
-        renderer.render(room.scene, camera);
+        const reg = regions[door.room];
+        if (!reg.loaded || sideOf(door) > 0.5) continue;
+        let rect = openingRect(door.center, door.tangent, door.half, door.h);
+        // Out in the hall, the vestibule's own doorway hides most of it.
+        const s = door.slot;
+        const along = (camera.position.x - s.base.x) * s.dir.x + (camera.position.z - s.base.z) * s.dir.z;
+        if (along < 0) rect = meet(rect, openingRect(s.base, door.tangent, DOOR_HALF, DOOR_H));
+        if (rect) views.push({ reg, door, portal: door.into, rect });
       }
-    } else if (here.door && inView(here.door.box)) {
-      const door = here.door;
-      const near = Math.abs((camera.position.x - door.center.x) * door.normal.x + (camera.position.z - door.center.z) * door.normal.z);
-      door.out.box.scale.z = near < 1 ? 1 : 0.02;
-      renderer.render(door.out.scene, camera);
-      renderer.render(lobby.scene, camera);
+    } else if (here.door && sideOf(here.door) > -0.5) {
+      const rect = openingRect(here.door.center, here.door.tangent, here.door.half, here.door.h);
+      if (rect) views.push({ reg: regions.lobby, door: here.door, portal: here.door.out, rect });
     }
   }
+
+  renderer.info.autoReset = false;
+  function draw(now) {
+    renderer.info.reset();
+    renderer.setScissorTest(false);
+    renderer.clear();
+    renderer.shadowMap.needsUpdate = true;
+    renderer.render(here.scene, camera);
+    for (const v of views) {
+      const [x0, y0, x1, y1] = v.rect;
+      renderer.setScissor(Math.floor(x0), Math.floor(y0), Math.ceil(x1 - x0) + 1, Math.ceil(y1 - y0) + 1);
+      renderer.setScissorTest(true);
+      v.portal.box.scale.z = Math.abs(sideOf(v.door)) < 1 ? 1 : 0.02;
+      renderer.render(v.portal.scene, camera);
+      // A room seen through a doorway redraws its shadows a few times a
+      // second, not every frame: nobody can tell from out here.
+      const due = !(now - (v.reg.shadowAt ?? -1e9) < 150);
+      if (due) v.reg.shadowAt = now;
+      renderer.shadowMap.needsUpdate = due;
+      renderer.render(v.reg.scene, camera);
+    }
+    renderer.setScissorTest(false);
+  }
   function visibleNow(reg) {
-    if (reg === here) return true;
-    if (here === regions.lobby) return reg.door && inView(reg.door.box);
-    return reg === regions.lobby && here.door && inView(here.door.box);
+    return reg === here || views.some((v) => v.reg === reg);
   }
 
   // ---------- The people in a room: breathing, glancing, settling ----------
@@ -1177,7 +1303,7 @@
     running = true;
     startAudio();
     if (!TOUCH) capture();
-    toast(regions.lobby.def.name, regions.lobby.def.tagline);
+    toast(regions.lobby.def.name);
   });
 
   $("homeBtn").addEventListener("click", () => goTo("lobby"));
@@ -1201,6 +1327,7 @@
     menuOpen = open;
     menuEl.hidden = !open;
     if (open) { release(); held.clear(); syncMenu(); }
+    hush();
   }
 
   for (const b of $("qualitySeg").querySelectorAll("button")) {
@@ -1232,7 +1359,8 @@
 
   function syncMenu() {
     for (const b of $("qualitySeg").querySelectorAll("button")) b.classList.toggle("is-on", b.dataset.q === settings.quality);
-    $("qualityNote").textContent = settings.quality === "auto" ? `Auto picked ${tierName} for this device.` : `${tierName[0].toUpperCase() + tierName.slice(1)} on this device.`;
+    const scaled = gov.level ? `, drawn at ${Math.round(SCALES[gov.level] * 100)}% resolution to keep it smooth` : "";
+    $("qualityNote").textContent = settings.quality === "auto" ? `Auto picked ${tierName} for this device${scaled}.` : `${tierName[0].toUpperCase() + tierName.slice(1)} on this device.`;
     $("motionToggle").setAttribute("aria-pressed", String(settings.reduceMotion));
     $("muteToggle").setAttribute("aria-pressed", String(settings.muted));
     $("volume").value = Math.round(settings.volume * 100);
@@ -1261,8 +1389,10 @@
   // room is rebuilt so its grass and particles match.
   function setQuality(name) {
     tierName = name;
-    Q = TIERS[name];
-    renderer.setPixelRatio(Math.min(devicePixelRatio, Q.dpr));
+    Q = { ...TIERS[name] };
+    gov.level = settings.quality === "auto" && settings.autoTier === name ? clamp(settings.autoLevel | 0, 0, SCALES.length - 1) : 0;
+    gov.failed.clear();
+    renderer.setPixelRatio(pixelRatio());
     renderer.setSize(innerWidth, innerHeight);
     const keep = here;
     for (const reg of Object.values(regions)) if (reg.loaded) { unloadRegion(reg); buildRegion(reg); }
@@ -1328,6 +1458,7 @@
   function closeViewer() {
     viewerOpen = false;
     viewer.hidden = true;
+    hush();
     if (!TOUCH) capture();
   }
   viewer.addEventListener("click", closeViewer);
@@ -1336,10 +1467,16 @@
 
   const clock = new THREE.Clock();
   function frame() {
-    const dt = Math.min(clock.getDelta(), 0.1);
+    const raw = clock.getDelta();
+    const dt = Math.min(raw, 0.1);
     const t = clock.elapsedTime;
-    if (running && !menuOpen && !viewerOpen) walk(dt);
+    const now = performance.now();
+    // A photo shown full screen covers everything: nothing to draw.
+    if (viewerOpen) return;
+    govern(raw * 1000, lastWork, now);
+    if (running && !menuOpen) walk(dt);
     placeCamera(t);
+    cull();
     const cor = corridorInfo();
     for (const reg of Object.values(regions)) {
       if (!reg.loaded || !visibleNow(reg)) continue;
@@ -1347,8 +1484,10 @@
       animatePeople(reg, t, dt);
     }
     crosshair.hidden = !(locked || (running && here?.api?.crosshair));
-    if (++cardCheck % 5 === 0) showCard(running && !menuOpen && !viewerOpen ? findPhoto() : null);
+    if (++cardCheck % 5 === 0) showCard(running && !menuOpen ? findPhoto() : null);
     mixSound(t, dt);
-    draw();
-    manageRooms(performance.now());
+    draw(now);
+    manageRooms(now);
+    lastWork = performance.now() - now;
   }
+  let lastWork = 0;

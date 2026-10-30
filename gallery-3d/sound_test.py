@@ -1,8 +1,9 @@
+import os
 import sys, time, json
 sys.path.insert(0, ".")
 from cdp import Page
 page = Page(1000, 640)
-page.goto("http://localhost:8000/crowd-lab/v2/", wait=4)
+page.goto(os.environ.get("GALLERY_URL", "http://localhost:8000/crowd-lab/v2/"), wait=4)
 page.eval("document.getElementById('enter').click()")
 time.sleep(1.5)
 print("audio state:", page.eval("window.__app.audio && window.__app.audio.ctx.state"))

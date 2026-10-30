@@ -77,11 +77,11 @@ class WS:
 
 
 class Page:
-    def __init__(self, width=1400, height=800, gpu=True):
+    def __init__(self, width=1400, height=800, gpu=True, scrollbars=False):
         self.dir = tempfile.mkdtemp(prefix="cdp-")
         port = 9333
         args = [CHROME, "--headless=new", f"--remote-debugging-port={port}", f"--user-data-dir={self.dir}",
-                f"--window-size={width},{height}", "--hide-scrollbars", "--autoplay-policy=no-user-gesture-required",
+                f"--window-size={width},{height}", *([] if scrollbars else ["--hide-scrollbars"]), "--autoplay-policy=no-user-gesture-required",
                 "--no-first-run", "--disable-background-timer-throttling", "--disable-renderer-backgrounding"]
         if gpu:
             args += (["--use-angle=d3d11"] if os.name == "nt" else []) + ["--enable-gpu", "--ignore-gpu-blocklist"]

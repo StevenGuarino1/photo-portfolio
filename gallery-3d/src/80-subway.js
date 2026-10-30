@@ -34,6 +34,10 @@
     const BEND_MAX = 0.13;
     const A_LAT = 1.0;
     const SPEED = Math.sqrt(A_LAT * (L / BEND_MAX));
+    // Which way the train is pointing in the world: the bends it has been
+    // through, added up (the integral of SPEED * bend / L). They swing one
+    // way and back, so this swings too, about 18° either side of straight.
+    const headingAt = (t) => (SPEED / L) * (-(0.1 / 0.25) * Math.cos(t * 0.25) - (0.03 / 0.61) * Math.cos(t * 0.61 + 1));
     // The track's curvature `s` metres along from the middle car's centre,
     // at time t: the bend that will reach you s / SPEED seconds from now.
     const kappa = (t, s) => bendAt(t + s / SPEED) / L;
@@ -84,7 +88,7 @@
       const dz = Z - f.z;
       return { x: dx * c - dz * s, z: dx * s + dz * c + CW / 2 };
     };
-    return { CW, CL, GAP, L, N, MID, S, SPEED, BEND_MAX, bendAt, shape, track, frame, toCar, fromCar };
+    return { CW, CL, GAP, L, N, MID, S, SPEED, BEND_MAX, bendAt, headingAt, shape, track, frame, toCar, fromCar };
   })();
 
   ROOMS.subway = {
@@ -109,7 +113,7 @@
       },
     },
     build(R) {
-      const { CW, CL, L, N, MID, S, SPEED, BEND_MAX, bendAt, shape, track, frame, toCar, fromCar } = SUBWAY;
+      const { CW, CL, L, N, MID, S, SPEED, BEND_MAX, bendAt, headingAt, shape, track, frame, toCar, fromCar } = SUBWAY;
       shape(performance.now() / 1000);
       const CH = 2.5; // wall height
       const TOP = CH + 0.12; // the ceiling
@@ -802,8 +806,14 @@
       // ---------- The city ----------
       // Laid out in a straight frame along the middle car (x along the line,
       // z across it); each layer slides past and wraps round seamlessly.
+      // Everything from a hundred metres out, and the sky, sits in `far`,
+      // which swings round the middle car as the track turns the train, so
+      // the skyline wheels past the windows in a bend; the blocks right
+      // below the line stay square to the viaduct.
       const city = new THREE.Group();
       R.add(city);
+      const far = new THREE.Group();
+      R.add(far);
       const sky = new THREE.Group();
       const MOON = new THREE.Vector3(-0.55, 0.32, -0.77).normalize();
       sky.add(skyDome({ top: 0x05060d, mid: 0x13131f, low: 0x4a2f22, sunDir: MOON, glow: [0.5, 0.5, 0.6], tight: 90, spread: 9, glowAmt: [0.4, 0.06] }));
@@ -886,7 +896,7 @@
       // One layer of buildings: `P` metres long, repeated, `n0`–`n1` metres
       // either side of the line. `avoid` keeps streets clear.
       const layers = [];
-      function layer({ seed, P, n0, n1, every, w, d, h, tint, lit, count, avoid }) {
+      function layer({ seed, P, n0, n1, every, w, d, h, tint, lit, count, avoid, parent = city }) {
         const r = rng(seed);
         const spots = [];
         for (const side of [-1, 1]) {
@@ -919,7 +929,7 @@
           mesh.frustumCulled = false;
           group.add(mesh);
         }
-        city.add(group);
+        parent.add(group);
         layers.push({ group, P });
         return { group, used, P };
       }
@@ -930,11 +940,11 @@
       // to sweep past.
       const nearL = layer({ seed: 301, P: 400, n0: 16, n1: 64, every: 14, w: [10, 22], d: [10, 22], h: [4, 13], tint: 0xffffff, lit: 0.42, count: 1, avoid: offStreets });
       // A couple of hundred metres out: mid-rise blocks, a little hazier.
-      layer({ seed: 302, P: 880, n0: 95, n1: 305, every: 20, w: [14, 30], d: [14, 30], h: [12, 55], tint: 0xb9b3c4, lit: 0.36, count: D < 0.5 ? 0.6 : 1, avoid: offStreets });
+      layer({ seed: 302, P: 880, n0: 95, n1: 305, every: 20, w: [14, 30], d: [14, 30], h: [12, 55], tint: 0xb9b3c4, lit: 0.36, count: D < 0.5 ? 0.6 : 1, avoid: offStreets, parent: far });
       // Downtown, past the freeway: towers.
-      const townL = layer({ seed: 304, P: 1600, n0: 390, n1: 820, every: 26, w: [18, 40], d: [18, 40], h: [50, 240], tint: 0x8c88a4, lit: 0.33, count: D < 0.5 ? 0.6 : 1 });
+      const townL = layer({ seed: 304, P: 1600, n0: 390, n1: 820, every: 26, w: [18, 40], d: [18, 40], h: [50, 240], tint: 0x8c88a4, lit: 0.33, count: D < 0.5 ? 0.6 : 1, parent: far });
       // The skyline on the horizon: supertalls, dim and blue with distance.
-      const farL = layer({ seed: 303, P: 3600, n0: 900, n1: 1420, every: 40, w: [26, 60], d: [26, 60], h: [90, 430], tint: 0x5e5c7c, lit: 0.27, count: D < 0.5 ? 0.5 : 1 });
+      const farL = layer({ seed: 303, P: 3600, n0: 900, n1: 1420, every: 40, w: [26, 60], d: [26, 60], h: [90, 430], tint: 0x5e5c7c, lit: 0.27, count: D < 0.5 ? 0.5 : 1, parent: far });
 
       // The tallest towers get a floodlit crown and a spire, and every tall
       // one a red aircraft light that blinks.
@@ -1033,7 +1043,7 @@
       {
         const deck = new THREE.Mesh(new THREE.BoxGeometry(4000, 1.2, 28), new THREE.MeshBasicMaterial({ color: 0x141416 }));
         deck.position.set(0, FY - 0.6, CW / 2 + FWY);
-        city.add(deck);
+        far.add(deck);
         const cols = new THREE.Group();
         const colMesh = new THREE.InstancedMesh(unitBox, new THREE.MeshBasicMaterial({ color: 0x1c1c1f }), 30);
         const m = new THREE.Matrix4();
@@ -1052,7 +1062,7 @@
         const lamps = new THREE.Points(g, new THREE.PointsMaterial({ map: glowTex, color: 0xffb060, size: 7, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
         lamps.frustumCulled = false;
         cols.add(colMesh, lamps);
-        city.add(cols);
+        far.add(cols);
         layers.push({ group: cols, P: 400 });
       }
 
@@ -1064,7 +1074,7 @@
       // of blocks) and wraps round.
       const HW = 640;
       const wrap = (v, h) => ((((v + h) % (2 * h)) + 2 * h) % (2 * h)) - h;
-      function fleet({ lanes, gap, size, seed }) {
+      function fleet({ lanes, gap, size, seed, parent = city }) {
         const r = rng(seed);
         const cars = [];
         for (const lane of lanes) {
@@ -1086,7 +1096,7 @@
         g.setAttribute("color", new THREE.BufferAttribute(col, 3));
         const pts = new THREE.Points(g, new THREE.PointsMaterial({ map: glowTex, vertexColors: true, size, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
         pts.frustumCulled = false;
-        city.add(pts);
+        parent.add(pts);
         return { cars, pos, g };
       }
       const lanes = [];
@@ -1100,7 +1110,7 @@
       }
       const street = fleet({ lanes, gap: D < 0.5 ? [16, 60] : [9, 40], size: 1.5, seed: 77 });
       const fwyLanes = [-10.5, -7, -3.5, 3.5, 7, 10.5].map((o) => ({ axis: "x", n: FWY + o, dir: o < 0 ? 1 : -1, speed: 24 + Math.abs(o), y: FY + 0.7 }));
-      const freeway = fleet({ lanes: fwyLanes, gap: D < 0.5 ? [9, 30] : [5, 22], size: 2.6, seed: 78 });
+      const freeway = fleet({ lanes: fwyLanes, gap: D < 0.5 ? [9, 30] : [5, 22], size: 2.6, seed: 78, parent: far });
       function drive(f, dt) {
         const { cars, pos } = f;
         for (let i = 0; i < cars.length; i++) {
@@ -1133,7 +1143,7 @@
         g.setAttribute("color", new THREE.Float32BufferAttribute([1, 1, 1, 1, 0.1, 0.1, 0.2, 1, 0.3], 3));
         const p = new THREE.Points(g, new THREE.PointsMaterial({ map: glowTex, vertexColors: true, size: 10, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
         p.frustumCulled = false;
-        city.add(p);
+        far.add(p);
         return p;
       })();
       // Searchlights sweeping the clouds from far across the city.
@@ -1151,12 +1161,16 @@
         const beam = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x9aa4c8, vertexColors: true, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
         beam.position.set(x, STREET, CW / 2 + n);
         beam.frustumCulled = false;
-        city.add(beam);
+        far.add(beam);
         return { beam, phase: i * 2.1 };
       });
       let travelled = 0;
       function cityTick(t, dt) {
         sky.position.copy(R.camLocal);
+        // Turn the far city and the sky about the middle car's centre.
+        const th = headingAt(performance.now() / 1000);
+        far.rotation.y = sky.rotation.y = th;
+        far.position.set(-(CW / 2) * Math.sin(th), 0, CW / 2 - (CW / 2) * Math.cos(th));
         travelled += SPEED * dt;
         for (const L of layers) L.group.position.x = -(travelled % L.P);
         streetTex.offset.x = (travelled / BLOCK) % 1;

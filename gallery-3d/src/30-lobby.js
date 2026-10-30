@@ -281,6 +281,9 @@
         for (const k of [-0.6, 0, 0.6]) blockers.push({ x: 0, z: z + k, r: 0.3 });
       }
 
+      // Hundreds of small static pieces, drawn as a handful.
+      mergeStatic(R.root);
+
       // A doorway whose room isn't built yet is closed for the moment.
       const barriers = () => doors.filter((door) => !regions[door.room].loaded).map((door) => {
         const p0 = door.center.clone().addScaledVector(door.tangent, -DOOR_HALF - 0.1);

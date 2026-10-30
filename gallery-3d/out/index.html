@@ -20,7 +20,9 @@
   }
 
   * { box-sizing: border-box; }
-  html, body { height: 100%; overflow: hidden; }
+  /* No margin: served on its own (the site's frame), a browser's default
+     8 px would push the whole picture off the window it hands over to. */
+  html, body { height: 100%; margin: 0; overflow: hidden; }
 
   body {
     background: var(--bg);
@@ -507,7 +509,8 @@
   // ---------- Quality ----------
   // Auto picks a tier from the device; Low/Medium/High override it. The tier
   // sets render resolution, shadows, how much grass and how many particles a
-  // room makes, and how many rooms stay built at once.
+  // room makes, and how many rooms stay built at once. On Auto the
+  // resolution then follows the frame rate actually measured (see govern()).
 
   const TOUCH = matchMedia("(pointer: coarse)").matches;
   function autoQuality() {
@@ -517,25 +520,29 @@
     if (TOUCH) return small || mem < 6 || cores < 8 ? "low" : "medium";
     return mem <= 4 || cores <= 4 ? "medium" : "high";
   }
+  // `keep` is about memory, not speed: rooms out of sight cost nothing to
+  // draw, but every built room holds its textures, meshes and shadow maps.
   const TIERS = {
     low: { dpr: 1, shadow: 0, density: 0.35, keep: 2, aniso: 2 },
     medium: { dpr: 1.35, shadow: 1024, density: 0.65, keep: 4, aniso: 4 },
-    high: { dpr: 2, shadow: 2048, density: 1, keep: 9, aniso: 8 },
+    high: { dpr: 2, shadow: 2048, density: 1, keep: 6, aniso: 8 },
   };
   let tierName = settings.quality === "auto" ? autoQuality() : settings.quality;
-  let Q = TIERS[tierName];
+  let Q = { ...TIERS[tierName] };
   const motion = () => (settings.reduceMotion ? 0.2 : 1);
 
   // ---------- Renderer and camera ----------
 
   const renderer = new THREE.WebGLRenderer({ antialias: tierName !== "low", stencil: true, powerPreference: "high-performance" });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, Q.dpr));
   renderer.setSize(innerWidth, innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.autoClear = false;
   renderer.localClippingEnabled = true;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // Shadow maps are redrawn when draw() says so: every frame for the room
+  // you're in, now and then for rooms seen through a doorway.
+  renderer.shadowMap.autoUpdate = false;
   renderer.setClearColor(0x0e0f12);
   document.body.prepend(renderer.domElement);
   const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
@@ -554,7 +561,79 @@
   addEventListener("resize", () => {
     renderer.setSize(innerWidth, innerHeight);
     fitCamera();
+    hush();
   });
+
+  // ---------- Keeping the frame rate up ----------
+  // On Auto, the resolution follows how the device is actually coping,
+  // judged on frame times over a second or so. Slow frames step it down a
+  // notch (what it costs goes with the square of it); a long smooth run
+  // tries a notch back up, and a notch that proved too much isn't tried
+  // again for a minute. The notch is remembered for the next visit. Past
+  // the bottom notch, shadow maps get smaller too.
+  const SCALES = [1, 0.85, 0.72, 0.6, 0.5];
+  const gov = { level: 0, times: [], work: [], calm: 0, quiet: 0, failed: new Map() };
+  if (settings.quality === "auto" && settings.autoTier === tierName) gov.level = clamp(settings.autoLevel | 0, 0, SCALES.length - 1);
+  function pixelRatio() {
+    const base = Math.min(devicePixelRatio, Q.dpr);
+    return settings.quality === "auto" ? Math.max(Math.min(base, 0.65), base * SCALES[gov.level]) : base;
+  }
+  renderer.setPixelRatio(pixelRatio());
+  // Don't judge the frame rate on a moment that's slow for other reasons:
+  // a room being built, the window resizing, coming back from a pause.
+  function hush(ms = 1200) {
+    gov.quiet = Math.max(gov.quiet, performance.now() + ms);
+    gov.times.length = gov.work.length = 0;
+  }
+  function setLevel(level) {
+    gov.level = level;
+    gov.calm = 0;
+    Object.assign(settings, { autoLevel: level, autoTier: tierName });
+    saveSettings();
+    renderer.setPixelRatio(pixelRatio());
+    hush(1500);
+  }
+  function shrinkShadows() {
+    if (Q.shadow <= 512) return;
+    Q.shadow /= 2;
+    for (const reg of Object.values(regions)) {
+      reg.scene?.traverse((o) => {
+        if (!o.isLight || !o.castShadow) return;
+        o.shadow.mapSize.set(Q.shadow, Q.shadow);
+        o.shadow.map?.dispose();
+        o.shadow.map = null;
+      });
+    }
+    hush(1500);
+  }
+  // `ms` is the time since the last frame; `work` is how long the last
+  // frame's own code took. When that code is most of the frame, the
+  // processor is the bottleneck and fewer pixels wouldn't help.
+  function govern(ms, work, now) {
+    if (settings.quality !== "auto") return;
+    if (ms > 250) return hush();
+    if (now < gov.quiet) return;
+    gov.times.push(ms);
+    gov.work.push(work);
+    gov.span = (gov.times.length === 1 ? 0 : gov.span) + ms;
+    // Judge on 50 frames, or on a second and a half when they're slow.
+    if (gov.times.length < 50 && !(gov.span > 1500 && gov.times.length >= 8)) return;
+    const s = gov.times.sort((a, b) => a - b);
+    const med = s[s.length >> 1];
+    const p90 = s[Math.floor(s.length * 0.9)];
+    const busy = gov.work.sort((a, b) => a - b)[gov.work.length >> 1];
+    gov.times.length = gov.work.length = 0;
+    if (med > 20 || p90 > 40) {
+      if (busy > med * 0.75) return;
+      gov.failed.set(gov.level, now);
+      // Badly slow: two notches at once.
+      if (gov.level < SCALES.length - 1) setLevel(Math.min(SCALES.length - 1, gov.level + (med > 45 ? 2 : 1)));
+      else shrinkShadows();
+    } else if (med < 17.6 && p90 < 22) {
+      const up = gov.level - 1;
+      if (++gov.calm >= 8 && up >= 0 && now - (gov.failed.get(up) ?? -1e9) > 60000) setLevel(up);
+    } else gov.calm = 0;
+  }
 
   // ---------- Small helpers ----------
 
@@ -961,6 +1040,8 @@
     setThrough(reg, reg !== here);
     if (audio) startRoomSound(reg);
     reg.builtMs = Math.round(performance.now() - t0);
+    reg.shadowAt = undefined;
+    hush();
   }
 
   function unloadRegion(reg) {
@@ -1107,7 +1188,7 @@
     if (prev && prev !== reg) setThrough(prev, true);
     setThrough(reg, false);
     for (const r of Object.values(regions)) if (r !== reg && r.loaded) setThrough(r, true);
-    if (!quiet && reg.def.name) toast(reg.def.name, reg.def.tagline);
+    if (!quiet && reg.def.name) toast(reg.def.name, reg.def.hint ?? "");
     roomActionBtn.hidden = !reg.api?.action;
     if (reg.api?.action) roomActionBtn.textContent = reg.api.action.label;
     renderRoomList();
@@ -1341,8 +1422,9 @@
   // they show through their doorways. Others come down after a while.
 
   let lastLoadCheck = 0;
+  let roomsOnHold = false; // set while the site's window hands over (95-site.js)
   function manageRooms(now) {
-    if (now - lastLoadCheck < 400) return;
+    if (roomsOnHold || now - lastLoadCheck < 400) return;
     lastLoadCheck = now;
     const want = [];
     if (here && here !== regions.lobby) want.push(here.id);
@@ -1371,40 +1453,86 @@
 
   // ---------- Drawing ----------
 
-  const frustum = new THREE.Frustum();
-  const viewProj = new THREE.Matrix4();
-  function inView(box) {
-    viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    frustum.setFromProjectionMatrix(viewProj);
-    return frustum.intersectsBox(box);
+  // A room seen through a doorway is drawn only inside the rectangle of
+  // the screen where it can show: its own doorway, cut down to the hall
+  // doorway in front of it while you're out in the hall. From down the
+  // hall the two never line up, so most rooms aren't drawn at all.
+
+  const corner = new THREE.Vector3();
+  const screenSize = new THREE.Vector2();
+  // The screen rectangle of a doorway opening ([x0, y0, x1, y1] in CSS
+  // pixels, from the bottom left as WebGL counts): null if it's out of
+  // sight, the whole screen if you're too close for it to project.
+  function openingRect(center, tangent, half, h) {
+    renderer.getSize(screenSize);
+    const W = screenSize.x;
+    const H = screenSize.y;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, behind = 0;
+    for (let i = 0; i < 4; i++) {
+      const s = i & 1 ? half : -half;
+      corner.set(center.x + tangent.x * s, i & 2 ? h : 0, center.z + tangent.z * s).applyMatrix4(camera.matrixWorldInverse);
+      if (corner.z > -camera.near) { behind++; continue; }
+      corner.applyMatrix4(camera.projectionMatrix);
+      x0 = Math.min(x0, corner.x); x1 = Math.max(x1, corner.x);
+      y0 = Math.min(y0, corner.y); y1 = Math.max(y1, corner.y);
+    }
+    if (behind === 4) return null;
+    if (behind) return [0, 0, W, H];
+    const r = [Math.max(0, (x0 + 1) / 2 * W), Math.max(0, (y0 + 1) / 2 * H), Math.min(W, (x1 + 1) / 2 * W), Math.min(H, (y1 + 1) / 2 * H)];
+    return r[2] - r[0] < 1 || r[3] - r[1] < 1 ? null : r;
   }
-  renderer.info.autoReset = false;
-  function draw() {
-    renderer.info.reset();
-    renderer.clear();
-    const lobby = regions.lobby;
-    renderer.render(here.scene, camera);
-    if (here === lobby) {
+  const meet = (a, b) => {
+    if (!a || !b) return null;
+    const r = [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])];
+    return r[2] - r[0] < 1 || r[3] - r[1] < 1 ? null : r;
+  };
+  const sideOf = (door) => (camera.position.x - door.center.x) * door.normal.x + (camera.position.z - door.center.z) * door.normal.z;
+
+  // What's on screen this frame through doorways: [{ reg, door, portal, rect }].
+  let views = [];
+  function cull() {
+    views = [];
+    if (here === regions.lobby) {
       for (const door of doors) {
-        const room = regions[door.room];
-        if (!room.loaded || !inView(door.box)) continue;
-        const near = Math.abs((camera.position.x - door.center.x) * door.normal.x + (camera.position.z - door.center.z) * door.normal.z);
-        door.into.box.scale.z = near < 1 ? 1 : 0.02;
-        renderer.render(door.into.scene, camera);
-        renderer.render(room.scene, camera);
+        const reg = regions[door.room];
+        if (!reg.loaded || sideOf(door) > 0.5) continue;
+        let rect = openingRect(door.center, door.tangent, door.half, door.h);
+        // Out in the hall, the vestibule's own doorway hides most of it.
+        const s = door.slot;
+        const along = (camera.position.x - s.base.x) * s.dir.x + (camera.position.z - s.base.z) * s.dir.z;
+        if (along < 0) rect = meet(rect, openingRect(s.base, door.tangent, DOOR_HALF, DOOR_H));
+        if (rect) views.push({ reg, door, portal: door.into, rect });
       }
-    } else if (here.door && inView(here.door.box)) {
-      const door = here.door;
-      const near = Math.abs((camera.position.x - door.center.x) * door.normal.x + (camera.position.z - door.center.z) * door.normal.z);
-      door.out.box.scale.z = near < 1 ? 1 : 0.02;
-      renderer.render(door.out.scene, camera);
-      renderer.render(lobby.scene, camera);
+    } else if (here.door && sideOf(here.door) > -0.5) {
+      const rect = openingRect(here.door.center, here.door.tangent, here.door.half, here.door.h);
+      if (rect) views.push({ reg: regions.lobby, door: here.door, portal: here.door.out, rect });
     }
   }
+
+  renderer.info.autoReset = false;
+  function draw(now) {
+    renderer.info.reset();
+    renderer.setScissorTest(false);
+    renderer.clear();
+    renderer.shadowMap.needsUpdate = true;
+    renderer.render(here.scene, camera);
+    for (const v of views) {
+      const [x0, y0, x1, y1] = v.rect;
+      renderer.setScissor(Math.floor(x0), Math.floor(y0), Math.ceil(x1 - x0) + 1, Math.ceil(y1 - y0) + 1);
+      renderer.setScissorTest(true);
+      v.portal.box.scale.z = Math.abs(sideOf(v.door)) < 1 ? 1 : 0.02;
+      renderer.render(v.portal.scene, camera);
+      // A room seen through a doorway redraws its shadows a few times a
+      // second, not every frame: nobody can tell from out here.
+      const due = !(now - (v.reg.shadowAt ?? -1e9) < 150);
+      if (due) v.reg.shadowAt = now;
+      renderer.shadowMap.needsUpdate = due;
+      renderer.render(v.reg.scene, camera);
+    }
+    renderer.setScissorTest(false);
+  }
   function visibleNow(reg) {
-    if (reg === here) return true;
-    if (here === regions.lobby) return reg.door && inView(reg.door.box);
-    return reg === regions.lobby && here.door && inView(here.door.box);
+    return reg === here || views.some((v) => v.reg === reg);
   }
 
   // ---------- The people in a room: breathing, glancing, settling ----------
@@ -1647,7 +1775,7 @@
     running = true;
     startAudio();
     if (!TOUCH) capture();
-    toast(regions.lobby.def.name, regions.lobby.def.tagline);
+    toast(regions.lobby.def.name);
   });
 
   $("homeBtn").addEventListener("click", () => goTo("lobby"));
@@ -1671,6 +1799,7 @@
     menuOpen = open;
     menuEl.hidden = !open;
     if (open) { release(); held.clear(); syncMenu(); }
+    hush();
   }
 
   for (const b of $("qualitySeg").querySelectorAll("button")) {
@@ -1702,7 +1831,8 @@
 
   function syncMenu() {
     for (const b of $("qualitySeg").querySelectorAll("button")) b.classList.toggle("is-on", b.dataset.q === settings.quality);
-    $("qualityNote").textContent = settings.quality === "auto" ? `Auto picked ${tierName} for this device.` : `${tierName[0].toUpperCase() + tierName.slice(1)} on this device.`;
+    const scaled = gov.level ? `, drawn at ${Math.round(SCALES[gov.level] * 100)}% resolution to keep it smooth` : "";
+    $("qualityNote").textContent = settings.quality === "auto" ? `Auto picked ${tierName} for this device${scaled}.` : `${tierName[0].toUpperCase() + tierName.slice(1)} on this device.`;
     $("motionToggle").setAttribute("aria-pressed", String(settings.reduceMotion));
     $("muteToggle").setAttribute("aria-pressed", String(settings.muted));
     $("volume").value = Math.round(settings.volume * 100);
@@ -1731,8 +1861,10 @@
   // room is rebuilt so its grass and particles match.
   function setQuality(name) {
     tierName = name;
-    Q = TIERS[name];
-    renderer.setPixelRatio(Math.min(devicePixelRatio, Q.dpr));
+    Q = { ...TIERS[name] };
+    gov.level = settings.quality === "auto" && settings.autoTier === name ? clamp(settings.autoLevel | 0, 0, SCALES.length - 1) : 0;
+    gov.failed.clear();
+    renderer.setPixelRatio(pixelRatio());
     renderer.setSize(innerWidth, innerHeight);
     const keep = here;
     for (const reg of Object.values(regions)) if (reg.loaded) { unloadRegion(reg); buildRegion(reg); }
@@ -1798,6 +1930,7 @@
   function closeViewer() {
     viewerOpen = false;
     viewer.hidden = true;
+    hush();
     if (!TOUCH) capture();
   }
   viewer.addEventListener("click", closeViewer);
@@ -1806,10 +1939,16 @@
 
   const clock = new THREE.Clock();
   function frame() {
-    const dt = Math.min(clock.getDelta(), 0.1);
+    const raw = clock.getDelta();
+    const dt = Math.min(raw, 0.1);
     const t = clock.elapsedTime;
-    if (running && !menuOpen && !viewerOpen) walk(dt);
+    const now = performance.now();
+    // A photo shown full screen covers everything: nothing to draw.
+    if (viewerOpen) return;
+    govern(raw * 1000, lastWork, now);
+    if (running && !menuOpen) walk(dt);
     placeCamera(t);
+    cull();
     const cor = corridorInfo();
     for (const reg of Object.values(regions)) {
       if (!reg.loaded || !visibleNow(reg)) continue;
@@ -1817,11 +1956,13 @@
       animatePeople(reg, t, dt);
     }
     crosshair.hidden = !(locked || (running && here?.api?.crosshair));
-    if (++cardCheck % 5 === 0) showCard(running && !menuOpen && !viewerOpen ? findPhoto() : null);
+    if (++cardCheck % 5 === 0) showCard(running && !menuOpen ? findPhoto() : null);
     mixSound(t, dt);
-    draw();
-    manageRooms(performance.now());
+    draw(now);
+    manageRooms(now);
+    lastWork = performance.now() - now;
   }
+  let lastWork = 0;
 
   // ---------- Building parts ----------
   // Flat-shaded, low-poly, one colour per part: the old-school RuneScape look.
@@ -2504,6 +2645,9 @@
         R.add(bench);
         for (const k of [-0.6, 0, 0.6]) blockers.push({ x: 0, z: z + k, r: 0.3 });
       }
+
+      // Hundreds of small static pieces, drawn as a handful.
+      mergeStatic(R.root);
 
       // A doorway whose room isn't built yet is closed for the moment.
       const barriers = () => doors.filter((door) => !regions[door.room].loaded).map((door) => {
@@ -8461,6 +8605,10 @@
     const BEND_MAX = 0.13;
     const A_LAT = 1.0;
     const SPEED = Math.sqrt(A_LAT * (L / BEND_MAX));
+    // Which way the train is pointing in the world: the bends it has been
+    // through, added up (the integral of SPEED * bend / L). They swing one
+    // way and back, so this swings too, about 18° either side of straight.
+    const headingAt = (t) => (SPEED / L) * (-(0.1 / 0.25) * Math.cos(t * 0.25) - (0.03 / 0.61) * Math.cos(t * 0.61 + 1));
     // The track's curvature `s` metres along from the middle car's centre,
     // at time t: the bend that will reach you s / SPEED seconds from now.
     const kappa = (t, s) => bendAt(t + s / SPEED) / L;
@@ -8511,7 +8659,7 @@
       const dz = Z - f.z;
       return { x: dx * c - dz * s, z: dx * s + dz * c + CW / 2 };
     };
-    return { CW, CL, GAP, L, N, MID, S, SPEED, BEND_MAX, bendAt, shape, track, frame, toCar, fromCar };
+    return { CW, CL, GAP, L, N, MID, S, SPEED, BEND_MAX, bendAt, headingAt, shape, track, frame, toCar, fromCar };
   })();
 
   ROOMS.subway = {
@@ -8536,7 +8684,7 @@
       },
     },
     build(R) {
-      const { CW, CL, L, N, MID, S, SPEED, BEND_MAX, bendAt, shape, track, frame, toCar, fromCar } = SUBWAY;
+      const { CW, CL, L, N, MID, S, SPEED, BEND_MAX, bendAt, headingAt, shape, track, frame, toCar, fromCar } = SUBWAY;
       shape(performance.now() / 1000);
       const CH = 2.5; // wall height
       const TOP = CH + 0.12; // the ceiling
@@ -9229,8 +9377,14 @@
       // ---------- The city ----------
       // Laid out in a straight frame along the middle car (x along the line,
       // z across it); each layer slides past and wraps round seamlessly.
+      // Everything from a hundred metres out, and the sky, sits in `far`,
+      // which swings round the middle car as the track turns the train, so
+      // the skyline wheels past the windows in a bend; the blocks right
+      // below the line stay square to the viaduct.
       const city = new THREE.Group();
       R.add(city);
+      const far = new THREE.Group();
+      R.add(far);
       const sky = new THREE.Group();
       const MOON = new THREE.Vector3(-0.55, 0.32, -0.77).normalize();
       sky.add(skyDome({ top: 0x05060d, mid: 0x13131f, low: 0x4a2f22, sunDir: MOON, glow: [0.5, 0.5, 0.6], tight: 90, spread: 9, glowAmt: [0.4, 0.06] }));
@@ -9313,7 +9467,7 @@
       // One layer of buildings: `P` metres long, repeated, `n0`–`n1` metres
       // either side of the line. `avoid` keeps streets clear.
       const layers = [];
-      function layer({ seed, P, n0, n1, every, w, d, h, tint, lit, count, avoid }) {
+      function layer({ seed, P, n0, n1, every, w, d, h, tint, lit, count, avoid, parent = city }) {
         const r = rng(seed);
         const spots = [];
         for (const side of [-1, 1]) {
@@ -9346,7 +9500,7 @@
           mesh.frustumCulled = false;
           group.add(mesh);
         }
-        city.add(group);
+        parent.add(group);
         layers.push({ group, P });
         return { group, used, P };
       }
@@ -9357,11 +9511,11 @@
       // to sweep past.
       const nearL = layer({ seed: 301, P: 400, n0: 16, n1: 64, every: 14, w: [10, 22], d: [10, 22], h: [4, 13], tint: 0xffffff, lit: 0.42, count: 1, avoid: offStreets });
       // A couple of hundred metres out: mid-rise blocks, a little hazier.
-      layer({ seed: 302, P: 880, n0: 95, n1: 305, every: 20, w: [14, 30], d: [14, 30], h: [12, 55], tint: 0xb9b3c4, lit: 0.36, count: D < 0.5 ? 0.6 : 1, avoid: offStreets });
+      layer({ seed: 302, P: 880, n0: 95, n1: 305, every: 20, w: [14, 30], d: [14, 30], h: [12, 55], tint: 0xb9b3c4, lit: 0.36, count: D < 0.5 ? 0.6 : 1, avoid: offStreets, parent: far });
       // Downtown, past the freeway: towers.
-      const townL = layer({ seed: 304, P: 1600, n0: 390, n1: 820, every: 26, w: [18, 40], d: [18, 40], h: [50, 240], tint: 0x8c88a4, lit: 0.33, count: D < 0.5 ? 0.6 : 1 });
+      const townL = layer({ seed: 304, P: 1600, n0: 390, n1: 820, every: 26, w: [18, 40], d: [18, 40], h: [50, 240], tint: 0x8c88a4, lit: 0.33, count: D < 0.5 ? 0.6 : 1, parent: far });
       // The skyline on the horizon: supertalls, dim and blue with distance.
-      const farL = layer({ seed: 303, P: 3600, n0: 900, n1: 1420, every: 40, w: [26, 60], d: [26, 60], h: [90, 430], tint: 0x5e5c7c, lit: 0.27, count: D < 0.5 ? 0.5 : 1 });
+      const farL = layer({ seed: 303, P: 3600, n0: 900, n1: 1420, every: 40, w: [26, 60], d: [26, 60], h: [90, 430], tint: 0x5e5c7c, lit: 0.27, count: D < 0.5 ? 0.5 : 1, parent: far });
 
       // The tallest towers get a floodlit crown and a spire, and every tall
       // one a red aircraft light that blinks.
@@ -9460,7 +9614,7 @@
       {
         const deck = new THREE.Mesh(new THREE.BoxGeometry(4000, 1.2, 28), new THREE.MeshBasicMaterial({ color: 0x141416 }));
         deck.position.set(0, FY - 0.6, CW / 2 + FWY);
-        city.add(deck);
+        far.add(deck);
         const cols = new THREE.Group();
         const colMesh = new THREE.InstancedMesh(unitBox, new THREE.MeshBasicMaterial({ color: 0x1c1c1f }), 30);
         const m = new THREE.Matrix4();
@@ -9479,7 +9633,7 @@
         const lamps = new THREE.Points(g, new THREE.PointsMaterial({ map: glowTex, color: 0xffb060, size: 7, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
         lamps.frustumCulled = false;
         cols.add(colMesh, lamps);
-        city.add(cols);
+        far.add(cols);
         layers.push({ group: cols, P: 400 });
       }
 
@@ -9491,7 +9645,7 @@
       // of blocks) and wraps round.
       const HW = 640;
       const wrap = (v, h) => ((((v + h) % (2 * h)) + 2 * h) % (2 * h)) - h;
-      function fleet({ lanes, gap, size, seed }) {
+      function fleet({ lanes, gap, size, seed, parent = city }) {
         const r = rng(seed);
         const cars = [];
         for (const lane of lanes) {
@@ -9513,7 +9667,7 @@
         g.setAttribute("color", new THREE.BufferAttribute(col, 3));
         const pts = new THREE.Points(g, new THREE.PointsMaterial({ map: glowTex, vertexColors: true, size, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
         pts.frustumCulled = false;
-        city.add(pts);
+        parent.add(pts);
         return { cars, pos, g };
       }
       const lanes = [];
@@ -9527,7 +9681,7 @@
       }
       const street = fleet({ lanes, gap: D < 0.5 ? [16, 60] : [9, 40], size: 1.5, seed: 77 });
       const fwyLanes = [-10.5, -7, -3.5, 3.5, 7, 10.5].map((o) => ({ axis: "x", n: FWY + o, dir: o < 0 ? 1 : -1, speed: 24 + Math.abs(o), y: FY + 0.7 }));
-      const freeway = fleet({ lanes: fwyLanes, gap: D < 0.5 ? [9, 30] : [5, 22], size: 2.6, seed: 78 });
+      const freeway = fleet({ lanes: fwyLanes, gap: D < 0.5 ? [9, 30] : [5, 22], size: 2.6, seed: 78, parent: far });
       function drive(f, dt) {
         const { cars, pos } = f;
         for (let i = 0; i < cars.length; i++) {
@@ -9560,7 +9714,7 @@
         g.setAttribute("color", new THREE.Float32BufferAttribute([1, 1, 1, 1, 0.1, 0.1, 0.2, 1, 0.3], 3));
         const p = new THREE.Points(g, new THREE.PointsMaterial({ map: glowTex, vertexColors: true, size: 10, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
         p.frustumCulled = false;
-        city.add(p);
+        far.add(p);
         return p;
       })();
       // Searchlights sweeping the clouds from far across the city.
@@ -9578,12 +9732,16 @@
         const beam = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x9aa4c8, vertexColors: true, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
         beam.position.set(x, STREET, CW / 2 + n);
         beam.frustumCulled = false;
-        city.add(beam);
+        far.add(beam);
         return { beam, phase: i * 2.1 };
       });
       let travelled = 0;
       function cityTick(t, dt) {
         sky.position.copy(R.camLocal);
+        // Turn the far city and the sky about the middle car's centre.
+        const th = headingAt(performance.now() / 1000);
+        far.rotation.y = sky.rotation.y = th;
+        far.position.set(-(CW / 2) * Math.sin(th), 0, CW / 2 - (CW / 2) * Math.cos(th));
         travelled += SPEED * dt;
         for (const L of layers) L.group.position.x = -(travelled % L.P);
         streetTex.offset.x = (travelled / BLOCK) % 1;
@@ -12122,6 +12280,7 @@
     name: "The Range",
     short: "Range",
     tagline: "Grab the launcher off the bench",
+    hint: "Walk up to the bench for the launcher",
     color: 0xe39a5a,
     leak: 0xf0a868,
     leakStyle: "sun",
@@ -12251,18 +12410,24 @@
         side.castShadow = true;
         R.add(side);
       }
-      const roof = part(new THREE.BoxGeometry(22.6, 0.25, 9.4), 0x3d3b38, 0, 3.7, 4.6);
+      const roof = part(new THREE.BoxGeometry(22.6, 0.25, 9.4), 0x5d5953, 0, 3.7, 4.6);
       roof.castShadow = true;
       R.add(roof);
-      // Lights under the roof, lane dividers, the rail, sandbags.
-      for (const x of [-6, 0, 6]) {
-        const lamp = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.05, 0.25), new THREE.MeshBasicMaterial({ color: 0xfff1d6 }));
-        lamp.position.set(x, 3.55, 4);
-        R.add(lamp);
+      // Rafters under the roof, and two rows of strip lights between them.
+      for (let z = 0.8; z < 9.2; z += 1.4) R.add(part(new THREE.BoxGeometry(22.4, 0.16, 0.12), 0x46423d, 0, 3.5, z));
+      const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff1d6 });
+      for (const z of [3.2, 6.9]) {
+        for (const x of [-7.5, -2.5, 2.5, 7.5]) {
+          const lamp = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.05, 0.22), lampMat);
+          lamp.position.set(x, 3.55, z);
+          R.add(lamp);
+        }
       }
-      const under = new THREE.PointLight(0xffe8c8, 6, 14, 1.6);
-      under.position.set(0, 3.2, 4);
-      R.add(under);
+      for (const z of [3.2, 6.9]) {
+        const under = new THREE.PointLight(0xffe8c8, 9, 16, 1.4);
+        under.position.set(0, 3.25, z);
+        R.add(under);
+      }
       for (const x of [-4.5, 4.5]) R.add(part(new THREE.BoxGeometry(0.08, 1.6, 2.4), 0x55524c, x, 0.8, 6.3));
       const rail = new THREE.Group();
       rail.add(part(new THREE.BoxGeometry(22, 0.08, 0.08), 0x9a7a3a, 0, 1.05, 0));
@@ -12359,6 +12524,7 @@
         const oz = nz;
         const n = W * H * D;
         const state = new Uint8Array(n); // 0 empty, 1 standing
+        const glass = new Uint8Array(n);
         const inst = new Int32Array(n).fill(-1);
         const color = new Float32Array(n * 3);
         const tone = [0.55 + r() * 0.15, 0.52 + r() * 0.14, 0.5 + r() * 0.12];
@@ -12371,6 +12537,7 @@
           const id = i + W * (k + D * j);
           state[id] = 1;
           const window = shell && !slab && (i + k) % 2 === 1 && j > 0;
+          glass[id] = window ? 1 : 0;
           const v = 0.9 + r() * 0.2;
           if (window) {
             if (r() < 0.12) C.setRGB(0.95, 0.68, 0.35);
@@ -12396,7 +12563,7 @@
         mesh.frustumCulled = false;
         R.add(mesh);
         const base = cells.filter((id) => id < W * D).length;
-        return { W, H, D, ox, oz, n, state, inst, color, mesh, initial: state.slice(), base, down: false, dirty: false, smoke: 0 };
+        return { W, H, D, ox, oz, n, state, glass, inst, color, mesh, initial: state.slice(), base, down: false, dirty: false, smoke: 0 };
       });
       const cellOf = (b, x, y, z) => {
         const i = Math.floor((x - b.ox) / S);
@@ -12424,6 +12591,8 @@
       debrisMesh.castShadow = true;
       debrisMesh.frustumCulled = false;
       for (let i = 0; i < MAXD; i++) { debrisMesh.setMatrixAt(i, ZERO); debrisMesh.setColorAt(i, C.setRGB(0.5, 0.5, 0.5)); }
+      // Only the part of the pool that's been used gets drawn.
+      debrisMesh.count = 0;
       R.add(debrisMesh);
       const D_ = {
         p: new Float32Array(MAXD * 3), v: new Float32Array(MAXD * 3), r: new Float32Array(MAXD * 3), w: new Float32Array(MAXD * 3),
@@ -12434,6 +12603,7 @@
       function spawnDebris(b, id, vx, vy, vz, scale, heavy) {
         const d = nextDebris;
         nextDebris = (nextDebris + 1) % MAXD;
+        debrisMesh.count = Math.max(debrisMesh.count, d + 1);
         if (!D_.live[d]) activeDebris++;
         const c = cellCentre(b, id, tmpA);
         D_.p.set([c.x, c.y, c.z], d * 3);
@@ -12527,40 +12697,220 @@
             fell++;
           }
           rumble(b, fell);
-        } else if (fell > 40) rumble(b, fell);
+          surge(b, fell);
+        } else if (fell > 40) {
+          rumble(b, fell);
+          surge(b, fell * 0.5);
+        }
+      }
+      // The dust a collapse pushes out along the ground: a ring of it
+      // rolling outward from the foot of the building and slowing, with
+      // more boiling up as the wreckage lands.
+      function surge(b, fell) {
+        const cx = b.ox + (b.W * S) / 2;
+        const cz = b.oz + (b.D * S) / 2;
+        const r0 = (Math.max(b.W, b.D) * S) / 2;
+        const n = Math.min(lowTier ? 18 : 42, 8 + fell / 40);
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2 + Math.random() * 0.3;
+          const sp = 9 + Math.random() * 9;
+          puff(cx + Math.cos(a) * r0, 2 + Math.random() * 4, cz + Math.sin(a) * r0, {
+            size: 10 + Math.random() * 7, grow: 3.4, life: 18 + Math.random() * 12, vy: 0.4 + Math.random() * 1.6,
+            vx: Math.cos(a) * sp, vz: Math.sin(a) * sp, drag: 0.45, color: 0xa09383, spread: 3, peak: 0.6,
+          });
+        }
       }
 
-      // ---------- Effects: fire, smoke, flash ----------
+      // ---------- Effects: fire, smoke, dust, glass, flash ----------
       const flash = new THREE.PointLight(0xffa860, 0, 140, 1.2);
       R.add(flash);
       let flashT = 0;
-      const POOL = lowTier ? 140 : 320;
-      const puffs = Array.from({ length: POOL }, () => {
-        const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0x777777, transparent: true, depthWrite: false, opacity: 0 }));
-        s.visible = false;
-        R.add(s);
-        return { s, life: 0, age: 1, vy: 0, grow: 0, fire: false, c: new THREE.Color() };
-      });
-      let nextPuff = 0;
-      function puff(x, y, z, { size = 6, grow = 3, life = 6, vy = 2, color = 0x6a645e, fire = false, spread = 2 } = {}) {
-        const p = puffs[nextPuff];
-        nextPuff = (nextPuff + 1) % POOL;
-        p.s.position.set(x + (Math.random() - 0.5) * spread, y + (Math.random() - 0.5) * spread * 0.5, z + (Math.random() - 0.5) * spread);
-        p.s.scale.setScalar(size);
-        p.s.material.blending = fire ? THREE.AdditiveBlending : THREE.NormalBlending;
-        p.s.material.color.setHex(color);
-        p.c.setHex(color);
-        p.s.visible = true;
-        Object.assign(p, { life, age: 0, vy, grow, fire, size });
+      // Smoke and dust are drawn from a cluster of soft lumps, so a puff
+      // reads as billowing rather than as a blurred disc.
+      const smokeTex = canvasTex(128, 128, (g) => {
+        const r = rng(83);
+        for (let i = 0; i < 18; i++) {
+          const a = r() * Math.PI * 2;
+          const d = Math.sqrt(r()) * 24;
+          const x = 64 + Math.cos(a) * d;
+          const y = 64 + Math.sin(a) * d;
+          const rad = 16 + r() * 22;
+          const grad = g.createRadialGradient(x, y, 0, x, y, rad);
+          grad.addColorStop(0, `rgba(255, 255, 255, ${0.3 + r() * 0.25})`);
+          grad.addColorStop(1, "rgba(255, 255, 255, 0)");
+          g.fillStyle = grad;
+          g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+        }
+      }, { repeat: false });
+      // Every puff, flame and glint is one instance of a square turned to
+      // face you: one draw for all the smoke and dust, one for all the fire
+      // and glass, however much is in the air. A particle drifts (with drag,
+      // rising or falling), grows, turns slowly and fades; fire cools from
+      // yellow to a dull red, glass twinkles as it tumbles.
+      const STRIDE = 20;
+      function particles(max, additive, map) {
+        const geo = new THREE.InstancedBufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute([-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0], 3));
+        geo.setIndex([0, 1, 2, 0, 2, 3]);
+        const at = new THREE.InstancedBufferAttribute(new Float32Array(max * 4), 4).setUsage(THREE.DynamicDrawUsage);
+        const tint = new THREE.InstancedBufferAttribute(new Float32Array(max * 4), 4).setUsage(THREE.DynamicDrawUsage);
+        const turn = new THREE.InstancedBufferAttribute(new Float32Array(max), 1).setUsage(THREE.DynamicDrawUsage);
+        geo.setAttribute("at", at);
+        geo.setAttribute("tint", tint);
+        geo.setAttribute("turn", turn);
+        geo.instanceCount = 0;
+        const mat = new THREE.ShaderMaterial({
+          uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { map: { value: map } }]),
+          vertexShader: `
+            attribute vec4 at;
+            attribute vec4 tint;
+            attribute float turn;
+            varying vec4 vTint;
+            varying vec2 vUv;
+            varying float vUp;
+            #include <fog_pars_vertex>
+            void main() {
+              vTint = tint;
+              vUv = position.xy + 0.5;
+              float c = cos(turn);
+              float s = sin(turn);
+              vec2 corner = vec2(c * position.x - s * position.y, s * position.x + c * position.y);
+              vUp = corner.y + 0.5;
+              vec4 mvPosition = modelViewMatrix * vec4(at.xyz, 1.0);
+              mvPosition.xy += corner * at.w;
+              gl_Position = projectionMatrix * mvPosition;
+              #include <fog_vertex>
+            }`,
+          fragmentShader: `
+            uniform sampler2D map;
+            varying vec4 vTint;
+            varying vec2 vUv;
+            varying float vUp;
+            #include <fog_pars_fragment>
+            void main() {
+              float lump = texture2D(map, vUv).a;
+              float a = lump * vTint.a;
+              if (a < 0.004) discard;
+              vec3 col = vTint.rgb;
+              ${additive ? "" : "col *= mix(0.72, 1.12, vUp) * (1.0 - 0.18 * lump);"}
+              float f = 0.0;
+              #ifdef USE_FOG
+                f = smoothstep(fogNear, fogFar, vFogDepth);
+              #endif
+              ${additive ? "a *= 1.0 - f;" : "col = mix(col, fogColor, f);"}
+              gl_FragColor = vec4(col, a);
+              #include <colorspace_fragment>
+            }`,
+          transparent: true,
+          depthWrite: false,
+          fog: true,
+          blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+        });
+        mat.userData.noClip = true;
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.frustumCulled = false;
+        mesh.renderOrder = additive ? 2 : 1;
+        R.add(mesh);
+        const d = new Float32Array(max * STRIDE);
+        const col = new THREE.Color();
+        let n = 0;
+        let shown = 0;
+        return {
+          add(x, y, z, o) {
+            if (n >= max) return;
+            const k = n++ * STRIDE;
+            col.setHex(o.color);
+            d[k] = x; d[k + 1] = y; d[k + 2] = z;
+            d[k + 3] = o.vx; d[k + 4] = o.vy; d[k + 5] = o.vz;
+            d[k + 6] = o.size; d[k + 7] = o.grow; d[k + 8] = o.life; d[k + 9] = 0;
+            d[k + 10] = col.r; d[k + 11] = col.g; d[k + 12] = col.b; d[k + 13] = o.peak;
+            d[k + 14] = o.drag; d[k + 15] = o.gravity;
+            d[k + 16] = Math.random() * Math.PI * 2; d[k + 17] = (Math.random() - 0.5) * o.swirl;
+            d[k + 18] = o.kind;
+          },
+          step(dt) {
+            if (!n && !shown) return;
+            const A = at.array;
+            const T = tint.array;
+            const U = turn.array;
+            for (let i = 0; i < n; i++) {
+              const k = i * STRIDE;
+              d[k + 9] += dt;
+              if (d[k + 9] >= d[k + 8]) {
+                // Gone: the last one takes its place.
+                n--;
+                if (i < n) d.copyWithin(k, n * STRIDE, n * STRIDE + STRIDE);
+                i--;
+                continue;
+              }
+              const age = d[k + 9];
+              const u = age / d[k + 8];
+              const drag = Math.exp(-d[k + 14] * dt);
+              d[k + 3] *= drag;
+              d[k + 5] *= drag;
+              d[k + 4] = d[k + 4] * drag - d[k + 15] * dt;
+              d[k] += d[k + 3] * dt;
+              d[k + 1] += d[k + 4] * dt;
+              d[k + 2] += d[k + 5] * dt;
+              d[k + 16] += d[k + 17] * dt;
+              const kind = d[k + 18];
+              const a = kind === 1 ? d[k + 13] * (1 - u)
+                : kind === 2 ? d[k + 13] * (1 - u) * (0.3 + 0.7 * Math.abs(Math.sin(age * 31 + i * 1.7)))
+                  : d[k + 13] * Math.min(1, age * 3) * Math.pow(1 - u, 1.4);
+              const cool = kind === 1 ? u : 0;
+              const j = i * 4;
+              A[j] = d[k]; A[j + 1] = d[k + 1]; A[j + 2] = d[k + 2]; A[j + 3] = d[k + 6] + d[k + 7] * age;
+              T[j] = d[k + 10] + (0.06 - d[k + 10]) * cool;
+              T[j + 1] = d[k + 11] + (0.012 - d[k + 11]) * cool;
+              T[j + 2] = d[k + 12] + (0.003 - d[k + 12]) * cool;
+              T[j + 3] = a;
+              U[i] = d[k + 16];
+            }
+            geo.instanceCount = n;
+            shown = n;
+            for (const attr of [at, tint, turn]) {
+              attr.clearUpdateRanges();
+              attr.addUpdateRange(0, Math.max(1, n) * attr.itemSize);
+              attr.needsUpdate = true;
+            }
+          },
+          clear() { n = 0; },
+        };
       }
-      // Smoke trails from the missile.
-      const trail = Array.from({ length: 90 }, () => {
-        const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xd8d2c8, transparent: true, depthWrite: false, opacity: 0 }));
-        s.visible = false;
-        R.add(s);
-        return { s, age: 1 };
+      const smoke = particles(lowTier ? 500 : 1400, false, smokeTex);
+      const glow = particles(lowTier ? 300 : 800, true, glowTex);
+      function puff(x, y, z, { size = 6, grow = 3, life = 6, vy = 2, vx = 0, vz = 0, drag = 0.15, color = 0x6a645e, fire = false, spread = 2, peak } = {}) {
+        (fire ? glow : smoke).add(
+          x + (Math.random() - 0.5) * spread, y + (Math.random() - 0.5) * spread * 0.5, z + (Math.random() - 0.5) * spread,
+          { vx, vy, vz, size, grow: grow * (fire ? 1 : 0.8), life, color, peak: peak ?? (fire ? 0.9 : 0.6), drag: fire ? 0 : drag, gravity: fire ? 0 : -0.25, swirl: fire ? 0 : 0.5, kind: fire ? 1 : 0 },
+        );
+      }
+      // A shard of window glass, flashing as it tumbles down.
+      function glint(at, vx, vy, vz) {
+        const k = () => 0.6 + Math.random() * 0.6;
+        glow.add(at.x + (Math.random() - 0.5) * S, at.y + (Math.random() - 0.5) * S, at.z + (Math.random() - 0.5) * S, {
+          vx: vx * k(), vy: vy * k(), vz: vz * k(), size: 0.7 + Math.random() * 0.6, grow: 0, life: 1.5 + Math.random() * 1.8,
+          color: 0xfff4dc, peak: 1, drag: 0.6, gravity: 7, swirl: 0, kind: 2,
+        });
+      }
+      // Scorch marks where a blast hits the ground.
+      const scorchMat = new THREE.MeshBasicMaterial({ map: glowTex, color: 0x000000, transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+      const scorches = Array.from({ length: 10 }, () => {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), scorchMat);
+        m.rotation.x = -Math.PI / 2;
+        m.visible = false;
+        R.add(m);
+        return m;
       });
-      let nextTrail = 0;
+      let nextScorch = 0;
+      function scorch(at) {
+        const m = scorches[nextScorch];
+        nextScorch = (nextScorch + 1) % scorches.length;
+        m.position.set(at.x, 0.12, at.z);
+        m.scale.setScalar(9 + Math.random() * 5);
+        m.rotation.z = Math.random() * Math.PI * 2;
+        m.visible = true;
+      }
 
       // ---------- The missile ----------
       const rocket = new THREE.Group();
@@ -12574,6 +12924,8 @@
       }
       rocket.visible = false;
       R.add(rocket);
+      const rocketLight = new THREE.PointLight(0xffb060, 0, 45, 1.4);
+      R.add(rocketLight);
       const missiles = [];
       const rootInv = new THREE.Quaternion();
       function fire() {
@@ -12592,9 +12944,13 @@
         const m = rocket.clone();
         m.visible = true;
         R.add(m);
-        missiles.push({ m, p: from, v: dir.multiplyScalar(140), age: 0 });
+        missiles.push({ m, p: from.clone(), v: dir.clone().multiplyScalar(140), age: 0 });
         api.launches.forEach((f) => f());
-        for (let i = 0; i < 6; i++) puff(from.x, from.y, from.z, { size: 1.2, grow: 2.5, life: 1.6, vy: 0.3, color: 0xd8d2c8, spread: 0.6 });
+        for (let i = 0; i < 5; i++) {
+          const ahead = 2.5 + Math.random() * 4;
+          puff(from.x + dir.x * ahead, from.y + dir.y * ahead, from.z + dir.z * ahead, { size: 0.8, grow: 2, life: 1.4, vy: 0.3, color: 0xd8d2c8, spread: 0.6, peak: 0.35 });
+        }
+        puff(from.x + dir.x * 0.6, from.y + dir.y * 0.6, from.z + dir.z * 0.6, { size: 0.25, grow: 2.5, life: 0.07, vy: 0, color: 0xffd090, fire: true, spread: 0.05, peak: 0.7 });
       }
 
       function explode(at) {
@@ -12602,7 +12958,15 @@
         flash.intensity = 900;
         flashT = 0;
         for (let i = 0; i < 10; i++) puff(at.x, at.y, at.z, { size: 5 + Math.random() * 5, grow: 9, life: 0.9 + Math.random() * 0.5, vy: 3, color: 0xffa040, fire: true, spread: 4 });
+        for (let i = 0; i < 4; i++) puff(at.x, at.y, at.z, { size: 14, grow: 30, life: 0.25, vy: 0, color: 0xfff0d0, fire: true, spread: 1 });
         for (let i = 0; i < 14; i++) puff(at.x, at.y + 2, at.z, { size: 7, grow: 5, life: 7 + Math.random() * 5, vy: 3 + Math.random() * 3, color: 0x4a4440, spread: 7 });
+        // Dust thrown out by the blast, slowing fast.
+        for (let i = 0; i < 12; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const sp = 14 + Math.random() * 12;
+          puff(at.x, at.y, at.z, { size: 4, grow: 6, life: 4 + Math.random() * 3, vy: 1 + Math.random() * 3, vx: Math.cos(a) * sp, vz: Math.sin(a) * sp, drag: 2.2, color: 0xa89a88, spread: 2, peak: 0.5 });
+        }
+        if (at.y < 1) scorch(at);
         // Blow out the blocks round the blast.
         const RAD = 4.8 * S;
         let hit = false;
@@ -12620,10 +12984,13 @@
             cellCentre(b, id, tmpA);
             const d = tmpA.distanceTo(at);
             if (d > RAD * (0.8 + Math.random() * 0.35)) continue;
+            const pane = b.glass[id];
             hideCell(b, id);
             const push = (1 - d / RAD) * 34 + 6;
             tmpB.subVectors(tmpA, at).normalize();
             spawnDebris(b, id, tmpB.x * push, tmpB.y * push + 8, tmpB.z * push, 0.45 + Math.random() * 0.3, false);
+            // A window going: a spray of glass catching the low sun.
+            if (pane) for (let g = 0; g < 4; g++) glint(tmpA, tmpB.x * push * 0.8, tmpB.y * push + 6, tmpB.z * push * 0.8);
             hit = true;
           }
           if (hit) { b.dirty = true; b.smoke = 25; b.smokeAt = at.clone(); }
@@ -12659,7 +13026,10 @@
         activeDebris = 0;
         for (let i = 0; i < MAXD; i++) debrisMesh.setMatrixAt(i, ZERO);
         debrisMesh.instanceMatrix.needsUpdate = true;
-        for (const p of puffs) { p.age = p.life; p.s.visible = false; }
+        smoke.clear();
+        glow.clear();
+        for (const sc of scorches) sc.visible = false;
+        debrisMesh.count = 0;
       }
 
       let shake = 0;
@@ -12724,26 +13094,16 @@
             }
             M.m.position.copy(M.p);
             M.m.lookAt(tmpA.copy(M.p).sub(M.v));
-            if (Math.random() < 0.9) {
-              const tr = trail[nextTrail];
-              nextTrail = (nextTrail + 1) % trail.length;
-              tr.s.position.copy(M.p);
-              tr.s.visible = true;
-              tr.age = 0;
-            }
+            if (M.age > 0.04) puff(M.p.x, M.p.y, M.p.z, { size: 0.6, grow: 2.2, life: 2.2, vy: 0.2, color: 0xd8d2c8, spread: 0.2, peak: 0.5 });
             if (boom || M.age > 7) {
               if (boom) explode(boom);
               R.root.remove(M.m);
               missiles.splice(mi, 1);
             }
           }
-          for (const tr of trail) {
-            if (!tr.s.visible) continue;
-            tr.age += dt;
-            if (tr.age > 2.2) { tr.s.visible = false; continue; }
-            tr.s.scale.setScalar(0.6 + tr.age * 2.2);
-            tr.s.material.opacity = 0.55 * (1 - tr.age / 2.2);
-          }
+          const lead = missiles[missiles.length - 1];
+          rocketLight.intensity = lead ? 70 : 0;
+          if (lead) rocketLight.position.copy(lead.p);
 
           // Buildings that lost blocks this frame: let loose sections fall.
           for (const b of buildings) if (b.dirty) settle(b);
@@ -12752,10 +13112,13 @@
           // Debris: gravity, tumbling, landing on the ground or on standing
           // blocks, and heavy pieces smashing what they land on.
           let breaks = 0;
+          let moved = false;
+          let dusts = 0;
           const p = D_.p;
           const v = D_.v;
           for (let d = 0; d < MAXD; d++) {
             if (D_.live[d] !== 1) continue;
+            moved = true;
             const o = d * 3;
             v[o + 1] -= GRAV * dt;
             const drag = D_.heavy[d] ? 1 : Math.exp(-dt * 0.4);
@@ -12796,7 +13159,18 @@
               D_.w[o] *= 0.5;
               D_.w[o + 1] *= 0.5;
               D_.w[o + 2] *= 0.5;
-              if (speed > 14 && Math.random() < 0.08) puff(p[o], p[o + 1], p[o + 2], { size: 5, grow: 6, life: 5, vy: 1, color: 0x8a7e70, spread: 3 });
+              // A falling section hitting the ground throws up dust that rolls
+              // outward from the building, low and slow: a collapse ends in a
+              // cloud.
+              if (D_.heavy[d] && speed > 7 && dusts < 6 && Math.random() < 0.2) {
+                dusts++;
+                const b = buildings[D_.b[d]];
+                const ox = p[o] - (b.ox + (b.W * S) / 2);
+                const oz = p[o + 2] - (b.oz + (b.D * S) / 2);
+                const l = Math.hypot(ox, oz) || 1;
+                const out = 3 + Math.random() * 6;
+                puff(p[o], Math.max(1.5, p[o + 1]), p[o + 2], { size: 8 + Math.random() * 7, grow: 3.2, life: 14 + Math.random() * 12, vy: 0.3 + Math.random() * 0.8, vx: (ox / l) * out, vz: (oz / l) * out, drag: 0.3, color: 0x9c8f80, spread: 2, peak: 0.55 });
+              } else if (speed > 12 && Math.random() < 0.06) puff(p[o], p[o + 1], p[o + 2], { size: 4, grow: 5, life: 4, vy: 1, color: 0x8a7e70, spread: 2 });
               if (speed < 1.5 && Math.hypot(v[o], v[o + 2]) < 0.6) D_.live[d] = 2; // at rest
             }
             tmpE.set(D_.r[o], D_.r[o + 1], D_.r[o + 2]);
@@ -12804,7 +13178,7 @@
             tmpS.setScalar(D_.s[d]);
             debrisMesh.setMatrixAt(d, tmpM.compose(tmpA.set(p[o], p[o + 1], p[o + 2]), tmpQ, tmpS));
           }
-          debrisMesh.instanceMatrix.needsUpdate = true;
+          if (moved) debrisMesh.instanceMatrix.needsUpdate = true;
 
           // Smoke rising from damaged buildings for a while.
           for (const b of buildings) {
@@ -12813,16 +13187,8 @@
             if (Math.random() < dt * 2.2) puff(b.smokeAt.x, Math.max(1, b.smokeAt.y), b.smokeAt.z, { size: 6, grow: 4, life: 9, vy: 4, color: 0x3e3a38, spread: 4 });
             if (Math.random() < dt * 1.5) puff(b.smokeAt.x, Math.max(1, b.smokeAt.y), b.smokeAt.z, { size: 3, grow: 1, life: 0.8, vy: 2, color: 0xff8a30, fire: true, spread: 3 });
           }
-          for (const q of puffs) {
-            if (!q.s.visible) continue;
-            q.age += dt;
-            if (q.age >= q.life) { q.s.visible = false; continue; }
-            const k = q.age / q.life;
-            q.s.position.y += q.vy * dt;
-            q.s.scale.setScalar(q.size + q.grow * q.age * (q.fire ? 1 : 0.8));
-            q.s.material.opacity = q.fire ? (1 - k) * 0.9 : Math.min(1, q.age * 3) * (1 - k) * 0.6;
-            if (q.fire) q.s.material.color.copy(q.c).lerp(C.setHex(0x441a08), k);
-          }
+          smoke.step(dt);
+          glow.step(dt);
           if (flash.intensity > 0) {
             flashT += dt;
             flash.intensity = Math.max(0, 900 * Math.exp(-flashT * 6));
@@ -12838,7 +13204,6 @@
         const delay = at.distanceTo(R.camLocal) / 343;
         setTimeout(() => api.shakeAt(at, 1.4), delay * 1000);
       });
-      api.debug = () => buildings.map((b) => [b.ox.toFixed(0), b.oz, b.initial.reduce((a, c) => a + c, 0), b.state.reduce((a, c) => a + c, 0), b.down]);
       return api;
     },
     sound(A, R, api) {
@@ -12967,9 +13332,11 @@
     function attach(R, z0) {
       Z0 = z0;
       plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, fog: false }));
+      plane.userData.keep = true; // resized as the screen changes shape
       R.add(plane);
       bars = [0, 1, 2, 3].map(() => {
         const b = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x0c0c0c, roughness: 0.9 }));
+        b.userData.keep = true;
         R.add(b);
         return b;
       });
@@ -12996,36 +13363,79 @@
       im.src = src;
     });
     async function paint(snap) {
-      const k = Math.min(2048 / snap.w, Math.min(snap.dpr || 1, 2));
+      // Sharp enough to fill a Retina screen when the camera is right up
+      // against it.
+      const most = Math.min(renderer.capabilities.maxTextureSize, 4096);
+      const k = Math.min(most / snap.w, most / snap.h, Math.min(snap.dpr || 1, 2));
+      // The page's own fonts, loaded before any text is drawn with them.
+      const fonts = [...new Set(snap.texts.map((t) => t.font))];
+      const [imgs] = await Promise.all([
+        Promise.race([
+          Promise.all(snap.items.map((it) => load(it.src))),
+          new Promise((r) => setTimeout(() => r(null), 2500)),
+        ]),
+        Promise.race([
+          Promise.all(fonts.map((f) => document.fonts.load(f).catch(() => {}))),
+          new Promise((r) => setTimeout(r, 1500)),
+        ]),
+      ]);
       canvas.width = Math.round(snap.w * k);
       canvas.height = Math.round(snap.h * k);
       // A new size needs a new texture on the GPU.
       tex.dispose();
       g.setTransform(k, 0, 0, k, 0, 0);
+      g.imageSmoothingQuality = "high";
+      g.globalAlpha = 1;
       g.fillStyle = snap.bg;
       g.fillRect(0, 0, snap.w, snap.h);
-      const imgs = await Promise.race([
-        Promise.all(snap.items.map((it) => load(it.src))),
-        new Promise((r) => setTimeout(() => r(null), 2500)),
-      ]);
       snap.items.forEach((it, i) => {
+        g.globalAlpha = it.card ?? 1;
         g.fillStyle = "#1c1c1c";
         g.fillRect(it.x, it.y, it.w, it.h);
         const im = imgs?.[i];
         if (!im) return;
+        g.globalAlpha = it.alpha ?? 1;
         // Cropped to fill, as the page does.
         const s = Math.max(it.w / im.width, it.h / im.height);
         const sw = it.w / s;
         const sh = it.h / s;
         g.drawImage(im, (im.width - sw) / 2, (im.height - sh) / 2, sw, sh, it.x, it.y, it.w, it.h);
       });
+      // Borders: the active category's underline, the S key's outline.
+      for (const b of snap.boxes ?? []) {
+        g.globalAlpha = b.alpha;
+        const [top, right, bottom, left] = b.sides;
+        if (b.radius && top && right && bottom && left) {
+          g.strokeStyle = top.c;
+          g.lineWidth = top.w;
+          g.beginPath();
+          g.roundRect?.(b.x + top.w / 2, b.y + top.w / 2, b.w - top.w, b.h - top.w, b.radius);
+          g.stroke();
+          continue;
+        }
+        const side = (s, x, y, w, h) => { if (s) { g.fillStyle = s.c; g.fillRect(x, y, w, h); } };
+        side(top, b.x, b.y, b.w, top?.w);
+        side(bottom, b.x, b.y + b.h - (bottom?.w ?? 0), b.w, bottom?.w);
+        side(left, b.x, b.y, left?.w, b.h);
+        side(right, b.x + b.w - (right?.w ?? 0), b.y, right?.w, b.h);
+      }
       for (const tx of snap.texts) {
+        g.globalAlpha = tx.alpha ?? 1;
         g.font = tx.font;
+        if ("letterSpacing" in g) g.letterSpacing = tx.ls && tx.ls !== "normal" ? tx.ls : "0px";
         g.fillStyle = tx.color;
         g.textBaseline = "alphabetic";
-        g.fillText(tx.text, tx.x, tx.base);
-        if (tx.under) g.fillRect(tx.x, tx.under, tx.w, 1.5);
+        // The baseline sits where the font's own ascent puts it in the box
+        // the page measured, so the words land on the same pixels.
+        const m = g.measureText(tx.text);
+        const asc = m.fontBoundingBoxAscent;
+        const desc = m.fontBoundingBoxDescent;
+        const base = tx.h && asc + desc > 0 ? tx.top + (tx.h * asc) / (asc + desc) : tx.base;
+        g.fillText(tx.text, tx.x, base);
+        if (tx.under) g.fillRect(tx.x, base + tx.under.offset, tx.w, tx.under.thick);
       }
+      g.globalAlpha = 1;
+      if ("letterSpacing" in g) g.letterSpacing = "0px";
       tex.needsUpdate = true;
       layout(snap.w / snap.h);
     }
@@ -13076,7 +13486,11 @@
     }
     async function stepBack() {
       state = "moving";
+      // Back to the resolution the device can keep up with (see enter).
+      renderer.setPixelRatio(pixelRatio());
+      hush(2400);
       await tween({ x: 0, z: SITE.Z0 + 5.2, y: 0, yaw: 0, pitch: -0.02 }, 1900);
+      roomsOnHold = false;
       state = "walking";
       running = true;
       hudTop.hidden = false;
@@ -13107,13 +13521,12 @@
     addEventListener("keydown", (e) => {
       if (!audio) startAudio();
       if (e.code === "KeyE" && state === "walking" && here === regions.lobby) {
-        const p = SITE.fillPose();
+        // Near the window and looking at it.
         const dx = 0 - me.x;
         const dz = SITE.Z0 - me.z;
         const d = Math.hypot(dx, dz);
         const facing = (-Math.sin(me.yaw) * dx - Math.cos(me.yaw) * dz) / d;
         if (d < 7 && facing > 0.6) goBack();
-        void p;
       }
     });
     addEventListener("pointerdown", () => { if (!audio) startAudio(); });
@@ -13121,6 +13534,14 @@
       const m = e.data || {};
       if (m.type === "gallery:enter") {
         await SITE.paint(m.snap);
+        // The moment of handing over is a still picture of the page, so draw
+        // it at the screen's full sharpness, whatever the frame rate needs
+        // once things start moving.
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        hush(4000);
+        // Rooms wait till the camera has pulled back: they're behind you
+        // then, and building one mid-glide would make it stutter.
+        roomsOnHold = true;
         placeAtFill();
         renderer.setAnimationLoop(frame);
         audio?.ctx.resume();
@@ -13151,10 +13572,10 @@
   enter(regions.lobby, { quiet: true });
   if (EMBED) {
     // Opened from the site: no title screen; wait in the lobby, facing the
-    // window, until the site hands over (95-site.js).
+    // window, until the site hands over (95-site.js). Nothing is drawn till
+    // then: the frame may sit loaded and unseen for a long while.
     titleEl.hidden = true;
     syncMenu();
-    renderer.setAnimationLoop(frame);
     parent.postMessage({ type: "gallery:ready" }, "*");
   } else {
     // You start out on the lighthouse gallery, at the railing in the storm.

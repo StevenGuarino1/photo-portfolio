@@ -1,12 +1,13 @@
 """Exercise the interface: title, menu, photo viewer on desktop; joystick,
 drag-look and tapping the photo card on an emulated phone with touch."""
+import os
 import sys
 import time
 
 sys.path.insert(0, ".")
 from cdp import Page
 
-URL = "http://localhost:8000/crowd-lab/v2/"
+URL = os.environ.get("GALLERY_URL", "http://localhost:8000/crowd-lab/v2/")
 out = {}
 
 # ---------- Desktop ----------

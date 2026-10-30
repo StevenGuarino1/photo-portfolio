@@ -20,7 +20,9 @@
   }
 
   * { box-sizing: border-box; }
-  html, body { height: 100%; overflow: hidden; }
+  /* No margin: served on its own (the site's frame), a browser's default
+     8 px would push the whole picture off the window it hands over to. */
+  html, body { height: 100%; margin: 0; overflow: hidden; }
 
   body {
     background: var(--bg);

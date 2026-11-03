@@ -112,6 +112,12 @@ until he says "push it" (fast-forward `main` to `gallery-3d`, then push).
   block buildings 150–380 m out that blow apart, crumble and topple. Smoke,
   dust, fire and glass are one instanced particle system (two draw calls);
   collapses push out a rolling dust surge; windows burst into glints.
+  Every building hides one of the photos (not night skies) just behind its
+  front wall; it's "found" once half that wall is gone or the building is
+  down (toast, chime, glow, dust clears, card + F). R/Rebuild hides a fresh
+  set. Hold right-click (or Z) to look through the sight: `api.zoom` narrows
+  the camera (`baseFov` / `zoomNow` in core) and slows mouse look. Far photos
+  use `reach` / `hidden` on their `reg.photos` entry (`findPhoto`).
 - **Frame rate, measured not guessed** (`10-core.js`):
   - `cull()` / `openingRect()`: a room seen through a doorway is drawn only
     inside the screen rectangle where it can show (its door, cut down to the

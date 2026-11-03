@@ -6,7 +6,9 @@
   // of blocks; a hit blows out the blocks round it, anything left with no
   // path down to the ground falls, falling blocks smash what they land on,
   // and a building that loses too much of its base comes down whole. The
-  // boom arrives late, at the speed of sound. R puts the town back.
+  // boom arrives late, at the speed of sound. Every building hides one of
+  // the photographs behind its front wall. R puts the town back, with a
+  // fresh set of photos inside.
 
   ROOMS.range = {
     name: "The Range",
@@ -236,6 +238,8 @@
       let armed = false;
       let reload = 0;
       let kick = 0;
+      let aiming = false;
+      let aim = 0; // 0 hip, 1 looking through the sight
 
       // ---------- The town ----------
       // [centre x, near edge z, width, depth, height] in blocks.
@@ -260,12 +264,16 @@
         const inst = new Int32Array(n).fill(-1);
         const color = new Float32Array(n * 3);
         const tone = [0.55 + r() * 0.15, 0.52 + r() * 0.14, 0.5 + r() * 0.12];
+        // The photo's slot: one block in from the front wall, the width of
+        // the inside, rows 1 to `top`, kept clear of floors.
+        const top = Math.min(H - 2, Math.ceil(((W - 2) * S) / 1.45 / S));
         const cells = [];
         for (let j = 0; j < H; j++) for (let k = 0; k < D; k++) for (let i = 0; i < W; i++) {
           const shell = i === 0 || i === W - 1 || k === 0 || k === D - 1;
           const slab = j % 3 === 0;
           const core = Math.abs(i - W / 2 + 0.5) < 1 && Math.abs(k - D / 2 + 0.5) < 1;
           if (!(shell || slab || core)) continue;
+          if (!shell && k === 1 && j >= 1 && j <= top) continue;
           const id = i + W * (k + D * j);
           state[id] = 1;
           const window = shell && !slab && (i + k) % 2 === 1 && j > 0;
@@ -295,7 +303,7 @@
         mesh.frustumCulled = false;
         R.add(mesh);
         const base = cells.filter((id) => id < W * D).length;
-        return { W, H, D, ox, oz, n, state, glass, inst, color, mesh, initial: state.slice(), base, down: false, dirty: false, smoke: 0 };
+        return { W, H, D, ox, oz, n, state, glass, inst, color, mesh, initial: state.slice(), base, down: false, dirty: false, smoke: 0, top };
       });
       const cellOf = (b, x, y, z) => {
         const i = Math.floor((x - b.ox) / S);
@@ -453,6 +461,89 @@
         }
       }
 
+      // ---------- The photos inside ----------
+      // Each building has a photograph standing just behind its front wall,
+      // as wide as the inside will take. Blow the wall away and there it is;
+      // bring the building down and it's left standing in the dust with a
+      // warm glow round it. Once it's out, look at it for its card, and F
+      // shows it full size. Rebuilding the town hides a fresh set. Night
+      // skies sit out: at this distance at dusk they'd read as black.
+      const POOL_STEMS = PHOTOS.filter((P) => P.category !== "Night Sky").map((P) => P.stem);
+      const frameMat = new THREE.MeshLambertMaterial({ color: 0x141416 });
+      const rimTex = canvasTex(256, 256, (g) => {
+        g.shadowColor = "#fff";
+        g.shadowBlur = 46;
+        g.fillStyle = "#fff";
+        for (let i = 0; i < 3; i++) g.fillRect(64, 64, 128, 128);
+      }, { repeat: false });
+      const hidden = [];
+      let lastSet = [];
+      function hidePhotos() {
+        // A fresh set, avoiding the last one where there are enough to go round.
+        const fresh = POOL_STEMS.filter((st) => !lastSet.includes(st));
+        const pool = fresh.length >= buildings.length ? fresh : POOL_STEMS.slice();
+        for (let i = pool.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [pool[i], pool[j]] = [pool[j], pool[i]];
+        }
+        const set = pool.slice(0, buildings.length);
+        const old = hidden.splice(0);
+        buildings.forEach((b, bi) => {
+          const P = PHOTO[set[bi % set.length]];
+          const slotW = (b.W - 2) * S - 0.8;
+          const slotH = b.top * S - 0.8;
+          const k = Math.min(slotW / P.w, slotH / P.h);
+          const w = P.w * k;
+          const h = P.h * k;
+          const g = new THREE.Group();
+          const pic = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: photoTexture(P.stem, R.reg), toneMapped: false, fog: false }));
+          const frame = new THREE.Mesh(new THREE.BoxGeometry(w + 0.36, h + 0.36, 0.22), frameMat);
+          frame.position.z = -0.13;
+          // The glow sits behind the photo, so it only shows round its edges.
+          const halo = new THREE.Mesh(new THREE.PlaneGeometry(w * 2, h * 2), new THREE.MeshBasicMaterial({ map: rimTex, color: 0xffcf96, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+          halo.position.z = -0.5;
+          g.add(pic, frame, halo);
+          g.position.set(b.ox + (b.W * S) / 2, S + (b.top * S) / 2, b.oz + 1.5 * S);
+          g.rotation.y = Math.PI;
+          R.add(g);
+          const entry = { mesh: pic, photo: P, w, h, reach: 700, hidden: true };
+          R.reg.photos.push(entry);
+          hidden.push({ b, g, halo, entry, out: false, glow: 0, wall: frontWall(b) });
+        });
+        // Let go of the last set: from the scene, the photo list, and the
+        // textures nothing else is using.
+        for (const h of old) {
+          R.root.remove(h.g);
+          const at = R.reg.photos.indexOf(h.entry);
+          if (at >= 0) R.reg.photos.splice(at, 1);
+          h.g.traverse((o) => {
+            if (!o.isMesh) return;
+            o.geometry.dispose();
+            if (o.material !== frameMat) o.material.dispose();
+          });
+          if (!set.includes(h.entry.photo.stem)) releaseTexture(h.entry.photo.stem, R.reg.id);
+        }
+        lastSet = set;
+      }
+      // How much of the front wall still stands in front of a photo.
+      function frontWall(b) {
+        let n = 0;
+        for (let j = 1; j <= b.top; j++) for (let i = 1; i < b.W - 1; i++) if (b.state[i + b.W * b.D * j]) n++;
+        return n;
+      }
+      function revealCheck() {
+        for (const h of hidden) {
+          if (h.out || !(h.b.down || frontWall(h.b) < h.wall * 0.5)) continue;
+          h.out = true;
+          h.entry.hidden = false;
+          h.b.smoke = Math.min(h.b.smoke, 2);
+          const P = h.entry.photo;
+          toast(P.title, TOUCH ? "Found a photo · tap its card to see it" : "Found a photo · right-click to see it, F to view");
+          api.reveals.forEach((f) => f(h.g.position));
+        }
+      }
+      hidePhotos();
+
       // ---------- Effects: fire, smoke, dust, glass, flash ----------
       const flash = new THREE.PointLight(0xffa860, 0, 140, 1.2);
       R.add(flash);
@@ -607,6 +698,14 @@
             }
           },
           clear() { n = 0; },
+          // Age everything within `r` metres (across the ground) of `at` by
+          // an extra `by` seconds.
+          hurry(at, r, by) {
+            for (let i = 0; i < n; i++) {
+              const k = i * STRIDE;
+              if (Math.hypot(d[k] - at.x, d[k + 2] - at.z) < r) d[k + 9] += by;
+            }
+          },
         };
       }
       const smoke = particles(lowTier ? 500 : 1400, false, smokeTex);
@@ -758,6 +857,7 @@
         activeDebris = 0;
         for (let i = 0; i < MAXD; i++) debrisMesh.setMatrixAt(i, ZERO);
         debrisMesh.instanceMatrix.needsUpdate = true;
+        hidePhotos();
         smoke.clear();
         glow.clear();
         for (const sc of scorches) sc.visible = false;
@@ -781,6 +881,9 @@
         action: { label: "Rebuild the town", run: reset },
         onKey: (code) => { if (code === "KeyR") reset(); },
         onFire: fire,
+        onAim: (on) => { aiming = on && armed; },
+        zoom: () => 1 + aim * 3,
+        reveals: [],
         cameraFx() {
           if (shake <= 0.001) return null;
           return { x: (Math.random() - 0.5) * shake * 0.08, y: (Math.random() - 0.5) * shake * 0.06, roll: (Math.random() - 0.5) * shake * 0.01 };
@@ -792,14 +895,18 @@
           if (!armed && info.here && Math.hypot(you.x - BENCH.x, you.z - BENCH.z) < 1.7) {
             armed = true;
             resting.visible = false;
-            toast("Launcher", TOUCH ? "Tap to fire · Rebuild button resets" : "Click to fire · R rebuilds the town");
+            toast("Launcher", TOUCH ? "Tap to fire · Rebuild button resets" : "Click to fire · right-click to aim · R rebuilds");
           }
           carried.visible = armed && info.here;
+          if (!info.here) aiming = false;
+          aim += ((aiming ? 1 : 0) - aim) * Math.min(1, dt * 10);
           if (carried.visible) {
             carried.position.copy(camera.position);
             carried.quaternion.copy(camera.quaternion);
             kick = Math.max(0, kick - dt * 4);
             held.position.z = -0.22 + kick * 0.12;
+            // Through the sight, the tube drops out of the way.
+            held.position.y = -0.29 - aim * 0.5;
             held.rotation.x = kick * 0.18;
           }
           if (reload > 0) {
@@ -837,9 +944,18 @@
           rocketLight.intensity = lead ? 70 : 0;
           if (lead) rocketLight.position.copy(lead.p);
 
-          // Buildings that lost blocks this frame: let loose sections fall.
-          for (const b of buildings) if (b.dirty) settle(b);
+          // Buildings that lost blocks this frame: let loose sections fall,
+          // and see whether that's let a photo out.
+          let changed = false;
+          for (const b of buildings) if (b.dirty) { settle(b); changed = true; }
           while (rumbles.length) rumbles.shift()();
+          if (changed) revealCheck();
+          for (const h of hidden) {
+            h.glow += ((h.out ? 1 : 0) - h.glow) * Math.min(1, dt * 0.8);
+            h.halo.material.opacity = h.glow * 0.7;
+            // The air round a found photo clears faster, so you can see it.
+            if (h.out && h.glow < 0.98) smoke.hurry(h.g.position, 30, dt * 4);
+          }
 
           // Debris: gravity, tumbling, landing on the ground or on standing
           // blocks, and heavy pieces smashing what they land on.
@@ -995,6 +1111,20 @@
         oneShot(t, 0.6).connect(crack).connect(cg).connect(A.bus);
         cg.gain.setValueAtTime(loud * loud * 0.8, t);
         cg.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+      });
+      api.reveals.push((at) => {
+        const dist = at.distanceTo(R.camLocal);
+        const t = ctx.currentTime + Math.min(0.6, dist / 343);
+        const out = A.gain(0);
+        out.connect(A.bus);
+        for (const [f, g] of [[523.25, 0.07], [783.99, 0.05], [1046.5, 0.025]]) {
+          const o = A.osc("sine", f);
+          o.connect(A.gain(g)).connect(out);
+          o.stop(t + 4.2);
+        }
+        out.gain.setValueAtTime(0, t);
+        out.gain.linearRampToValueAtTime(1, t + 0.04);
+        out.gain.exponentialRampToValueAtTime(0.001, t + 4);
       });
       api.collapses.push((b, count) => {
         const at = new THREE.Vector3(b.ox + (b.W * S_RANGE) / 2, 10, b.oz + (b.D * S_RANGE) / 2);

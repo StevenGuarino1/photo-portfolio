@@ -1,5 +1,7 @@
 """Pick up the launcher in the Range, put three missiles into the tall
-tower, and photograph the blast, the collapse and the dust afterwards.
+tower, and photograph the blast, the collapse and the dust afterwards; then
+check the photo hidden in it came out: aim at it through the sight, see its
+card, open it full screen, and rebuild the town for a fresh set.
 
   python range_test.py [url] [--shots DIR]
 """
@@ -24,12 +26,19 @@ page.eval("window.__app.goTo('range', 'line')")
 time.sleep(2.5)
 # Aim at the foot of the tall tower (x 10, z ~237 in the room's own frame).
 x, z, eye = 1.2, 6.6, 1.62
-tx, ty, tz = 10.0, 9.0, 236.0
-yaw = math.atan2(-(tx - x), -(tz - z))
-pitch = math.atan2(ty - eye, math.hypot(tx - x, tz - z))
-page.eval(f"(() => {{ const r = window.__app.regions.range; Object.assign(window.__app.me, {{ yaw: {yaw} + r.rot, pitch: {pitch} }}); }})()")
+
+
+def look_at(tx, ty, tz):
+    yaw = math.atan2(-(tx - x), -(tz - z))
+    pitch = math.atan2(ty - eye, math.hypot(tx - x, tz - z))
+    page.eval(f"(() => {{ const r = window.__app.regions.range; Object.assign(window.__app.me, {{ yaw: {yaw} + r.rot, pitch: {pitch} }}); }})()")
+
+
+look_at(10.0, 9.0, 236.0)
 time.sleep(0.5)
 print("armed toast:", page.eval("document.querySelector('#toast b').textContent"), flush=True)
+hidden = "window.__app.here.photos.filter((p) => p.reach)"
+print("photos hidden in the town:", page.eval(f"{hidden}.length"), "out:", page.eval(f"{hidden}.filter((p) => !p.hidden).length"))
 t0 = time.time()
 for shot in range(3):
     page.eval("window.__app.here.api.onFire()")
@@ -41,5 +50,26 @@ for at, name in plan:
     page.shot(os.path.join(SHOTS, f"range-{name}.png"))
     info = page.eval("(() => { const r = window.__app.renderer.info.render; return { calls: r.calls, tris: r.triangles }; })()")
     print(name, info, page.eval("window.__fps(0.5)"), flush=True)
+out = page.eval(f"{hidden}.filter((p) => !p.hidden).map((p) => p.photo.title)")
+print("photos out:", out)
+# Look through the sight at the one that came out, and open it.
+pos = page.eval(f"(() => {{ const p = {hidden}.find((q) => !q.hidden); if (!p) return null; const v = p.mesh.getWorldPosition(new p.mesh.position.constructor()); const r = window.__app.regions.range; const l = r.toLocal(v.x, v.z); return {{ x: l.x, y: v.y, z: l.z }}; }})()")
+if pos:
+    look_at(pos["x"], pos["y"], pos["z"])
+    page.eval("window.__app.here.api.onAim(true)")
+    time.sleep(1.2)
+    page.shot(os.path.join(SHOTS, "range-6-aim.png"))
+    print("zoom:", page.eval("window.__app.camera.fov.toFixed(1)"), "card:", page.eval("document.getElementById('photoCard').hidden ? null : document.querySelector('#photoCard h2').textContent"))
+    page.key("KeyF", "f")
+    time.sleep(1.0)
+    print("viewer:", page.eval("!document.getElementById('viewer').hidden"), page.eval("document.getElementById('viewerImg').src.split('/').pop()"))
+    page.key("Escape", "Escape")
+    time.sleep(0.5)
+    page.eval("window.__app.here.api.onAim(false)")
+before = page.eval(f"{hidden}.map((p) => p.photo.stem).join(',')")
+page.eval("window.__app.here.api.action.run()")
+time.sleep(1)
+after = page.eval(f"{hidden}.map((p) => p.photo.stem).join(',')")
+print("rebuilt: fresh set", before != after, "all hidden again", page.eval(f"{hidden}.every((p) => p.hidden)"), "count", page.eval(f"{hidden}.length"), "listed", page.eval("window.__app.here.photos.length"))
 print("errors:", page.eval("window.__errors"), page.console_errors()[:6])
 page.close()

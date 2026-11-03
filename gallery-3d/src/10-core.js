@@ -80,10 +80,14 @@
   const lerp = THREE.MathUtils.lerp;
   const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.05, 3000);
   camera.rotation.order = "YXZ";
-  // On a tall phone screen, widen the view so you don't feel boxed in.
+  // On a tall phone screen, widen the view so you don't feel boxed in. A
+  // room can narrow it, looking through a sight (`zoom` in its api).
+  let baseFov = 62;
+  let zoomNow = 1;
   function fitCamera() {
     camera.aspect = innerWidth / innerHeight;
-    camera.fov = camera.aspect < 1 ? lerp(62, 80, clamp((1 - camera.aspect) / 0.55, 0, 1)) : 62;
+    baseFov = camera.aspect < 1 ? lerp(62, 80, clamp((1 - camera.aspect) / 0.55, 0, 1)) : 62;
+    camera.fov = baseFov / zoomNow;
     camera.updateProjectionMatrix();
   }
   addEventListener("resize", () => {
@@ -284,11 +288,14 @@
     e.refs.add(reg.id);
     return e.tex;
   }
+  function releaseTexture(stem, id) {
+    const e = texCache.get(stem);
+    if (!e) return;
+    e.refs.delete(id);
+    if (!e.refs.size) { e.tex.dispose(); texCache.delete(stem); }
+  }
   function releaseTextures(id) {
-    for (const [stem, e] of texCache) {
-      e.refs.delete(id);
-      if (!e.refs.size) { e.tex.dispose(); texCache.delete(stem); }
-    }
+    for (const stem of [...texCache.keys()]) releaseTexture(stem, id);
   }
 
   // Labels in each room's own style: a gallery card, a burned wooden sign,
@@ -764,6 +771,7 @@
     if (e.key === "Shift") held.add("run");
     if (e.code === "KeyF" || e.code === "Enter") { if (focusPhoto) openViewer(focusPhoto.photo); }
     if (e.code === "KeyH") goTo("lobby");
+    if (e.code === "KeyZ" && !e.repeat) here?.api?.onAim?.(true);
     if (e.code === "KeyM") {
       settings.reduceMotion = !settings.reduceMotion;
       saveSettings();
@@ -773,10 +781,11 @@
     here?.api?.onKey?.(e.code);
   });
   addEventListener("keyup", (e) => {
+    if (e.code === "KeyZ") here?.api?.onAim?.(false);
     if (KEYS[e.code]) held.delete(KEYS[e.code]);
     if (e.key === "Shift") held.delete("run");
   });
-  addEventListener("blur", () => held.clear());
+  addEventListener("blur", () => { held.clear(); here?.api?.onAim?.(false); });
 
   // Mouse: click to capture it and look freely; if the browser won't let
   // the page capture the mouse, drag to look instead.
@@ -803,7 +812,7 @@
   const release = () => { if (locked) { releasing = true; document.exitPointerLock(); } };
   addEventListener("mousemove", (e) => {
     if (!locked) return;
-    const k = 0.0022 * settings.sensitivity;
+    const k = (0.0022 * settings.sensitivity) / zoomNow;
     me.yaw -= e.movementX * k;
     me.pitch = clamp(me.pitch - e.movementY * k, -1.35, 1.35);
   });
@@ -815,7 +824,11 @@
   // quick tap on a touch screen.
   canvas.addEventListener("mousedown", (e) => {
     if (running && locked && !menuOpen && !viewerOpen && e.button === 0) here?.api?.onFire?.();
+    // Rooms with a sight to look through: hold the right button (or Z).
+    if (running && !menuOpen && !viewerOpen && e.button === 2) here?.api?.onAim?.(true);
   });
+  addEventListener("mouseup", (e) => { if (e.button === 2) here?.api?.onAim?.(false); });
+  canvas.addEventListener("contextmenu", (e) => { if (running) e.preventDefault(); });
   let tap = null;
   canvas.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "touch") tap = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
@@ -832,7 +845,7 @@
   });
   canvas.addEventListener("pointermove", (e) => {
     if (!look || e.pointerId !== look.id) return;
-    const k = (e.pointerType === "touch" ? 0.0055 : 0.004) * settings.sensitivity;
+    const k = ((e.pointerType === "touch" ? 0.0055 : 0.004) * settings.sensitivity) / zoomNow;
     me.yaw -= (e.clientX - look.x) * k;
     me.pitch = clamp(me.pitch - (e.clientY - look.y) * k, -1.35, 1.35);
     look.x = e.clientX;
@@ -917,6 +930,12 @@
     const fx = here?.api?.cameraFx?.(t) ?? null;
     camera.position.set(me.x + (fx?.x ?? 0) * m, me.y + EYE + bob + (fx?.y ?? 0) * m, me.z);
     camera.rotation.set(me.pitch, me.yaw, (fx?.roll ?? 0) * m);
+    const zoom = here?.api?.zoom?.() ?? 1;
+    if (zoom !== zoomNow) {
+      zoomNow = zoom;
+      camera.fov = baseFov / zoom;
+      camera.updateProjectionMatrix();
+    }
     camera.updateMatrixWorld();
   }
 
@@ -1416,18 +1435,22 @@
     camera.getWorldDirection(camDir);
     for (const reg of [here]) {
       for (const p of reg.photos) {
-        if (!p.mesh.visible) continue;
+        if (!p.mesh.visible || p.hidden) continue;
         p.mesh.getWorldPosition(tmpV);
         tmpN.set(0, 0, 1).transformDirection(p.mesh.matrixWorld);
         const dx = camera.position.x - tmpV.x;
         const dy = camera.position.y - tmpV.y;
         const dz = camera.position.z - tmpV.z;
         const d = Math.hypot(dx, dy, dz);
-        const reach = Math.max(3, Math.max(p.w, p.h) * 2.4);
+        const reach = p.reach ?? Math.max(3, Math.max(p.w, p.h) * 2.4);
         if (d > reach || (dx * tmpN.x + dy * tmpN.y + dz * tmpN.z) / d < 0.25) continue;
         const ang = -(dx * camDir.x + dy * camDir.y + dz * camDir.z) / d;
-        if (ang < Math.cos(THREE.MathUtils.degToRad(24 + Math.max(p.w, p.h) * 4 / d))) continue;
-        if (d < bestD) { best = p; bestD = d; }
+        // A far photo has to be near the middle of the view, and the one
+        // nearest the middle wins; up close it's the nearest one in view.
+        const cone = p.reach ? 4 + THREE.MathUtils.radToDeg(Math.atan(Math.max(p.w, p.h) / 2 / d)) : 24 + Math.max(p.w, p.h) * 4 / d;
+        if (ang < Math.cos(THREE.MathUtils.degToRad(cone))) continue;
+        const score = p.reach ? 1 - ang : d;
+        if (score < bestD) { best = p; bestD = score; }
       }
     }
     return best;

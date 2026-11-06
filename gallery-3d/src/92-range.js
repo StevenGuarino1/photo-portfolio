@@ -8,7 +8,9 @@
   // and a building that loses too much of its base comes down whole. The
   // boom arrives late, at the speed of sound. Every building hides one of
   // the photographs behind its front wall. R puts the town back, with a
-  // fresh set of photos inside.
+  // fresh set of photos inside. Once picked up, the launcher goes where
+  // you go (31-arms.js): carry it out into the lobby and the hall's walls
+  // turn out to be hollow (32-hall.js).
 
   ROOMS.range = {
     name: "The Range",
@@ -192,54 +194,12 @@
       bench.traverse((o) => { if (o.isMesh) o.castShadow = true; });
       R.add(bench);
 
-      // The launcher: a fat tube with a grip, a sight and a warhead peeking
-      // out the front. One copy rests on the bench; the other is carried.
-      function launcherModel() {
-        const g = new THREE.Group();
-        const olive = new THREE.MeshStandardMaterial({ color: 0x4b5235, roughness: 0.7 });
-        const dark = new THREE.MeshStandardMaterial({ color: 0x1d1f1c, roughness: 0.6, metalness: 0.4 });
-        const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 1.1, 14), olive);
-        tube.rotation.x = Math.PI / 2;
-        g.add(tube);
-        for (const z of [-0.55, 0.55]) {
-          const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.08, 14), dark);
-          ring.rotation.x = Math.PI / 2;
-          ring.position.z = z;
-          g.add(ring);
-        }
-        const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.14, 0.06), dark);
-        grip.position.set(0, -0.13, 0.05);
-        grip.rotation.x = 0.25;
-        const grip2 = grip.clone();
-        grip2.position.z = -0.25;
-        const sight = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.05, 0.09), dark);
-        sight.position.set(-0.06, 0.1, -0.3);
-        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.18, 12), new THREE.MeshStandardMaterial({ color: 0x6d6a4a, roughness: 0.6 }));
-        tip.rotation.x = -Math.PI / 2;
-        tip.position.z = -0.62;
-        g.add(grip, grip2, sight, tip);
-        g.userData.tip = tip;
-        return g;
-      }
+      // The launcher resting on the bench, until you pick it up (31-arms.js).
       const resting = launcherModel();
       resting.position.set(BENCH.x, 1.06, BENCH.z);
       resting.rotation.set(0, 0.4, Math.PI / 2 - 0.05);
       resting.traverse((o) => { if (o.isMesh) o.castShadow = true; });
       R.add(resting);
-      // Carried: placed in front of the camera every frame.
-      const carried = new THREE.Group();
-      const held = launcherModel();
-      held.position.set(0.34, -0.29, -0.22);
-      held.scale.setScalar(0.85);
-      held.rotation.y = 0.04;
-      carried.add(held);
-      carried.visible = false;
-      R.scene.add(carried);
-      let armed = false;
-      let reload = 0;
-      let kick = 0;
-      let aiming = false;
-      let aim = 0; // 0 hip, 1 looking through the sight
 
       // ---------- The town ----------
       // [centre x, near edge z, width, depth, height] in blocks.
@@ -575,259 +535,25 @@
       hidePhotos();
 
       // ---------- Effects: fire, smoke, dust, glass, flash ----------
-      const flash = new THREE.PointLight(0xffa860, 0, 140, 1.2);
-      R.add(flash);
-      let flashT = 0;
-      // Smoke and dust are drawn from a cluster of soft lumps, so a puff
-      // reads as billowing rather than as a blurred disc.
-      const smokeTex = canvasTex(128, 128, (g) => {
-        const r = rng(83);
-        for (let i = 0; i < 18; i++) {
-          const a = r() * Math.PI * 2;
-          const d = Math.sqrt(r()) * 24;
-          const x = 64 + Math.cos(a) * d;
-          const y = 64 + Math.sin(a) * d;
-          const rad = 16 + r() * 22;
-          const grad = g.createRadialGradient(x, y, 0, x, y, rad);
-          grad.addColorStop(0, `rgba(255, 255, 255, ${0.3 + r() * 0.25})`);
-          grad.addColorStop(1, "rgba(255, 255, 255, 0)");
-          g.fillStyle = grad;
-          g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
-        }
-      }, { repeat: false });
-      // Every puff, flame and glint is one instance of a square turned to
-      // face you: one draw for all the smoke and dust, one for all the fire
-      // and glass, however much is in the air. A particle drifts (with drag,
-      // rising or falling), grows, turns slowly and fades; fire cools from
-      // yellow to a dull red, glass twinkles as it tumbles.
-      const STRIDE = 20;
-      function particles(max, additive, map) {
-        const geo = new THREE.InstancedBufferGeometry();
-        geo.setAttribute("position", new THREE.Float32BufferAttribute([-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0], 3));
-        geo.setIndex([0, 1, 2, 0, 2, 3]);
-        const at = new THREE.InstancedBufferAttribute(new Float32Array(max * 4), 4).setUsage(THREE.DynamicDrawUsage);
-        const tint = new THREE.InstancedBufferAttribute(new Float32Array(max * 4), 4).setUsage(THREE.DynamicDrawUsage);
-        const turn = new THREE.InstancedBufferAttribute(new Float32Array(max), 1).setUsage(THREE.DynamicDrawUsage);
-        geo.setAttribute("at", at);
-        geo.setAttribute("tint", tint);
-        geo.setAttribute("turn", turn);
-        geo.instanceCount = 0;
-        const mat = new THREE.ShaderMaterial({
-          uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { map: { value: map } }]),
-          vertexShader: `
-            attribute vec4 at;
-            attribute vec4 tint;
-            attribute float turn;
-            varying vec4 vTint;
-            varying vec2 vUv;
-            varying float vUp;
-            #include <fog_pars_vertex>
-            void main() {
-              vTint = tint;
-              vUv = position.xy + 0.5;
-              float c = cos(turn);
-              float s = sin(turn);
-              vec2 corner = vec2(c * position.x - s * position.y, s * position.x + c * position.y);
-              vUp = corner.y + 0.5;
-              vec4 mvPosition = modelViewMatrix * vec4(at.xyz, 1.0);
-              mvPosition.xy += corner * at.w;
-              gl_Position = projectionMatrix * mvPosition;
-              #include <fog_vertex>
-            }`,
-          fragmentShader: `
-            uniform sampler2D map;
-            varying vec4 vTint;
-            varying vec2 vUv;
-            varying float vUp;
-            #include <fog_pars_fragment>
-            void main() {
-              float lump = texture2D(map, vUv).a;
-              float a = lump * vTint.a;
-              if (a < 0.004) discard;
-              vec3 col = vTint.rgb;
-              ${additive ? "" : "col *= mix(0.72, 1.12, vUp) * (1.0 - 0.18 * lump);"}
-              float f = 0.0;
-              #ifdef USE_FOG
-                f = smoothstep(fogNear, fogFar, vFogDepth);
-              #endif
-              ${additive ? "a *= 1.0 - f;" : "col = mix(col, fogColor, f);"}
-              gl_FragColor = vec4(col, a);
-              #include <colorspace_fragment>
-            }`,
-          transparent: true,
-          depthWrite: false,
-          fog: true,
-          blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
-        });
-        mat.userData.noClip = true;
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.frustumCulled = false;
-        mesh.renderOrder = additive ? 2 : 1;
-        R.add(mesh);
-        const d = new Float32Array(max * STRIDE);
-        const col = new THREE.Color();
-        let n = 0;
-        let shown = 0;
-        return {
-          add(x, y, z, o) {
-            if (n >= max) return;
-            const k = n++ * STRIDE;
-            col.setHex(o.color);
-            d[k] = x; d[k + 1] = y; d[k + 2] = z;
-            d[k + 3] = o.vx; d[k + 4] = o.vy; d[k + 5] = o.vz;
-            d[k + 6] = o.size; d[k + 7] = o.grow; d[k + 8] = o.life; d[k + 9] = 0;
-            d[k + 10] = col.r; d[k + 11] = col.g; d[k + 12] = col.b; d[k + 13] = o.peak;
-            d[k + 14] = o.drag; d[k + 15] = o.gravity;
-            d[k + 16] = Math.random() * Math.PI * 2; d[k + 17] = (Math.random() - 0.5) * o.swirl;
-            d[k + 18] = o.kind;
-          },
-          step(dt) {
-            if (!n && !shown) return;
-            const A = at.array;
-            const T = tint.array;
-            const U = turn.array;
-            for (let i = 0; i < n; i++) {
-              const k = i * STRIDE;
-              d[k + 9] += dt;
-              if (d[k + 9] >= d[k + 8]) {
-                // Gone: the last one takes its place.
-                n--;
-                if (i < n) d.copyWithin(k, n * STRIDE, n * STRIDE + STRIDE);
-                i--;
-                continue;
-              }
-              const age = d[k + 9];
-              const u = age / d[k + 8];
-              const drag = Math.exp(-d[k + 14] * dt);
-              d[k + 3] *= drag;
-              d[k + 5] *= drag;
-              d[k + 4] = d[k + 4] * drag - d[k + 15] * dt;
-              d[k] += d[k + 3] * dt;
-              d[k + 1] += d[k + 4] * dt;
-              d[k + 2] += d[k + 5] * dt;
-              d[k + 16] += d[k + 17] * dt;
-              const kind = d[k + 18];
-              const a = kind === 1 ? d[k + 13] * (1 - u)
-                : kind === 2 ? d[k + 13] * (1 - u) * (0.3 + 0.7 * Math.abs(Math.sin(age * 31 + i * 1.7)))
-                  : d[k + 13] * Math.min(1, age * 3) * Math.pow(1 - u, 1.4);
-              const cool = kind === 1 ? u : 0;
-              const j = i * 4;
-              A[j] = d[k]; A[j + 1] = d[k + 1]; A[j + 2] = d[k + 2]; A[j + 3] = d[k + 6] + d[k + 7] * age;
-              T[j] = d[k + 10] + (0.06 - d[k + 10]) * cool;
-              T[j + 1] = d[k + 11] + (0.012 - d[k + 11]) * cool;
-              T[j + 2] = d[k + 12] + (0.003 - d[k + 12]) * cool;
-              T[j + 3] = a;
-              U[i] = d[k + 16];
-            }
-            geo.instanceCount = n;
-            shown = n;
-            for (const attr of [at, tint, turn]) {
-              attr.clearUpdateRanges();
-              attr.addUpdateRange(0, Math.max(1, n) * attr.itemSize);
-              attr.needsUpdate = true;
-            }
-          },
-          clear() { n = 0; },
-          // Age everything within `r` metres (across the ground) of `at` by
-          // an extra `by` seconds.
-          hurry(at, r, by) {
-            for (let i = 0; i < n; i++) {
-              const k = i * STRIDE;
-              if (Math.hypot(d[k] - at.x, d[k + 2] - at.z) < r) d[k + 9] += by;
-            }
-          },
-        };
-      }
-      const smoke = particles(lowTier ? 500 : 1400, false, smokeTex);
-      const glow = particles(lowTier ? 300 : 800, true, glowTex);
-      function puff(x, y, z, { size = 6, grow = 3, life = 6, vy = 2, vx = 0, vz = 0, drag = 0.15, color = 0x6a645e, fire = false, spread = 2, peak } = {}) {
-        (fire ? glow : smoke).add(
-          x + (Math.random() - 0.5) * spread, y + (Math.random() - 0.5) * spread * 0.5, z + (Math.random() - 0.5) * spread,
-          { vx, vy, vz, size, grow: grow * (fire ? 1 : 0.8), life, color, peak: peak ?? (fire ? 0.9 : 0.6), drag: fire ? 0 : drag, gravity: fire ? 0 : -0.25, swirl: fire ? 0 : 0.5, kind: fire ? 1 : 0 },
-        );
-      }
-      // A shard of window glass, flashing as it tumbles down.
-      function glint(at, vx, vy, vz) {
-        const k = () => 0.6 + Math.random() * 0.6;
-        glow.add(at.x + (Math.random() - 0.5) * S, at.y + (Math.random() - 0.5) * S, at.z + (Math.random() - 0.5) * S, {
-          vx: vx * k(), vy: vy * k(), vz: vz * k(), size: 0.7 + Math.random() * 0.6, grow: 0, life: 1.5 + Math.random() * 1.8,
-          color: 0xfff4dc, peak: 1, drag: 0.6, gravity: 7, swirl: 0, kind: 2,
-        });
-      }
-      // Scorch marks where a blast hits the ground.
-      const scorchMat = new THREE.MeshBasicMaterial({ map: glowTex, color: 0x000000, transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
-      const scorches = Array.from({ length: 10 }, () => {
-        const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), scorchMat);
-        m.rotation.x = -Math.PI / 2;
-        m.visible = false;
-        R.add(m);
-        return m;
-      });
-      let nextScorch = 0;
-      function scorch(at) {
-        const m = scorches[nextScorch];
-        nextScorch = (nextScorch + 1) % scorches.length;
-        m.position.set(at.x, 0.12, at.z);
-        m.scale.setScalar(9 + Math.random() * 5);
-        m.rotation.z = Math.random() * Math.PI * 2;
-        m.visible = true;
-      }
+      const fx = fxKit(R, { low: lowTier });
+      const { puff, glint } = fx;
 
       // ---------- The missile ----------
-      const rocket = new THREE.Group();
-      {
-        const body = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.7, 8), new THREE.MeshLambertMaterial({ color: 0x6d6a4a }));
-        body.rotation.x = Math.PI / 2;
-        const flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffb060, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
-        flame.scale.setScalar(1.6);
-        flame.position.z = 0.5;
-        rocket.add(body, flame);
-      }
-      rocket.visible = false;
-      R.add(rocket);
-      const rocketLight = new THREE.PointLight(0xffb060, 0, 45, 1.4);
-      R.add(rocketLight);
-      const missiles = [];
-      const rootInv = new THREE.Quaternion();
-      function fire() {
-        if (!armed || reload > 0) return;
-        reload = 0.9;
-        kick = 1;
-        const tip = held.userData.tip;
-        tip.visible = false;
-        const from = new THREE.Vector3();
-        tip.getWorldPosition(from);
-        R.root.worldToLocal(from);
-        const dir = new THREE.Vector3();
-        camera.getWorldDirection(dir);
-        R.root.getWorldQuaternion(rootInv).invert();
-        dir.applyQuaternion(rootInv);
-        const m = rocket.clone();
-        m.visible = true;
-        R.add(m);
-        missiles.push({ m, p: from.clone(), v: dir.clone().multiplyScalar(140), age: 0 });
-        api.launches.forEach((f) => f());
-        for (let i = 0; i < 5; i++) {
-          const ahead = 2.5 + Math.random() * 4;
-          puff(from.x + dir.x * ahead, from.y + dir.y * ahead, from.z + dir.z * ahead, { size: 0.8, grow: 2, life: 1.4, vy: 0.3, color: 0xd8d2c8, spread: 0.6, peak: 0.35 });
-        }
-        puff(from.x + dir.x * 0.6, from.y + dir.y * 0.6, from.z + dir.z * 0.6, { size: 0.25, grow: 2.5, life: 0.07, vy: 0, color: 0xffd090, fire: true, spread: 0.05, peak: 0.7 });
-      }
+      const missiles = missileKit(R, fx, {
+        hit(p) {
+          if (p.y <= 0.1) return p.clone().setY(0.4);
+          for (const b of buildings) {
+            const id = cellOf(b, p.x, p.y, p.z);
+            if (id >= 0 && b.state[id]) return p.clone();
+          }
+          return null;
+        },
+        boom: (at) => explode(at),
+      });
 
       function explode(at) {
-        flash.position.copy(at).add(tmpB.set(0, 6, -6));
-        flash.intensity = 900;
-        flashT = 0;
-        for (let i = 0; i < 10; i++) puff(at.x, at.y, at.z, { size: 5 + Math.random() * 5, grow: 9, life: 0.9 + Math.random() * 0.5, vy: 3, color: 0xffa040, fire: true, spread: 4 });
-        for (let i = 0; i < 4; i++) puff(at.x, at.y, at.z, { size: 14, grow: 30, life: 0.25, vy: 0, color: 0xfff0d0, fire: true, spread: 1 });
-        for (let i = 0; i < 14; i++) puff(at.x, at.y + 2, at.z, { size: 7, grow: 5, life: 7 + Math.random() * 5, vy: 3 + Math.random() * 3, color: 0x4a4440, spread: 7 });
-        // Dust thrown out by the blast, slowing fast.
-        for (let i = 0; i < 12; i++) {
-          const a = Math.random() * Math.PI * 2;
-          const sp = 14 + Math.random() * 12;
-          puff(at.x, at.y, at.z, { size: 4, grow: 6, life: 4 + Math.random() * 3, vy: 1 + Math.random() * 3, vx: Math.cos(a) * sp, vz: Math.sin(a) * sp, drag: 2.2, color: 0xa89a88, spread: 2, peak: 0.5 });
-        }
-        if (at.y < 1) scorch(at);
+        fx.burst(at, 1, tmpB.copy(at).add(tmpA.set(0, 6, -6)));
+        if (at.y < 1) fx.scorch(at);
         // Blow out the blocks round the blast.
         const RAD = 4.8 * S;
         let hit = false;
@@ -890,9 +616,8 @@
         for (let i = 0; i < MAXD; i++) debrisMesh.setMatrixAt(i, ZERO);
         debrisMesh.instanceMatrix.needsUpdate = true;
         hidePhotos();
-        smoke.clear();
-        glow.clear();
-        for (const sc of scorches) sc.visible = false;
+        fx.clear();
+        missiles.clear();
         debrisMesh.count = 0;
       }
 
@@ -912,9 +637,10 @@
         collapses: [],
         action: { label: "Rebuild the town", run: reset },
         onKey: (code) => { if (code === "KeyR") reset(); },
-        onFire: fire,
-        onAim: (on) => { aiming = on && armed; },
-        zoom: () => 1 + aim * 3,
+        launch(from, dir) {
+          missiles.launch(from, dir);
+          api.launches.forEach((f) => f());
+        },
         reveals: [],
         cameraFx() {
           if (shake <= 0.001) return null;
@@ -922,59 +648,16 @@
         },
         update(t, dt, info) {
           sky.position.copy(R.camLocal);
-          // Pick the launcher up by walking to the bench.
+          // Pick the launcher up by walking to the bench. Once it's yours
+          // it goes where you go (31-arms.js).
           const you = R.player;
-          if (!armed && info.here && Math.hypot(you.x - BENCH.x, you.z - BENCH.z) < 1.7) {
-            armed = true;
-            resting.visible = false;
-            toast("Launcher", TOUCH ? "Tap to fire · Rebuild button resets" : "Click to fire · right-click to aim · R rebuilds");
+          if (!ARMS.carrying && info.here && Math.hypot(you.x - BENCH.x, you.z - BENCH.z) < 1.7) {
+            ARMS.pickUp();
+            toast("Launcher", TOUCH ? "Tap to fire · Rebuild button resets · it comes with you" : "Click to fire · right-click to aim · R rebuilds · it comes with you");
           }
-          carried.visible = armed && info.here;
-          if (!info.here) aiming = false;
-          aim += ((aiming ? 1 : 0) - aim) * Math.min(1, dt * 10);
-          if (carried.visible) {
-            carried.position.copy(camera.position);
-            carried.quaternion.copy(camera.quaternion);
-            kick = Math.max(0, kick - dt * 4);
-            held.position.z = -0.22 + kick * 0.12;
-            // Through the sight, the tube drops out of the way.
-            held.position.y = -0.29 - aim * 0.5;
-            held.rotation.x = kick * 0.18;
-          }
-          if (reload > 0) {
-            reload -= dt;
-            if (reload <= 0) held.userData.tip.visible = true;
-          }
+          resting.visible = !ARMS.carrying;
           shake *= Math.exp(-dt * 5);
-
-          // Missiles in flight: march along each step, checking the ground
-          // and every block they pass.
-          for (let mi = missiles.length - 1; mi >= 0; mi--) {
-            const M = missiles[mi];
-            M.age += dt;
-            M.v.y -= 2.5 * dt;
-            const steps = Math.ceil((M.v.length() * dt) / 0.6);
-            let boom = null;
-            for (let s = 0; s < steps && !boom; s++) {
-              M.p.addScaledVector(M.v, dt / steps);
-              if (M.p.y <= 0.1) { boom = M.p.clone().setY(0.4); break; }
-              for (const b of buildings) {
-                const id = cellOf(b, M.p.x, M.p.y, M.p.z);
-                if (id >= 0 && b.state[id]) { boom = M.p.clone(); break; }
-              }
-            }
-            M.m.position.copy(M.p);
-            M.m.lookAt(tmpA.copy(M.p).sub(M.v));
-            if (M.age > 0.04) puff(M.p.x, M.p.y, M.p.z, { size: 0.6, grow: 2.2, life: 2.2, vy: 0.2, color: 0xd8d2c8, spread: 0.2, peak: 0.5 });
-            if (boom || M.age > 7) {
-              if (boom) explode(boom);
-              R.root.remove(M.m);
-              missiles.splice(mi, 1);
-            }
-          }
-          const lead = missiles[missiles.length - 1];
-          rocketLight.intensity = lead ? 70 : 0;
-          if (lead) rocketLight.position.copy(lead.p);
+          missiles.step(dt);
 
           // Buildings that lost blocks this frame: let loose sections fall,
           // and see whether that's let a photo out.
@@ -1018,7 +701,7 @@
             h.glow += ((h.out ? 1 : 0) - h.glow) * Math.min(1, dt * 0.8);
             h.halo.material.opacity = h.glow * 0.7;
             // The air round a found photo clears faster, so you can see it.
-            if (h.out && h.glow < 0.98) smoke.hurry(h.g.position, 30, dt * 4);
+            if (h.out && h.glow < 0.98) fx.smoke.hurry(h.g.position, 30, dt * 4);
           }
 
           // Debris: gravity, tumbling, landing on the ground or on standing
@@ -1099,12 +782,7 @@
             if (Math.random() < dt * 2.2) puff(b.smokeAt.x, Math.max(1, b.smokeAt.y), b.smokeAt.z, { size: 6, grow: 4, life: 9, vy: 4, color: 0x3e3a38, spread: 4 });
             if (Math.random() < dt * 1.5) puff(b.smokeAt.x, Math.max(1, b.smokeAt.y), b.smokeAt.z, { size: 3, grow: 1, life: 0.8, vy: 2, color: 0xff8a30, fire: true, spread: 3 });
           }
-          smoke.step(dt);
-          glow.step(dt);
-          if (flash.intensity > 0) {
-            flashT += dt;
-            flash.intensity = Math.max(0, 900 * Math.exp(-flashT * 6));
-          }
+          fx.step(dt);
         },
         shakeAt(at, strength) {
           const d = Math.max(30, at.distanceTo(R.camLocal));

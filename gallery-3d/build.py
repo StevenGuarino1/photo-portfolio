@@ -74,7 +74,7 @@ def build(test=False):
         hook = open(os.path.join(HERE, "testhook.html"), encoding="utf-8").read()
         open(os.path.join(lab, "index.html"), "w", encoding="utf-8", newline="\n").write(hook + page.replace(
             "renderer.setAnimationLoop(frame);",
-            "renderer.setAnimationLoop(frame);\n  window.__app = { regions, doors, me, camera, renderer, goTo, enter, buildRegion, settings, get here() { return here; }, setQuality, frame, TIERS, get tier() { return tierName; }, get audio() { return audio; } };"))
+            "renderer.setAnimationLoop(frame);\n  window.__app = { regions, doors, me, camera, renderer, goTo, enter, buildRegion, settings, get here() { return here; }, setQuality, frame, TIERS, get tier() { return tierName; }, get audio() { return audio; }, ARMS };"))
         for d in ("img", "full"):
             dd = os.path.join(lab, d)
             if not os.path.exists(dd):

@@ -83,6 +83,8 @@ matrices — that is precise and needs no frame loop.
   down both sides (order in `SLOTS`, `10-core.js`):
   Gallery (Globe Room behind it), the Gathering, Lighthouse, Hawk Watch,
   Nature Train, Night Train, Pool, Apartments, Moor, Drive-in, Range.
+  Bring the Range's launcher in and the long walls break, with shades in
+  the hollows behind them (`src/32-hall.js`).
 - **How rooms draw:** each room is its own scene, seen only through its doorway
   (stencil plus per-material clipping planes). Rooms load when you come near.
 - **Night Train:** five cars on a curving track whose bends are fixed in the
@@ -128,6 +130,73 @@ access**, so check it actually reached GitHub before building on it.
   calling `api.update` directly): tall tower brought down with four shots,
   its photo fell from 45 m to the rubble, card and toast correct, no errors.
   Not checked: frame rate on real hardware, the floor-collapse-only case.
+
+### Later the same session: the launcher leaves the Range, the hall fights back
+
+Steven asked: carry the launcher out of the Range, shoot the hallway walls,
+they fall apart and enemies come out.
+
+- **The launcher is carried** (`src/31-arms.js`, `ARMS`): picked up at the
+  Range bench as before, then it goes where you go. A room can be fired in
+  if its api has `launch(from, dir)` (the Range and the lobby); elsewhere
+  it's slung out of sight and clicks do nothing. It's drawn in its own
+  scene after everything else with the depth cleared, so it never pokes
+  into walls. Missiles start on the line of sight, so they go where the
+  crosshair points. Aim and zoom moved from the Range into `ARMS`
+  (`ARMS.onAim`, `ARMS.zoom`; core calls them).
+- **Shared effects**: the smoke/fire/dust/glass particles, the scorch marks
+  and the flash (`fxKit`), missiles in flight (`missileKit`) and the
+  launcher model moved out of `92-range.js` into `31-arms.js`. The Range
+  uses them unchanged in look; its old `onFire`/`onAim`/`zoom` are gone.
+  The particle shader now handles `FogExp2` (the lobby's fog) as well.
+- **The hall** (`src/32-hall.js`, built from `30-lobby.js`): the stretches
+  of the long walls between doorways become 0.5 m blocks (1,500 or so, two
+  instanced meshes) with a hollow behind each one. A blast takes out what's
+  within ~1.35 m, anything no longer joined to floor, ceiling or door
+  frame drops, rubble skids across the floor. Missiles go off on walls,
+  floor, ceiling, end walls, benches, shades, the wall over a door, and
+  inside a vestibule; the end walls, door surrounds and site window never
+  break.
+- **Seams**: a whole wall draws only the black paint quads (a hair
+  oversize so they overlap). The grey concrete cores are drawn only for
+  blocks beside a hole (`rims()`). Drawing cores everywhere gave thin lines
+  at every joint at one angle or another, whatever the polygon offsets
+  (one surface is always near edge-on where they meet); measured against
+  the plain wall from four angles, the intact block wall is now identical.
+- **The shades**: tall, stooped, matte black, pale eyes, one instanced mesh
+  for bodies (6 boxes each, posed through a shared rig) and one for eyes.
+  A first breach reveals 2 or 3 waiting in the hollow; they come out one
+  at a time (~2.5 s apart) once a hole is about 1.5 × 2 m, climbing up to
+  it and dropping out if it's high; more come from the back every 9–15 s
+  while it's open (8 per hollow at most, 12 alive, 8 on Low). They walk at
+  1.2–1.7 m/s (you walk 2.5), wind up for 0.8 s and swipe; a blast within
+  3.2 m throws them and they come apart into black dust. One in a hollow
+  is only caught by a blast that got into it.
+- **You**: five swipes (one back every 6 s you're left alone), each a red
+  edge on the screen (`hurtEl`), a shake and a step back (through
+  `collide`/`crossDoors`). A blast within 2.4 m of you counts as one.
+  Fifth swipe: you come to by the entrance and the hall is put back.
+- **Repair the hall**: R, or the room button, which only shows while
+  there's damage (core now honours `action.when()`).
+- **Costs nothing until the launcher comes in**: the lobby keeps its plain
+  walls (now their own material, so one more draw call: 99 at the spawn,
+  measured here) and
+  only builds the fight the first time you're in it carrying the launcher
+  (+8 draws while it exists). No lights are added to the lobby (that would
+  change every shader in it): a blast borrows the nearest of its three
+  following lamps, flaring orange and easing back. Sound: launch, a boom
+  ringing down the hall (convolver), crumbling, a shade's breath on
+  stirring, a rush of dust when one dies, a thump when you're hit; one-shot
+  oscillators are made directly, since `A.osc` keeps every node it makes
+  and the lobby never unloads.
+- Tests: `range_test.py` now fires and aims through `ARMS`. New
+  `hall_test.py` stops the page's loop once in the lobby and steps time by
+  hand, so it plays out the same on a slow software renderer: checked that
+  nothing is built without the launcher, a breach, two shades killed with
+  one shot, a swipe landing, and repair. Both pass here (SwiftShader); the
+  two "404" console lines are Chrome asking for `/favicon.ico`.
+- Not checked: frame rate on real hardware; touch (tap fires, as in the
+  Range); how it feels at speed.
 
 ## Changed in the 2026-10-29 PC session
 

@@ -771,7 +771,7 @@
     if (e.key === "Shift") held.add("run");
     if (e.code === "KeyF" || e.code === "Enter") { if (focusPhoto) openViewer(focusPhoto.photo); }
     if (e.code === "KeyH") goTo("lobby");
-    if (e.code === "KeyZ" && !e.repeat) here?.api?.onAim?.(true);
+    if (e.code === "KeyZ" && !e.repeat) { ARMS.onAim(true); here?.api?.onAim?.(true); }
     if (e.code === "KeyM") {
       settings.reduceMotion = !settings.reduceMotion;
       saveSettings();
@@ -781,11 +781,11 @@
     here?.api?.onKey?.(e.code);
   });
   addEventListener("keyup", (e) => {
-    if (e.code === "KeyZ") here?.api?.onAim?.(false);
+    if (e.code === "KeyZ") { ARMS.onAim(false); here?.api?.onAim?.(false); }
     if (KEYS[e.code]) held.delete(KEYS[e.code]);
     if (e.key === "Shift") held.delete("run");
   });
-  addEventListener("blur", () => { held.clear(); here?.api?.onAim?.(false); });
+  addEventListener("blur", () => { held.clear(); ARMS.onAim(false); here?.api?.onAim?.(false); });
 
   // Mouse: click to capture it and look freely; if the browser won't let
   // the page capture the mouse, drag to look instead.
@@ -823,11 +823,11 @@
   // Rooms with something to fire: a click while the mouse is captured, or a
   // quick tap on a touch screen.
   canvas.addEventListener("mousedown", (e) => {
-    if (running && locked && !menuOpen && !viewerOpen && e.button === 0) here?.api?.onFire?.();
+    if (running && locked && !menuOpen && !viewerOpen && e.button === 0) { if (!ARMS.fire()) here?.api?.onFire?.(); }
     // Rooms with a sight to look through: hold the right button (or Z).
-    if (running && !menuOpen && !viewerOpen && e.button === 2) here?.api?.onAim?.(true);
+    if (running && !menuOpen && !viewerOpen && e.button === 2) { ARMS.onAim(true); here?.api?.onAim?.(true); }
   });
-  addEventListener("mouseup", (e) => { if (e.button === 2) here?.api?.onAim?.(false); });
+  addEventListener("mouseup", (e) => { if (e.button === 2) { ARMS.onAim(false); here?.api?.onAim?.(false); } });
   canvas.addEventListener("contextmenu", (e) => { if (running) e.preventDefault(); });
   let tap = null;
   canvas.addEventListener("pointerdown", (e) => {
@@ -835,7 +835,7 @@
   });
   canvas.addEventListener("pointerup", (e) => {
     if (!tap || e.pointerId !== tap.id) return;
-    if (Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 12 && performance.now() - tap.t < 300 && running && !menuOpen) here?.api?.onFire?.();
+    if (Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 12 && performance.now() - tap.t < 300 && running && !menuOpen) { if (!ARMS.fire()) here?.api?.onFire?.(); }
     tap = null;
   });
   canvas.addEventListener("pointerdown", (e) => {
@@ -930,7 +930,7 @@
     const fx = here?.api?.cameraFx?.(t) ?? null;
     camera.position.set(me.x + (fx?.x ?? 0) * m, me.y + EYE + bob + (fx?.y ?? 0) * m, me.z);
     camera.rotation.set(me.pitch, me.yaw, (fx?.roll ?? 0) * m);
-    const zoom = here?.api?.zoom?.() ?? 1;
+    const zoom = ARMS.active() ? ARMS.zoom() : here?.api?.zoom?.() ?? 1;
     if (zoom !== zoomNow) {
       zoomNow = zoom;
       camera.fov = baseFov / zoom;
@@ -1082,6 +1082,7 @@
       renderer.render(v.reg.scene, camera);
     }
     renderer.setScissorTest(false);
+    ARMS.draw();
   }
   function visibleNow(reg) {
     return reg === here || views.some((v) => v.reg === reg);
@@ -1504,6 +1505,7 @@
     govern(raw * 1000, lastWork, now);
     if (running && !menuOpen) walk(dt);
     placeCamera(t);
+    ARMS.update(dt);
     cull();
     const cor = corridorInfo();
     for (const reg of Object.values(regions)) {
@@ -1511,7 +1513,9 @@
       reg.api.update?.(t, dt, { cor, here: reg === here });
       animatePeople(reg, t, dt);
     }
-    crosshair.hidden = !(locked || (running && here?.api?.crosshair));
+    crosshair.hidden = !(locked || (running && (here?.api?.crosshair || ARMS.active())));
+    // A room's button can come and go (the lobby's, once there's damage).
+    if (here?.api?.action?.when) roomActionBtn.hidden = !here.api.action.when();
     if (++cardCheck % 5 === 0) showCard(running && !menuOpen ? findPhoto() : null);
     mixSound(t, dt);
     draw(now);

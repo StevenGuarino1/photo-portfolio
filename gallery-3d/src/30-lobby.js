@@ -134,17 +134,23 @@
 
       const walls = [];
       const wallMat = new THREE.MeshStandardMaterial({ color: 0x171717, roughness: 1 });
-      // The two long walls, with a doorway at each slot on that side.
+      // The two long walls, with a doorway at each slot on that side. The
+      // stretches between doorways have a material of their own (the same to
+      // look at), so they merge into one piece that can be swapped out for
+      // breakable block once the launcher comes in (32-hall.js).
+      const segMat = wallMat.clone();
+      const segments = [];
       for (const side of [-1, 1]) {
         const mine = SLOTS.filter((sl) => sl.dir.x === side && ROOMS[sl.room]).map((sl) => sl.base.z).sort((p, q) => p - q);
         let z = Z0;
         const piece = (z0, z1) => {
           if (z1 - z0 < 0.01) return;
-          const w = wallFaces(z1 - z0, H, wallMat, null, null);
+          const w = wallFaces(z1 - z0, H, segMat, null, null);
           w.position.set(side * W, 0, (z0 + z1) / 2);
           w.rotation.y = -side * Math.PI / 2;
           R.add(w);
           walls.push([side * W, z0, side * W, z1]);
+          segments.push({ side, z0, z1, doorBefore: z0 !== Z0, doorAfter: z1 !== LEN });
         };
         for (const dz of mine) {
           piece(z, dz - DOOR_HALF);
@@ -283,6 +289,36 @@
 
       // Hundreds of small static pieces, drawn as a handful.
       mergeStatic(R.root);
+      const segPlanes = [];
+      R.root.traverse((o) => { if (o.isMesh && o.material === segMat) segPlanes.push(o); });
+
+      // The fight (32-hall.js) is only built once the launcher is carried in.
+      // Its sounds hook in through these lists, which exist from the start.
+      const hooks = { booms: [], launches: [], crumbles: [], growls: [], hurts: [], deaths: [] };
+      let fight = null;
+      // A blast borrows the lamp nearest it for its flash: pulled over to
+      // the blast, flaring orange, then easing back to its place. (A light
+      // of its own would change every shader in the hall.)
+      const FLARE = new THREE.Color(0xffa860);
+      let flare = null;
+      const settleLamp = (l) => { l.position.x = 0; l.position.y = H - 1.2; l.color.setHex(0xf2f2f2); l.intensity = 10; };
+      const flashAt = (p) => {
+        if (flare) settleLamp(flare.lamp);
+        const lamp = lamps.reduce((a, b) => (a.position.distanceToSquared(p) <= b.position.distanceToSquared(p) ? a : b));
+        flare = { lamp, at: new THREE.Vector3(p.x * 0.85, Math.max(0.6, p.y), p.z), t: 0 };
+      };
+      function arm() {
+        if (fight) return fight;
+        fight = hallFight(R, { segments, W, H, LEN, Z0, blockers, low: Q.density < 0.5, hooks, flashAt });
+        for (const m of segPlanes) m.visible = false;
+        // The new pieces take on the lobby's stencil and clipping as they
+        // stand (it may be showing through a doorway right now).
+        const was = R.reg.through;
+        R.reg.through = undefined;
+        setThrough(R.reg, !!was);
+        hush();
+        return fight;
+      }
 
       // A doorway whose room isn't built yet is closed for the moment.
       const barriers = () => doors.filter((door) => !regions[door.room].loaded).map((door) => {
@@ -295,10 +331,36 @@
         walls,
         blockers,
         barriers,
-        update(t, dt, { cor }) {
+        hooks,
+        get fight() { return fight; },
+        // With the launcher (31-arms.js, 32-hall.js).
+        launch: (from, dir) => arm().launch(from, dir),
+        armsHint: ["Hollow walls", "Something's moving behind them"],
+        cameraFx: () => fight?.cameraFx() ?? null,
+        action: { label: "Repair the hall", run: () => fight?.repair(), when: () => !!fight?.damaged },
+        onKey: (code) => { if (code === "KeyR" && fight?.damaged) fight.repair(); },
+        update(t, dt, { cor, here }) {
+          // The launcher's come in: from now on the walls can break.
+          if (here && ARMS.carrying && !fight) arm();
           // The lamps follow you down the hall.
           const you = R.player;
           lamps.forEach((l, k) => { l.position.z = clamp(Math.round(you.z / LOBBY.spacing) * LOBBY.spacing + 2 + (k - 1) * LOBBY.spacing, 2, LEN - 2); });
+          fight?.update(t, dt, here);
+          if (flare) {
+            flare.t += dt;
+            const l = flare.lamp;
+            const k = Math.exp(-flare.t * 6);
+            if (k < 0.02) {
+              settleLamp(l);
+              flare = null;
+            } else {
+              l.position.x = 0;
+              l.position.y = H - 1.2;
+              l.position.lerp(flare.at, Math.min(1, k * 1.5));
+              l.color.setHex(0xf2f2f2).lerp(FLARE, k);
+              l.intensity = 10 + 150 * k;
+            }
+          }
           // Walking down a vestibule, the air takes on the room's colour.
           const target = cor?.room ? fogBase.clone().lerp(new THREE.Color(ROOMS[cor.room].fogColor ?? 0x0a0a0a), smooth(cor.progress, 0, 1) * 0.8) : fogBase;
           R.scene.fog.color.lerp(target, Math.min(1, dt * 3));
@@ -315,11 +377,141 @@
         },
       };
     },
-    sound(A) {
+    sound(A, R, api) {
       // The lobby's hush: a soft room tone.
       const tone = A.filter("lowpass", 220, 0.5);
       const g = A.gain(0.05);
       A.hiss().connect(tone).connect(g).connect(A.bus);
+      const hooks = api?.hooks;
+      if (!hooks) return {};
+      // A long hard hall: everything loud rings on in it.
+      const ctx = A.ctx;
+      const hall = ctx.createConvolver();
+      {
+        const len = Math.floor(ctx.sampleRate * 2.4);
+        const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+        for (let c = 0; c < 2; c++) {
+          const d = ir.getChannelData(c);
+          for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2) * (i < 400 ? i / 400 : 1);
+        }
+        hall.buffer = ir;
+      }
+      const wet = A.gain(0.55);
+      hall.connect(wet).connect(A.bus);
+      const out = (node, dry = 1) => {
+        const d = A.gain(dry);
+        node.connect(d).connect(A.bus);
+        node.connect(hall);
+      };
+      const noise = (t, len) => {
+        const src = ctx.createBufferSource();
+        src.buffer = audio.noise;
+        src.start(t, Math.random() * 1.5, len);
+        return src;
+      };
+      // One-shot oscillators made here rather than with A.osc, which keeps
+      // every node it makes for the life of the room (forever, in the lobby).
+      const osc = (type, freq, t, until) => {
+        const o = ctx.createOscillator();
+        o.type = type;
+        o.frequency.value = freq;
+        o.start(t);
+        o.stop(until);
+        return o;
+      };
+      hooks.launches.push(() => {
+        const t = ctx.currentTime;
+        const f = A.filter("bandpass", 900, 0.8);
+        const g2 = A.gain(0);
+        noise(t, 1).connect(f).connect(g2);
+        out(g2);
+        f.frequency.setValueAtTime(1500, t);
+        f.frequency.exponentialRampToValueAtTime(300, t + 0.8);
+        g2.gain.setValueAtTime(0, t);
+        g2.gain.linearRampToValueAtTime(0.7, t + 0.02);
+        g2.gain.exponentialRampToValueAtTime(0.001, t + 0.9);
+      });
+      hooks.booms.push((p) => {
+        const d = Math.max(2, R.camLocal.distanceTo(new THREE.Vector3(p.x, p.y, p.z)));
+        const t = ctx.currentTime + 0.01 + d / 343;
+        const loud = Math.min(0.85, 9 / d);
+        const low = A.filter("lowpass", 900, 0.7);
+        const g2 = A.gain(0);
+        noise(t, 2).connect(low).connect(g2);
+        out(g2);
+        g2.gain.setValueAtTime(0, t);
+        g2.gain.linearRampToValueAtTime(loud * 2, t + 0.008);
+        g2.gain.exponentialRampToValueAtTime(0.001, t + 1.6);
+        low.frequency.setValueAtTime(2400, t);
+        low.frequency.exponentialRampToValueAtTime(120, t + 1);
+        const sub = osc("sine", 60, t, t + 0.9);
+        const sg = A.gain(0);
+        sub.connect(sg);
+        out(sg, 1.2);
+        sg.gain.setValueAtTime(loud * 1.4, t);
+        sg.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
+        sub.frequency.setValueAtTime(60, t);
+        sub.frequency.exponentialRampToValueAtTime(26, t + 0.7);
+      });
+      // Block and grit coming down, a clatter thinning out.
+      hooks.crumbles.push((p, n) => {
+        const t = ctx.currentTime + 0.05;
+        const len = Math.min(2.2, 0.6 + n / 40);
+        const f = A.filter("bandpass", 1100, 0.9);
+        const g2 = A.gain(0);
+        const pan = A.placed(p.x, p.y, p.z, 3, 1);
+        noise(t, len).connect(f).connect(g2).connect(pan);
+        g2.connect(hall);
+        for (let k = 0; k < len; k += 0.03 + Math.random() * 0.07) g2.gain.setValueAtTime(Math.random() < 0.45 ? 0 : Math.random() * 0.45 * (1 - k / len), t + k);
+        g2.gain.setValueAtTime(0, t + len);
+      });
+      // A shade stirring: a low breath that rises and drags.
+      hooks.growls.push((s) => {
+        const t = ctx.currentTime + Math.random() * 0.6;
+        const f0 = 52 + Math.random() * 18;
+        const o = osc("sawtooth", f0, t, t + 1.7);
+        const f = A.filter("lowpass", 240, 3);
+        const g2 = A.gain(0);
+        const pan = A.placed(s.x, 1.6, s.z, 2, 1.1);
+        o.connect(f).connect(g2).connect(pan);
+        const br = A.filter("bandpass", 700, 1.4);
+        const bg = A.gain(0);
+        noise(t, 1.6).connect(br).connect(bg).connect(pan);
+        for (const [gn, peak] of [[g2, 0.16], [bg, 0.1]]) {
+          gn.gain.setValueAtTime(0, t);
+          gn.gain.linearRampToValueAtTime(peak, t + 0.5);
+          gn.gain.linearRampToValueAtTime(peak * 0.6, t + 1.1);
+          gn.gain.linearRampToValueAtTime(0, t + 1.6);
+        }
+        o.frequency.setValueAtTime(f0, t);
+        o.frequency.linearRampToValueAtTime(f0 * 0.7, t + 1.6);
+      });
+      // Coming apart: a soft rush of dust.
+      hooks.deaths.push((s) => {
+        const t = ctx.currentTime + 0.15;
+        const f = A.filter("highpass", 900, 0.5);
+        const g2 = A.gain(0);
+        noise(t, 1.2).connect(f).connect(g2).connect(A.placed(s.x, 1, s.z, 2, 1));
+        g2.gain.setValueAtTime(0, t);
+        g2.gain.linearRampToValueAtTime(0.25, t + 0.1);
+        g2.gain.exponentialRampToValueAtTime(0.001, t + 1.1);
+      });
+      // Hit: a dull thump and a ring in the ears.
+      hooks.hurts.push(() => {
+        const t = ctx.currentTime;
+        const th = osc("sine", 110, t, t + 0.35);
+        const tg = A.gain(0);
+        th.connect(tg).connect(A.bus);
+        tg.gain.setValueAtTime(0.5, t);
+        tg.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+        th.frequency.setValueAtTime(110, t);
+        th.frequency.exponentialRampToValueAtTime(45, t + 0.3);
+        const f = A.filter("bandpass", 1800, 2);
+        const g2 = A.gain(0);
+        noise(t, 0.2).connect(f).connect(g2).connect(A.bus);
+        g2.gain.setValueAtTime(0.2, t);
+        g2.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      });
       return {};
     },
   };

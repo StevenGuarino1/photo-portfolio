@@ -41,7 +41,7 @@ hidden = "window.__app.here.photos.filter((p) => p.reach)"
 print("photos hidden in the town:", page.eval(f"{hidden}.length"), "out:", page.eval(f"{hidden}.filter((p) => !p.hidden).length"))
 t0 = time.time()
 for shot in range(3):
-    page.eval("window.__app.here.api.onFire()")
+    page.eval("(() => { const A = window.__app.ARMS; A.reload = 0; return A.fire(); })()")
     time.sleep(1.0)
 plan = [(2.0, "1-blast"), (4.5, "2-falling"), (7.0, "3-collapse"), (13.0, "4-dust"), (22.0, "5-after")]
 for at, name in plan:
@@ -56,7 +56,7 @@ print("photos out:", out)
 pos = page.eval(f"(() => {{ const p = {hidden}.find((q) => !q.hidden); if (!p) return null; const v = p.mesh.getWorldPosition(new p.mesh.position.constructor()); const r = window.__app.regions.range; const l = r.toLocal(v.x, v.z); return {{ x: l.x, y: v.y, z: l.z }}; }})()")
 if pos:
     look_at(pos["x"], pos["y"], pos["z"])
-    page.eval("window.__app.here.api.onAim(true)")
+    page.eval("window.__app.ARMS.onAim(true)")
     time.sleep(1.2)
     page.shot(os.path.join(SHOTS, "range-6-aim.png"))
     print("zoom:", page.eval("window.__app.camera.fov.toFixed(1)"), "card:", page.eval("document.getElementById('photoCard').hidden ? null : document.querySelector('#photoCard h2').textContent"))
@@ -65,7 +65,7 @@ if pos:
     print("viewer:", page.eval("!document.getElementById('viewer').hidden"), page.eval("document.getElementById('viewerImg').src.split('/').pop()"))
     page.key("Escape", "Escape")
     time.sleep(0.5)
-    page.eval("window.__app.here.api.onAim(false)")
+    page.eval("window.__app.ARMS.onAim(false)")
 before = page.eval(f"{hidden}.map((p) => p.photo.stem).join(',')")
 page.eval("window.__app.here.api.action.run()")
 time.sleep(1)

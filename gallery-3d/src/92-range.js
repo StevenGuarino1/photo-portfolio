@@ -265,15 +265,20 @@
         const color = new Float32Array(n * 3);
         const tone = [0.55 + r() * 0.15, 0.52 + r() * 0.14, 0.5 + r() * 0.12];
         // The photo's slot: one block in from the front wall, the width of
-        // the inside, rows 1 to `top`, kept clear of floors.
+        // the inside, `top` rows tall, standing on one of the floors (rows
+        // `lo` to `lo + top - 1`). Which floor changes from visit to visit,
+        // so you have to look for it.
         const top = Math.min(H - 2, Math.ceil(((W - 2) * S) / 1.45 / S));
+        const floors = [];
+        for (let f = 1; f + top <= H - 1; f += 3) floors.push(f);
+        const lo = floors[Math.floor(Math.pow(Math.random(), 1.4) * floors.length)] || 1;
         const cells = [];
         for (let j = 0; j < H; j++) for (let k = 0; k < D; k++) for (let i = 0; i < W; i++) {
           const shell = i === 0 || i === W - 1 || k === 0 || k === D - 1;
           const slab = j % 3 === 0;
           const core = Math.abs(i - W / 2 + 0.5) < 1 && Math.abs(k - D / 2 + 0.5) < 1;
           if (!(shell || slab || core)) continue;
-          if (!shell && k === 1 && j >= 1 && j <= top) continue;
+          if (!shell && k === 1 && j >= lo && j < lo + top) continue;
           const id = i + W * (k + D * j);
           state[id] = 1;
           const window = shell && !slab && (i + k) % 2 === 1 && j > 0;
@@ -303,7 +308,7 @@
         mesh.frustumCulled = false;
         R.add(mesh);
         const base = cells.filter((id) => id < W * D).length;
-        return { W, H, D, ox, oz, n, state, glass, inst, color, mesh, initial: state.slice(), base, down: false, dirty: false, smoke: 0, top };
+        return { W, H, D, ox, oz, n, state, glass, inst, color, mesh, initial: state.slice(), base, down: false, dirty: false, smoke: 0, top, lo };
       });
       const cellOf = (b, x, y, z) => {
         const i = Math.floor((x - b.ox) / S);
@@ -371,6 +376,10 @@
       // sections drop together.
       function settle(b) {
         b.dirty = false;
+        // Pieces that came to rest on this building may have just lost what
+        // they were lying on: set them moving again to find out.
+        const bi = buildings.indexOf(b);
+        for (let d = 0; d < MAXD; d++) if (D_.live[d] === 2 && D_.b[d] === bi) D_.live[d] = 1;
         if (b.down) return;
         const { W, H, D, state } = b;
         const seen = new Uint8Array(b.n);
@@ -462,14 +471,17 @@
       }
 
       // ---------- The photos inside ----------
-      // Each building has a photograph standing just behind its front wall,
-      // as wide as the inside will take. Blow the wall away and there it is;
-      // bring the building down and it's left standing in the dust with a
+      // Each building has a photograph standing on one of its floors, just
+      // behind the front wall, as wide as the inside will take. Blow the wall
+      // away and there it is. Knock the floor out from under it and it drops
+      // with the building; bring the whole thing down and it slides out of
+      // the wreck and ends up leaning back on the rubble, facing you, with a
       // warm glow round it. Once it's out, look at it for its card, and F
       // shows it full size. Rebuilding the town hides a fresh set. Night
       // skies sit out: at this distance at dusk they'd read as black.
       const POOL_STEMS = PHOTOS.filter((P) => P.category !== "Night Sky").map((P) => P.stem);
-      const frameMat = new THREE.MeshLambertMaterial({ color: 0x141416 });
+      // Pushed back in depth so it never flickers through the photo at range.
+      const frameMat = new THREE.MeshLambertMaterial({ color: 0x141416, polygonOffset: true, polygonOffsetFactor: 4, polygonOffsetUnits: 4 });
       const rimTex = canvasTex(256, 256, (g) => {
         g.shadowColor = "#fff";
         g.shadowBlur = 46;
@@ -498,17 +510,17 @@
           const g = new THREE.Group();
           const pic = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: photoTexture(P.stem, R.reg), toneMapped: false, fog: false }));
           const frame = new THREE.Mesh(new THREE.BoxGeometry(w + 0.36, h + 0.36, 0.22), frameMat);
-          frame.position.z = -0.13;
+          frame.position.z = -0.2;
           // The glow sits behind the photo, so it only shows round its edges.
           const halo = new THREE.Mesh(new THREE.PlaneGeometry(w * 2, h * 2), new THREE.MeshBasicMaterial({ map: rimTex, color: 0xffcf96, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
           halo.position.z = -0.5;
           g.add(pic, frame, halo);
-          g.position.set(b.ox + (b.W * S) / 2, S + (b.top * S) / 2, b.oz + 1.5 * S);
+          g.position.set(b.ox + (b.W * S) / 2, b.lo * S + (b.top * S) / 2, b.oz + 1.5 * S);
           g.rotation.y = Math.PI;
           R.add(g);
           const entry = { mesh: pic, photo: P, w, h, reach: 700, hidden: true };
           R.reg.photos.push(entry);
-          hidden.push({ b, g, halo, entry, out: false, glow: 0, wall: frontWall(b) });
+          hidden.push({ b, g, halo, entry, out: false, glow: 0, wall: frontWall(b), floor: support(b), half: h / 2 + 0.18, fall: 0, vy: 0, vz: 0, lean: -1, baseY: 0, baseZ: 0 });
         });
         // Let go of the last set: from the scene, the photo list, and the
         // textures nothing else is using.
@@ -528,8 +540,23 @@
       // How much of the front wall still stands in front of a photo.
       function frontWall(b) {
         let n = 0;
-        for (let j = 1; j <= b.top; j++) for (let i = 1; i < b.W - 1; i++) if (b.state[i + b.W * b.D * j]) n++;
+        for (let j = b.lo; j < b.lo + b.top; j++) for (let i = 1; i < b.W - 1; i++) if (b.state[i + b.W * b.D * j]) n++;
         return n;
+      }
+      // How much of the floor it stands on is left (the front wall and the
+      // slab under the slot).
+      function support(b) {
+        let n = 0;
+        const j = b.lo - 1;
+        for (let k = 0; k <= 2; k++) for (let i = 0; i < b.W; i++) if (b.state[i + b.W * (k + b.D * j)]) n++;
+        return n;
+      }
+      // Where a dropped photo comes to rest: on whatever still stands under
+      // the slot, or the rubble on the ground.
+      function restY(b) {
+        const i = Math.floor(b.W / 2);
+        for (let j = b.lo - 2; j >= 0; j--) if (b.state[i + b.W * (1 + b.D * j)]) return (j + 1) * S;
+        return 0.5;
       }
       function revealCheck() {
         for (const h of hidden) {
@@ -538,7 +565,10 @@
           h.entry.hidden = false;
           h.b.smoke = Math.min(h.b.smoke, 2);
           const P = h.entry.photo;
-          toast(P.title, TOUCH ? "Found a photo · tap its card to see it" : "Found a photo · right-click to see it, F to view");
+          const got = hidden.filter((q) => q.out).length;
+          const tally = `${got} of ${hidden.length}`;
+          if (got === hidden.length) toast(P.title, `All ${hidden.length} photos found · ${TOUCH ? "Rebuild" : "R"} hides a fresh set`);
+          else toast(P.title, TOUCH ? `Found ${tally} · tap its card to see it` : `Found ${tally} · right-click to see it, F to view`);
           api.reveals.forEach((f) => f(h.g.position));
         }
       }
@@ -809,6 +839,7 @@
           const j1 = Math.min(b.H - 1, Math.floor((at.y + RAD) / S));
           const k0 = Math.max(0, Math.floor((at.z - RAD - b.oz) / S));
           const k1 = Math.min(b.D - 1, Math.floor((at.z + RAD - b.oz) / S));
+          let struck = false;
           for (let j = j0; j <= j1; j++) for (let k = k0; k <= k1; k++) for (let i = i0; i <= i1; i++) {
             const id = i + b.W * (k + b.D * j);
             if (!b.state[id]) continue;
@@ -822,9 +853,10 @@
             spawnDebris(b, id, tmpB.x * push, tmpB.y * push + 8, tmpB.z * push, 0.45 + Math.random() * 0.3, false);
             // A window going: a spray of glass catching the low sun.
             if (pane) for (let g = 0; g < 4; g++) glint(tmpA, tmpB.x * push * 0.8, tmpB.y * push + 6, tmpB.z * push * 0.8);
-            hit = true;
+            struck = true;
           }
-          if (hit) { b.dirty = true; b.smoke = 25; b.smokeAt = at.clone(); }
+          if (struck) hit = true;
+          if (struck) { b.dirty = true; b.smoke = 25; b.smokeAt = at.clone(); }
         }
         api.booms.forEach((f) => f(at));
         return hit;
@@ -951,6 +983,38 @@
           while (rumbles.length) rumbles.shift()();
           if (changed) revealCheck();
           for (const h of hidden) {
+            // The floor under it gone: it drops. With the building down it
+            // also slides forward out of the wreck.
+            if (!h.fall && (h.b.down || support(h.b) < h.floor * 0.3)) {
+              h.fall = 1;
+              h.vy = 0;
+              h.vz = h.b.down ? -(2 + Math.random() * 1.5) : 0;
+            }
+            if (h.fall === 1) {
+              h.vy -= GRAV * dt;
+              h.g.position.y += h.vy * dt;
+              h.g.position.z += h.vz * dt;
+              const floorY = h.b.down ? 0.5 : restY(h.b);
+              if (h.g.position.y - h.half <= floorY) {
+                h.fall = 2;
+                h.baseY = floorY;
+                h.baseZ = h.g.position.z;
+                h.g.position.y = floorY + h.half;
+                h.lean = h.b.down ? 0 : -1;
+                const at = h.g.position;
+                for (let i = 0; i < 6; i++) puff(at.x + (Math.random() - 0.5) * h.half * 2, floorY + 1, at.z - 1, { size: 5, grow: 3, life: 6, vy: 0.6, vx: (Math.random() - 0.5) * 4, vz: -2 - Math.random() * 2, drag: 0.6, color: 0x9c8f80, spread: 2, peak: 0.45 });
+              }
+            }
+            // Landed in the wreck: tips back onto the rubble, pivoting on
+            // its bottom edge, settling rather than snapping.
+            if (h.lean >= 0 && h.lean < 1) {
+              h.lean = Math.min(1, h.lean + dt * 0.9);
+              const u = h.lean;
+              const th = 0.3 * (1 - Math.pow(1 - u, 3)) + 0.025 * Math.sin(u * Math.PI * 2) * (1 - u);
+              h.g.rotation.x = th;
+              h.g.position.y = h.baseY + h.half * Math.cos(th);
+              h.g.position.z = h.baseZ + h.half * Math.sin(th);
+            }
             h.glow += ((h.out ? 1 : 0) - h.glow) * Math.min(1, dt * 0.8);
             h.halo.material.opacity = h.glow * 0.7;
             // The air round a found photo clears faster, so you can see it.

@@ -102,6 +102,33 @@ matrices — that is precise and needs no frame loop.
   a board. Bow sweeps roughly 24° to 73°, one every 3.5–5 s, eased to hold a
   beat at the bottom.
 
+## Changed in the 2026-11-06 cloud session
+
+On `gallery-3d`, committed locally in a cloud session that had **no push
+access**, so check it actually reached GitHub before building on it.
+
+- **Range photos live inside the buildings** (`src/92-range.js`): each photo
+  now stands on a random floor of its building (`b.lo`, a row just above a
+  slab, picked per visit, biased low), not always at street level, so you
+  have to find it. Still just behind the front wall, still hidden until the
+  wall in front of it goes.
+- **They come down with the building**: knock out the floor under a photo
+  (`support()` under 30%) and it drops onto whatever still stands below
+  (`restY()`); bring the building down and it slides out of the wreck and
+  tips back onto the rubble, pivoting on its bottom edge, with a puff of dust.
+  Before, a found photo hung in mid-air after a collapse.
+- Toast counts finds: "Found 3 of 13", and "All 13 photos found · R hides a
+  fresh set" at the end.
+- Fixed: the frame showed through a tilted photo at range as dark stripes
+  (depth fighting at 2 cm); frame sits further back with polygon offset.
+- Fixed: debris resting on a floor stayed floating when that floor went;
+  `settle()` wakes a building's resting pieces.
+- Fixed: one blast marked every later building in the loop as hit.
+- Checked in headless Chromium (SwiftShader, ~2 fps, so physics stepped by
+  calling `api.update` directly): tall tower brought down with four shots,
+  its photo fell from 45 m to the rubble, card and toast correct, no errors.
+  Not checked: frame rate on real hardware, the floor-collapse-only case.
+
 ## Changed in the 2026-10-29 PC session
 
 All on `gallery-3d` (commits e57501b, 3aaaed6, c5c8bbd and the Range before

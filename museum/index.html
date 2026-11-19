@@ -300,18 +300,39 @@ const T = {
     }
   }),
 };
-// High windows: the sky through a grid of glazing bars.
+// High windows: just the glazing bars; the sky is far off beyond them.
 T.window = pixelTex(32, 26, (g) => {
-  for (let y = 0; y < 26; y++) {
-    g.fillStyle = `rgb(${16 + y * 0.6 | 0}, ${24 + y * 0.9 | 0}, ${56 + y * 1.6 | 0})`;
-    g.fillRect(0, y, 32, 1);
-  }
-  const r = rng(121);
-  for (let i = 0; i < 6; i++) { g.fillStyle = "#b8c4f0"; g.fillRect(r() * 32 | 0, r() * 20 | 0, 1, 1); }
+  g.clearRect(0, 0, 32, 26);
   g.fillStyle = "#0b0b0f";
   for (const x of [0, 10, 21, 31]) g.fillRect(x, 0, 1, 26);
   for (const y of [0, 8, 17, 25]) g.fillRect(0, y, 32, 1);
 }, { repeat: false });
+// The night sky, all the way round, a long way off.
+T.dome = pixelTex(2048, 1024, (g) => {
+  for (let y = 0; y < 1024; y++) {
+    const k = Math.min(1, y / 512);
+    g.fillStyle = y < 512 ? `rgb(${7 + k * 20 | 0}, ${11 + k * 30 | 0}, ${28 + k * 52 | 0})` : "#0a0c13";
+    g.fillRect(0, y, 2048, 1);
+  }
+  // (None near the top, where a sphere's texture pinches into streaks:
+  // the sky overhead is the flat starfield below.)
+  const r = rng(151);
+  for (let i = 0; i < 2600; i++) {
+    const y = 160 + Math.pow(r(), 1.2) * 330;
+    g.fillStyle = r() < 0.15 ? "#e3e9ff" : r() < 0.5 ? "#9fb0dd" : "#5e6d9c";
+    g.fillRect(r() * 2048 | 0, y | 0, 1, 1);
+  }
+}, { repeat: false });
+// Overhead, through the skylight: stars on a flat sky high above.
+T.stars = pixelTex(64, 64, (g) => {
+  g.fillStyle = "#070b1c";
+  g.fillRect(0, 0, 64, 64);
+  const r = rng(161);
+  for (let i = 0; i < 16; i++) {
+    g.fillStyle = r() < 0.25 ? "#e3e9ff" : r() < 0.6 ? "#9fb0dd" : "#5e6d9c";
+    g.fillRect(r() * 64 | 0, r() * 64 | 0, 1, 1);
+  }
+});
 T.moon = pixelTex(16, 16, (g) => {
   for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
     const d = Math.hypot(x - 7.5, y - 7.5);
@@ -457,7 +478,14 @@ for (const s of [-1, 1]) {
   }
   // The cornice, the clerestory wall above it and its high windows.
   put(box(0.5, 0.7, LEN, 2, 0.7), M.cornice, { x: s * (HW - 0.25), y: WALL + 0.35, z: LEN / 2, cast: true });
-  put(plane(LEN, CEIL - WALL - 0.7, 2, 2), M.plaster, { x: s * HW, y: (WALL + 0.7 + CEIL) / 2, z: LEN / 2, ry });
+  // Above the cornice, cut round the high windows so you see out of them.
+  const W0 = WALL + 0.7;
+  const WIN0 = 10.1 - 1.33;
+  const WIN1 = 10.1 + 1.33;
+  put(plane(LEN, WIN0 - W0, 2, 2), M.plaster, { x: s * HW, y: (W0 + WIN0) / 2, z: LEN / 2, ry });
+  put(plane(LEN, CEIL - WIN1, 2, 2), M.plaster, { x: s * HW, y: (WIN1 + CEIL) / 2, z: LEN / 2, ry });
+  const cuts = [0, ...BAYS.flatMap((b) => [b - 1.6, b + 1.6]), LEN];
+  for (let k = 0; k < cuts.length; k += 2) wallPiece(cuts[k], cuts[k + 1], WIN0, WIN1, M.plaster, 2, 2);
   for (const z of BAYS) {
     put(box(0.12, 2.9, 0.16, 0.12, 2.9), M.plain, { x: s * (HW - 0.06), y: 10.1, z: z - 1.68 });
     put(box(0.12, 2.9, 0.16, 0.12, 2.9), M.plain, { x: s * (HW - 0.06), y: 10.1, z: z + 1.68 });
@@ -477,7 +505,7 @@ for (const s of [-1, 1]) {
   scene.add(spill);
 }
 // The windows themselves give light rather than take it.
-const windowMat = new THREE.MeshBasicMaterial({ map: T.window, color: 0x8f9bd0 });
+const windowMat = new THREE.MeshBasicMaterial({ map: T.window, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide });
 for (const s of [-1, 1]) for (const z of BAYS) {
   const w = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 2.66), windowMat);
   w.position.set(s * (HW - 0.012), 10.1, z);
@@ -556,13 +584,19 @@ for (const s of [-1, 1]) {
 for (let z = 0; z <= LEN; z += 3) put(box(2 * SKY, 0.45, 0.3, 1, 1), M.darkwood, { x: 0, y: CEIL + 0.1, z, cast: true });
 for (const s of [-1, 1]) put(box(0.12, 0.3, LEN, 1, 1), M.darkwood, { x: s * 0.75, y: CEIL + 0.25, z: LEN / 2, cast: true });
 {
-  const sky = new THREE.Mesh(plane(2 * SKY + 0.4, LEN, 4.4, 4.4), new THREE.MeshBasicMaterial({ map: T.sky, fog: false }));
-  sky.rotation.x = Math.PI / 2;
-  sky.position.set(0, CEIL + 1.6, LEN / 2);
-  scene.add(sky);
-  const moon = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), new THREE.MeshBasicMaterial({ map: T.moon, transparent: true, alphaTest: 0.5, fog: false }));
-  moon.rotation.x = Math.PI / 2;
-  moon.position.set(1.1, CEIL + 1.55, 31);
+  // Seen through the skylight and the windows: a sky a long way out, with
+  // the moon where the moonlight comes from.
+  const centre = new THREE.Vector3(0, 0, LEN / 2);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(95, 32, 16), new THREE.MeshBasicMaterial({ map: T.dome, side: THREE.BackSide, fog: false }));
+  dome.position.copy(centre);
+  scene.add(dome);
+  const overhead = new THREE.Mesh(plane(400, 400, 22, 22), new THREE.MeshBasicMaterial({ map: T.stars, fog: false }));
+  overhead.rotation.x = Math.PI / 2;
+  overhead.position.set(0, 70, LEN / 2);
+  scene.add(overhead);
+  const moon = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 4.2), new THREE.MeshBasicMaterial({ map: T.moon, transparent: true, alphaTest: 0.5, fog: false }));
+  moon.position.copy(centre).addScaledVector(new THREE.Vector3(12, 52, 2).normalize(), 60);
+  moon.lookAt(centre);
   scene.add(moon);
 }
 
@@ -615,10 +649,9 @@ for (const x of [-HW + 0.6, HW - 0.6]) for (const z of [0, LEN]) blockers.push({
 const all = (typeof PHOTOS !== "undefined" ? PHOTOS : []).map((P) => ({ ...P, stem: P.file.split("/").pop().replace(/\.jpg$/i, "") }));
 const hero = all.find((P) => P.stem === "4") ?? all[0];
 // Twelve for the long walls, taking the categories in turn so the hall
-// has a mix. Night skies sit out: on a dark wall at night they read as
-// blank.
+// has a mix.
 const byCat = new Map();
-for (const P of all) if (P !== hero && P.category !== "Night Sky") (byCat.get(P.category) ?? byCat.set(P.category, []).get(P.category)).push(P);
+for (const P of all) if (P !== hero) (byCat.get(P.category) ?? byCat.set(P.category, []).get(P.category)).push(P);
 const hung = [];
 const cats = [...byCat.keys()];
 for (let i = 0; hung.length < 12 && i < 40; i++) {
@@ -627,7 +660,7 @@ for (let i = 0; hung.length < 12 && i < 40; i++) {
 }
 const loader = new THREE.TextureLoader();
 const photoMeshes = [];
-const washMat = new THREE.MeshBasicMaterial({ map: WASH, color: 0xffb86e, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
+const washMat = new THREE.MeshBasicMaterial({ map: WASH, color: 0xffb86e, transparent: true, opacity: 0.42, blending: THREE.AdditiveBlending, depthWrite: false });
 const poolMat = new THREE.MeshBasicMaterial({ map: GLOW, color: 0xff9d52, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false });
 const month = (d) => (d ? new Date(d).toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "");
 function plaqueTex(P) {
@@ -670,7 +703,9 @@ function hang(P, x, z, n, maxW, maxH, cy) {
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = Math.min(8, maxAniso);
     pic.material.map = t;
-    pic.material.color.set(0xffffff);
+    // Dimmed: the museum's closed, the photos are lit only by the picture
+    // lights left on for the night.
+    pic.material.color.set(0x8c8c8c);
     pic.material.needsUpdate = true;
   });
   pic.userData.photo = P;

@@ -134,6 +134,7 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true, power
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.VSMShadowMap; // soft-edged, so moonlit and dark blend
+renderer.shadowMap.autoUpdate = false;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
 document.body.prepend(renderer.domElement);
@@ -953,40 +954,8 @@ const dustSeed = new Float32Array(DUST);
 }
 const dustGeo = new THREE.BufferGeometry();
 dustGeo.setAttribute("position", new THREE.BufferAttribute(dustPos, 3));
-// Away from the moonlight: a low mist creeping along the floor (kept below
-// the photos), warm dust hanging in the air all down the hall, and the
-// floor darkening into the corners.
-const mistTex = (() => {
-  const c = document.createElement("canvas");
-  c.width = c.height = 128;
-  const g = c.getContext("2d");
-  const r = rng(231);
-  for (let i = 0; i < 22; i++) {
-    const x = 20 + r() * 88;
-    const y = 40 + r() * 48;
-    const rad = 18 + r() * 26;
-    const grad = g.createRadialGradient(x, y, 0, x, y, rad);
-    grad.addColorStop(0, `rgba(255,255,255,${0.18 + r() * 0.16})`);
-    grad.addColorStop(1, "rgba(255,255,255,0)");
-    g.fillStyle = grad;
-    g.fillRect(0, 0, 128, 128);
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-})();
-const mists = [];
-{
-  const r = rng(233);
-  for (let i = 0; i < 30; i++) {
-    const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: mistTex, color: 0x76809c, transparent: true, opacity: 0.09 + r() * 0.06, depthWrite: false, ...SPARE }));
-    m.scale.set(6 + r() * 4, 1.3 + r() * 0.6, 1);
-    m.position.set((r() - 0.5) * (2 * HW - 3), 0.5 + r() * 0.25, r() * LEN);
-    m.userData.speed = 0.08 + r() * 0.12;
-    mists.push(m);
-    scene.add(m);
-  }
-}
+// Away from the moonlight: warm dust hanging in the air all down the hall,
+// and the floor darkening into the corners. (The mist is further down.)
 const MOTES = TOUCH ? 160 : 300;
 const motePos = new Float32Array(MOTES * 3);
 {
@@ -1025,6 +994,246 @@ scene.add(motes);
 const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: 0xc8d4ff, size: 0.028, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, ...SPARE }));
 scene.add(dust);
 
+// ---------- The mist ----------
+// A real volume of mist lying along the floor. The room is drawn as usual;
+// a quick depth-only pass says how far away each pixel is; then, for every
+// pixel, the ray from your eye to whatever it meets is marched through the
+// mist layer, gathering light (a cool haze, the moonbeams where they come
+// down through the skylight, striped by its beams, the warm glow of the
+// picture lights and lamps) and dimming what lies behind. Its shape is two
+// sizes of 3D noise drifting slowly down the hall. It's laid over the room
+// everywhere but the photos (they're marked, like for the other effects).
+const MIST_TOP = 1.5; // metres: knee-deep, gone by here
+const noise3D = (() => {
+  const N = 64;
+  const data = new Uint8Array(N * N * N);
+  // Smooth value noise that repeats every N voxels, at three sizes.
+  const octave = (cells, seed) => {
+    const r = rng(seed);
+    const lat = new Float32Array(cells * cells * cells).map(() => r());
+    const w = (v) => ((v % cells) + cells) % cells;
+    const at = (x, y, z) => lat[w(x) + cells * (w(y) + cells * w(z))];
+    const sm = (f) => f * f * (3 - 2 * f);
+    return (x, y, z) => {
+      const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+      const fx = sm(x - xi), fy = sm(y - yi), fz = sm(z - zi);
+      const l = (a, b, f) => a + (b - a) * f;
+      return l(
+        l(l(at(xi, yi, zi), at(xi + 1, yi, zi), fx), l(at(xi, yi + 1, zi), at(xi + 1, yi + 1, zi), fx), fy),
+        l(l(at(xi, yi, zi + 1), at(xi + 1, yi, zi + 1), fx), l(at(xi, yi + 1, zi + 1), at(xi + 1, yi + 1, zi + 1), fx), fy),
+        fz,
+      );
+    };
+  };
+  const o1 = octave(4, 241);
+  const o2 = octave(8, 242);
+  const o3 = octave(16, 243);
+  let i = 0;
+  for (let z = 0; z < N; z++) for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const v = o1((x * 4) / N, (y * 4) / N, (z * 4) / N) * 0.55 + o2((x * 8) / N, (y * 8) / N, (z * 8) / N) * 0.3 + o3((x * 16) / N, (y * 16) / N, (z * 16) / N) * 0.15;
+    data[i++] = Math.round(v * 255);
+  }
+  const t = new THREE.Data3DTexture(data, N, N, N);
+  t.format = THREE.RedFormat;
+  t.minFilter = t.magFilter = THREE.LinearFilter;
+  t.wrapS = t.wrapT = t.wrapR = THREE.RepeatWrapping;
+  t.unpackAlignment = 1;
+  t.needsUpdate = true;
+  return t;
+})();
+const depthRT = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: true });
+depthRT.depthTexture = new THREE.DepthTexture(1, 1);
+const depthOnly = new THREE.MeshBasicMaterial({ colorWrite: false });
+const f2 = (v) => v.toFixed(4);
+const v3 = (v) => `vec3(${f2(v.x)}, ${f2(v.y)}, ${f2(v.z)})`;
+const mistMat = new THREE.ShaderMaterial({
+  uniforms: {
+    tDepth: { value: depthRT.depthTexture },
+    tNoise: { value: noise3D },
+    uInvProj: { value: new THREE.Matrix4() },
+    uCamWorld: { value: new THREE.Matrix4() },
+    uCamPos: { value: new THREE.Vector3() },
+    uTime: { value: 0 },
+    uFrame: { value: 0 },
+    uSteps: { value: TOUCH ? 10 : 22 },
+    uExposure: { value: 1.15 },
+  },
+  vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
+  fragmentShader: `
+    precision highp float;
+    precision highp sampler3D;
+    uniform sampler2D tDepth;
+    uniform sampler3D tNoise;
+    uniform mat4 uInvProj;
+    uniform mat4 uCamWorld;
+    uniform vec3 uCamPos;
+    uniform float uTime;
+    uniform float uFrame;
+    uniform int uSteps;
+    uniform float uExposure;
+    varying vec2 vUv;
+    const float HW = ${f2(HW)};
+    const float LEN = ${f2(LEN)};
+    const float MID = ${f2(MID)};
+    const float CEIL = ${f2(CEIL)};
+    const float SKY = ${f2(SKY)};
+    const float TOP = ${f2(MIST_TOP)};
+    const vec3 MOON_UP = ${v3(MOON_DIR.clone().negate())};
+    const vec3 DESK0 = vec3(${f2(DESKS[0].x - DESKS[0].s * 0.45)}, 1.05, ${f2(DESKS[0].z)});
+    const vec3 DESK1 = vec3(${f2(DESKS[1].x - DESKS[1].s * 0.45)}, 1.05, ${f2(DESKS[1].z)});
+    const vec3 AMBIENT = vec3(0.012, 0.015, 0.026);
+    const vec3 MOONCOL = vec3(0.15, 0.18, 0.32);
+
+    vec3 acesFit(vec3 c) {
+      const mat3 inM = mat3(vec3(0.59719, 0.07600, 0.02840), vec3(0.35458, 0.90834, 0.13383), vec3(0.04823, 0.01566, 0.83777));
+      const mat3 outM = mat3(vec3(1.60475, -0.10208, -0.00327), vec3(-0.53108, 1.10813, -0.07276), vec3(-0.07367, -0.00605, 1.07602));
+      c = inM * (c / 0.6);
+      c = (c * (c + 0.0245786) - 0.000090537) / (c * (0.983729 * c + 0.4329510) + 0.238081);
+      return clamp(outM * c, 0.0, 1.0);
+    }
+    // How thick the mist is at p: billows drifting down the hall, densest
+    // on the floor and gone by TOP.
+    float density(vec3 p) {
+      vec3 wind = vec3(0.006, 0.0, 0.016) * uTime;
+      float a = texture(tNoise, p * vec3(0.045, 0.1, 0.03) - wind).r;
+      float b = texture(tNoise, p * vec3(0.14, 0.26, 0.11) - wind * 2.6 + vec3(0.37, 0.11, 0.73)).r;
+      float shape = smoothstep(0.3, 0.74, a * 0.72 + b * 0.28);
+      // Billows rise a little higher than the flat layer between them.
+      float top = TOP * (0.55 + 0.45 * shape);
+      float h = exp(-p.y / 0.42) * (1.0 - smoothstep(top * 0.35, top, p.y));
+      float walls = smoothstep(HW, HW - 0.6, abs(p.x));
+      return (0.03 + 0.95 * shape) * h * walls;
+    }
+    // Is p in the moonlight? Up along the light to the ceiling: inside the
+    // skylight, and not behind one of its beams or rails.
+    float moonLit(vec3 p) {
+      vec3 q = p + MOON_UP * ((CEIL - p.y) / MOON_UP.y);
+      float inside = smoothstep(SKY, SKY - 0.3, abs(q.x)) * step(0.0, q.z) * step(q.z, LEN);
+      float bz = abs(fract(q.z / 3.0 + 0.5) - 0.5) * 3.0;
+      float beams = smoothstep(0.12, 0.28, bz);
+      float rails = smoothstep(0.03, 0.14, abs(q.x)) * smoothstep(0.03, 0.14, abs(abs(q.x) - 1.6));
+      return inside * beams * rails;
+    }
+    // The warm light: a pool under each picture light along both walls
+    // (not the middle bay, where the archways are), the desk lamps by the
+    // doors, and the Osprey's spot at the far end.
+    vec3 warm(vec3 p) {
+      float side = exp(-pow(abs(p.x) - (HW - 1.3), 2.0) / 2.6);
+      float bz = abs(fract(p.z / 6.0 + 0.5) - 0.5) * 6.0;
+      float bay = exp(-bz * bz / 2.0) * step(4.5, p.z) * step(p.z, LEN - 4.5) * (1.0 - exp(-pow(p.z - MID, 2.0) / 5.0));
+      vec3 c = vec3(0.55, 0.32, 0.15) * side * bay;
+      vec3 l0 = DESK0 - p;
+      vec3 l1 = DESK1 - p;
+      c += vec3(0.6, 0.45, 0.28) * (1.0 / (1.0 + dot(l0, l0) * 1.4) + 1.0 / (1.0 + dot(l1, l1) * 1.4));
+      vec3 hp = vec3(0.0, 0.5, LEN - 2.5) - p;
+      c += vec3(0.5, 0.34, 0.2) / (1.0 + dot(hp, hp) * 0.1);
+      return c;
+    }
+    void main() {
+      float T = 1.0;
+      vec3 acc = vec3(0.0);
+      {
+        float depth = texture2D(tDepth, vUv).r;
+        vec4 vp = uInvProj * vec4(vUv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+        vp /= vp.w;
+        vec3 wp = (uCamWorld * vec4(vp.xyz, 1.0)).xyz;
+        vec3 ro = uCamPos;
+        vec3 rd = wp - ro;
+        float tMax = length(rd);
+        rd /= tMax;
+        if (depth >= 0.99999) tMax = 120.0;
+        // Only the stretch of the ray inside the mist layer.
+        float t0 = 0.0;
+        float t1 = tMax;
+        if (abs(rd.y) > 1e-4) {
+          float ta = -ro.y / rd.y;
+          float tb = (TOP - ro.y) / rd.y;
+          t0 = max(t0, min(ta, tb));
+          t1 = min(t1, max(ta, tb));
+        } else if (ro.y > TOP) t1 = -1.0;
+        t1 = min(t1, t0 + 70.0);
+        if (t1 > t0) {
+          float dt = (t1 - t0) / float(uSteps);
+          // A different offset per pixel and frame hides the steps.
+          float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy + uFrame * 5.588238, vec2(0.06711056, 0.00583715))));
+          for (int i = 0; i < 32; i++) {
+            if (i >= uSteps) break;
+            vec3 p = ro + rd * (t0 + (float(i) + jitter) * dt);
+            float d = density(p);
+            if (d < 0.002) continue;
+            vec3 light = AMBIENT + MOONCOL * moonLit(p) + warm(p);
+            float a = 1.0 - exp(-d * dt * 0.7);
+            acc += T * a * light;
+            T *= 1.0 - a;
+            if (T < 0.03) break;
+          }
+        }
+      }
+      // Laid over the finished room: room * T + the mist's own light.
+      gl_FragColor = vec4(acesFit(acc * uExposure), T);
+      #include <colorspace_fragment>
+    }`,
+  depthTest: false,
+  depthWrite: false,
+  toneMapped: false,
+  transparent: true,
+  blending: THREE.CustomBlending,
+  blendSrc: THREE.OneFactor,
+  blendDst: THREE.SrcAlphaFactor,
+  blendSrcAlpha: THREE.ZeroFactor,
+  blendDstAlpha: THREE.OneFactor,
+  stencilWrite: true,
+  stencilRef: 1,
+  stencilFunc: THREE.NotEqualStencilFunc,
+  stencilZPass: THREE.KeepStencilOp,
+});
+const postScene = new THREE.Scene();
+{
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mistMat);
+  quad.frustumCulled = false;
+  postScene.add(quad);
+}
+const postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const bufSize = new THREE.Vector2();
+function sizeTargets() {
+  renderer.getDrawingBufferSize(bufSize);
+  depthRT.setSize(bufSize.x, bufSize.y);
+}
+// What the depth pass leaves out: the mirror (it would redraw the whole
+// room), the sky, and every see-through thing (beams, glows, dust, sprites),
+// which would otherwise stop the mist behind them. The floor stays.
+let skipDepth = null;
+let frameNo = 0;
+function render(t) {
+  if (!skipDepth) {
+    skipDepth = [mirror, skyGroup];
+    scene.traverse((o) => {
+      if (o === floor || skipDepth.includes(o)) return;
+      if (o.isSprite || o.isPoints || (o.material && !Array.isArray(o.material) && o.material.transparent)) skipDepth.push(o);
+    });
+  }
+  const was = skipDepth.map((o) => o.visible);
+  for (const o of skipDepth) o.visible = false;
+  scene.overrideMaterial = depthOnly;
+  renderer.setRenderTarget(depthRT);
+  renderer.render(scene, camera);
+  scene.overrideMaterial = null;
+  skipDepth.forEach((o, i) => (o.visible = was[i]));
+  renderer.setRenderTarget(null);
+  // Shadows are drawn for this pass only, not again for the depth pass.
+  renderer.shadowMap.needsUpdate = true;
+  renderer.render(scene, camera);
+  const u = mistMat.uniforms;
+  u.uInvProj.value.copy(camera.projectionMatrixInverse);
+  u.uCamWorld.value.copy(camera.matrixWorld);
+  u.uCamPos.value.copy(camera.position);
+  u.uTime.value = t;
+  u.uFrame.value = frameNo++ % 64;
+  renderer.autoClear = false;
+  renderer.render(postScene, postCam);
+  renderer.autoClear = true;
+}
+
 // ---------- Looks ----------
 // Sleek: full resolution, the floor mirrored. Retro: about 300 pixels
 // tall, no mirror. Between: half-way.
@@ -1037,9 +1246,10 @@ let style = "sleek"; // settled on; 2 and 3 still switch, for comparison
 function applyStyle(name) {
   style = name;
   const S = STYLES[name];
-  const ratio = S.lines ? S.lines / innerHeight : Math.min(devicePixelRatio, 2);
+  const ratio = S.lines ? S.lines / innerHeight : Math.min(devicePixelRatio, 1.75);
   renderer.setPixelRatio(ratio);
   renderer.setSize(innerWidth, innerHeight);
+  sizeTargets();
   canvas.classList.toggle("pixel", !!S.lines);
   mirror.visible = S.mirror;
   floorMat.transparent = S.mirror;
@@ -1390,17 +1600,12 @@ function frame() {
     }
   }
   dustGeo.attributes.position.needsUpdate = true;
-  for (const m of mists) {
-    m.position.z += m.userData.speed * dt;
-    m.position.x += Math.sin(t * 0.05 + m.userData.speed * 40) * 0.02 * dt;
-    if (m.position.z > LEN + 2) m.position.z = -2;
-  }
   motes.rotation.y = Math.sin(t * 0.02) * 0.004;
   motes.position.y = Math.sin(t * 0.13) * 0.15;
   // The globes and the desk lamp breathe a little.
   globeMat.emissiveIntensity = 0.55 + Math.sin(t * 0.7) * 0.03;
   if (running && !viewer.classList.contains("on")) showCard(pick(innerWidth / 2, innerHeight / 2));
-  renderer.render(scene, camera);
+  render(t);
 }
 renderer.setAnimationLoop(frame);
 window.__gallery = { me, camera, renderer, applyStyle, frame, get focus() { return focus; }, hung, hero };

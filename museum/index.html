@@ -84,10 +84,9 @@
   </div>
 </div>
 <div class="hud" id="name">The Night Gallery</div>
-<div class="hud" id="styles" role="group" aria-label="Look">
-  <button type="button" data-style="sleek"><kbd>1</kbd>Sleek</button>
-  <button type="button" data-style="retro"><kbd>2</kbd>Retro</button>
-  <button type="button" data-style="between"><kbd>3</kbd>Between</button>
+<div class="hud" id="styles" role="group" aria-label="Surfaces">
+  <button type="button" id="floorBtn">Floor: <span></span></button>
+  <button type="button" id="wallBtn">Walls: <span></span></button>
 </div>
 <div class="hud" id="dot" hidden></div>
 <div class="hud" id="hint"></div>
@@ -307,30 +306,58 @@ T.window = pixelTex(32, 26, (g) => {
   for (const x of [0, 10, 21, 31]) g.fillRect(x, 0, 1, 26);
   for (const y of [0, 8, 17, 25]) g.fillRect(0, y, 32, 1);
 }, { repeat: false });
-// The night sky, all the way round, a long way off.
-T.dome = pixelTex(2048, 1024, (g) => {
-  for (let y = 0; y < 1024; y++) {
-    const k = Math.min(1, y / 512);
-    g.fillStyle = y < 512 ? `rgb(${7 + k * 20 | 0}, ${11 + k * 30 | 0}, ${28 + k * 52 | 0})` : "#0a0c13";
-    g.fillRect(0, y, 2048, 1);
+// Other floors and walls to try (the pickers at the top right).
+T.slate = pixelTex(64, 64, (g) => {
+  const r = rng(171);
+  for (let ty = 0; ty < 2; ty++) for (let tx = 0; tx < 2; tx++) {
+    const k = 0.9 + r() * 0.2;
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+      g.fillStyle = shade(0x2b2d30, k * (1 + (r() - 0.5) * 0.06));
+      g.fillRect(tx * 32 + x, ty * 32 + y, 1, 1);
+    }
+    for (let m = 0; m < 7; m++) { g.fillStyle = shade(0x2b2d30, k * 1.14); g.fillRect(tx * 32 + (r() * 30 | 0), ty * 32 + (r() * 31 | 0), 2, 1); }
+    g.fillStyle = "#111214";
+    g.fillRect(tx * 32, ty * 32, 32, 1);
+    g.fillRect(tx * 32, ty * 32, 1, 32);
   }
-  // (None near the top, where a sphere's texture pinches into streaks:
-  // the sky overhead is the flat starfield below.)
-  const r = rng(151);
-  for (let i = 0; i < 2600; i++) {
-    const y = 160 + Math.pow(r(), 1.2) * 330;
-    g.fillStyle = r() < 0.15 ? "#e3e9ff" : r() < 0.5 ? "#9fb0dd" : "#5e6d9c";
-    g.fillRect(r() * 2048 | 0, y | 0, 1, 1);
+});
+// Oak laid in a chevron: 1 m planks, a hand's width wide.
+T.oak = pixelTex(64, 64, (g) => {
+  const shadeOf = new Map();
+  const r = rng(181);
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+    const c = Math.floor(x / 16);
+    const lx = x % 16;
+    const lift = Math.floor((c % 2 ? lx : 15 - lx) / 2);
+    const row = y + lift;
+    const id = c * 1000 + Math.floor(row / 4);
+    if (!shadeOf.has(id)) shadeOf.set(id, 0.8 + r() * 0.35);
+    const seam = row % 4 === 0 || lx === 0;
+    g.fillStyle = seam ? "#2a1a0e" : shade(0x6b4a2c, shadeOf.get(id) * (1 + (r() - 0.5) * 0.08));
+    g.fillRect(x, y, 1, 1);
   }
-}, { repeat: false });
-// Overhead, through the skylight: stars on a flat sky high above.
-T.stars = pixelTex(64, 64, (g) => {
-  g.fillStyle = "#070b1c";
-  g.fillRect(0, 0, 64, 64);
-  const r = rng(161);
-  for (let i = 0; i < 16; i++) {
-    g.fillStyle = r() < 0.25 ? "#e3e9ff" : r() < 0.6 ? "#9fb0dd" : "#5e6d9c";
-    g.fillRect(r() * 64 | 0, r() * 64 | 0, 1, 1);
+});
+T.navy = pixelTex(32, 32, (g) => {
+  speckle(g, 32, 32, 0x1c2434, 0.07, 191);
+  const r = rng(193);
+  for (let i = 0; i < 10; i++) { g.fillStyle = "rgba(255,255,255,0.025)"; g.fillRect(r() * 32 | 0, 0, 1, 32); }
+});
+T.green = pixelTex(32, 32, (g) => {
+  speckle(g, 32, 32, 0x2b392c, 0.06, 201);
+  for (let y = 0; y < 32; y++) for (let x = (y % 2); x < 32; x += 2) { g.fillStyle = "rgba(255,255,255,0.03)"; g.fillRect(x, y, 1, 1); }
+});
+// Dressed stone in courses: half-metre blocks, the old grid-shooter wall.
+T.ashlar = pixelTex(32, 32, (g) => {
+  const r = rng(211);
+  for (let row = 0; row < 4; row++) for (let b = -1; b < 2; b++) {
+    const x0 = b * 16 + (row % 2) * 8;
+    const k = 0.85 + r() * 0.25;
+    for (let y = row * 8; y < row * 8 + 8; y++) for (let x = x0; x < x0 + 16; x++) {
+      if (x < 0 || x > 31) continue;
+      const edge = y === row * 8 || x === x0;
+      g.fillStyle = edge ? "#2c2a26" : shade(0x6a665e, k * (1 + (r() - 0.5) * 0.1));
+      g.fillRect(x, y, 1, 1);
+    }
   }
 });
 T.moon = pixelTex(16, 16, (g) => {
@@ -583,21 +610,48 @@ for (const s of [-1, 1]) {
 }
 for (let z = 0; z <= LEN; z += 3) put(box(2 * SKY, 0.45, 0.3, 1, 1), M.darkwood, { x: 0, y: CEIL + 0.1, z, cast: true });
 for (const s of [-1, 1]) put(box(0.12, 0.3, LEN, 1, 1), M.darkwood, { x: s * 0.75, y: CEIL + 0.25, z: LEN / 2, cast: true });
+// The sky goes wherever you go, so it never shifts as you walk: as far off
+// as real stars. A gradient dome, stars as single points (no texture to
+// pinch at the top), and the moon where the moonlight comes from.
+const skyGroup = new THREE.Group();
+scene.add(skyGroup);
 {
-  // Seen through the skylight and the windows: a sky a long way out, with
-  // the moon where the moonlight comes from.
-  const centre = new THREE.Vector3(0, 0, LEN / 2);
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(95, 32, 16), new THREE.MeshBasicMaterial({ map: T.dome, side: THREE.BackSide, fog: false }));
-  dome.position.copy(centre);
-  scene.add(dome);
-  const overhead = new THREE.Mesh(plane(400, 400, 22, 22), new THREE.MeshBasicMaterial({ map: T.stars, fog: false }));
-  overhead.rotation.x = Math.PI / 2;
-  overhead.position.set(0, 70, LEN / 2);
-  scene.add(overhead);
-  const moon = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 4.2), new THREE.MeshBasicMaterial({ map: T.moon, transparent: true, alphaTest: 0.5, fog: false }));
-  moon.position.copy(centre).addScaledVector(new THREE.Vector3(12, 52, 2).normalize(), 60);
-  moon.lookAt(centre);
-  scene.add(moon);
+  const g = new THREE.SphereGeometry(150, 32, 16);
+  const pos = g.attributes.position;
+  const col = new Float32Array(pos.count * 3);
+  const top = new THREE.Color(0x060a1a);
+  const horizon = new THREE.Color(0x1a2850);
+  const below = new THREE.Color(0x090b12);
+  const c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i) / 150;
+    (y > 0 ? c.copy(horizon).lerp(top, Math.pow(y, 0.55)) : c.copy(below)).toArray(col, i * 3);
+  }
+  g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  const dome = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
+  dome.renderOrder = -2;
+  const N = 2400;
+  const sp = new Float32Array(N * 3);
+  const sc = new Float32Array(N * 3);
+  const r = rng(221);
+  for (let i = 0; i < N; i++) {
+    const y = 0.03 + r() * 0.97;
+    const a = r() * Math.PI * 2;
+    const h = Math.sqrt(1 - y * y);
+    sp.set([Math.cos(a) * h * 140, y * 140, Math.sin(a) * h * 140], i * 3);
+    const k = r() < 0.12 ? 1 : 0.35 + r() * 0.4;
+    sc.set([0.8 * k, 0.85 * k, k], i * 3);
+  }
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute("position", new THREE.BufferAttribute(sp, 3));
+  sg.setAttribute("color", new THREE.BufferAttribute(sc, 3));
+  const stars = new THREE.Points(sg, new THREE.PointsMaterial({ size: 2, sizeAttenuation: false, vertexColors: true, fog: false, depthWrite: false }));
+  stars.renderOrder = -1;
+  const moon = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 4.6), new THREE.MeshBasicMaterial({ map: T.moon, transparent: true, alphaTest: 0.5, fog: false, depthWrite: false }));
+  moon.position.copy(new THREE.Vector3(12, 52, 2).normalize()).multiplyScalar(130);
+  moon.lookAt(0, 0, 0);
+  moon.renderOrder = -1;
+  skyGroup.add(dome, stars, moon);
 }
 
 // Benches down the middle, a guard's desk by the doors.
@@ -874,8 +928,7 @@ const STYLES = {
   retro: { lines: 300, mirror: false },
   between: { lines: 560, mirror: true },
 };
-let style = "sleek";
-try { style = STYLES[localStorage.getItem("night-gallery-style")] ? localStorage.getItem("night-gallery-style") : "sleek"; } catch { /* private window */ }
+let style = "sleek"; // settled on; 2 and 3 still switch, for comparison
 function applyStyle(name) {
   style = name;
   const S = STYLES[name];
@@ -884,14 +937,47 @@ function applyStyle(name) {
   renderer.setSize(innerWidth, innerHeight);
   canvas.classList.toggle("pixel", !!S.lines);
   mirror.visible = S.mirror;
-  floorMat.opacity = S.mirror ? 0.86 : 1;
   floorMat.transparent = S.mirror;
   floorMat.needsUpdate = true;
-  for (const b of document.querySelectorAll("#styles button")) b.setAttribute("aria-pressed", String(b.dataset.style === name));
-  try { localStorage.setItem("night-gallery-style", name); } catch { /* fine */ }
+  floorMat.opacity = S.mirror ? FLOORS[floorAt].see : 1;
 }
-for (const b of document.querySelectorAll("#styles button")) b.addEventListener("click", (e) => { e.stopPropagation(); applyStyle(b.dataset.style); });
+// Floors and walls to try on, in place.
+const FLOORS = [
+  { name: "Checker", map: T.floor, rough: 0.32, see: 0.86 },
+  { name: "Slate", map: T.slate, rough: 0.22, see: 0.8 },
+  { name: "Oak", map: T.oak, rough: 0.5, see: 0.92 },
+];
+const WALLS = [
+  { name: "Red silk", map: T.silk },
+  { name: "Navy", map: T.navy },
+  { name: "Green", map: T.green },
+  { name: "Stone", map: T.ashlar },
+];
+let floorAt = 0;
+let wallAt = 0;
+try {
+  floorAt = Math.min(FLOORS.length - 1, Math.max(0, +localStorage.getItem("night-gallery-floor") || 0));
+  wallAt = Math.min(WALLS.length - 1, Math.max(0, +localStorage.getItem("night-gallery-walls") || 0));
+} catch { /* private window */ }
+function applySurfaces() {
+  const F = FLOORS[floorAt];
+  floorMat.map = F.map;
+  floorMat.roughness = F.rough;
+  floorMat.opacity = STYLES[style].mirror ? F.see : 1;
+  floorMat.needsUpdate = true;
+  M.silk.map = WALLS[wallAt].map;
+  M.silk.needsUpdate = true;
+  $("floorBtn").querySelector("span").textContent = F.name;
+  $("wallBtn").querySelector("span").textContent = WALLS[wallAt].name;
+  try {
+    localStorage.setItem("night-gallery-floor", String(floorAt));
+    localStorage.setItem("night-gallery-walls", String(wallAt));
+  } catch { /* fine */ }
+}
+$("floorBtn").addEventListener("click", (e) => { e.stopPropagation(); floorAt = (floorAt + 1) % FLOORS.length; applySurfaces(); });
+$("wallBtn").addEventListener("click", (e) => { e.stopPropagation(); wallAt = (wallAt + 1) % WALLS.length; applySurfaces(); });
 applyStyle(style);
+applySurfaces();
 addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
@@ -1041,6 +1127,8 @@ addEventListener("keydown", (e) => {
   if (e.code === "Digit1") applyStyle("sleek");
   if (e.code === "Digit2") applyStyle("retro");
   if (e.code === "Digit3") applyStyle("between");
+  if (e.code === "KeyG") $("floorBtn").click();
+  if (e.code === "KeyV") $("wallBtn").click();
   if ((e.code === "KeyF" || e.code === "Enter") && focus) openViewer(focus);
   if (e.code.startsWith("Arrow") || e.code === "Space") e.preventDefault();
 });
@@ -1136,7 +1224,7 @@ function closeViewer() {
 viewer.addEventListener("click", closeViewer);
 
 // ---------- Going in ----------
-$("hint").textContent = TOUCH ? "Drag on the left to walk · drag on the right to look · tap a photo" : "W A S D to walk · Shift to hurry · 1 2 3 change the look · F to view a photo";
+$("hint").textContent = TOUCH ? "Drag on the left to walk · drag on the right to look · tap a photo" : "W A S D to walk · Shift to hurry · G and V try other floors and walls · F to view a photo";
 if (TOUCH) $("howto").textContent = "Drag on the left to walk, on the right to look";
 $("enter").addEventListener("click", () => {
   $("intro").classList.add("gone");
@@ -1156,6 +1244,7 @@ function frame() {
   const bob = Math.sin(me.stride * 7.4) * 0.018 * Math.min(1, Math.hypot(me.vx, me.vz) / 2.3);
   camera.position.set(me.x, EYE + bob, me.z);
   camera.rotation.set(me.pitch, me.yaw, 0);
+  skyGroup.position.copy(camera.position);
   // Dust drifting down the moonlight, and lifting again at the top.
   const p = dustGeo.attributes.position.array;
   for (let i = 0; i < DUST; i++) {

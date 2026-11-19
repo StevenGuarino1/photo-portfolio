@@ -130,10 +130,10 @@ const WIN1 = WY + WH / 2;
 const EYE = 1.65;
 
 // ---------- Renderer, scene, camera ----------
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true, powerPreference: "high-performance" });
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.VSMShadowMap; // soft-edged, so moonlit and dark blend
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
 document.body.prepend(renderer.domElement);
@@ -413,6 +413,10 @@ const WASH = (() => {
 })();
 
 // ---------- Building ----------
+// Effects go around the photographs, never over them: each photo marks its
+// pixels, and haze, dust, beams and glows leave marked pixels alone.
+const MARK = { stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp };
+const SPARE = { stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilZPass: THREE.KeepStencilOp, stencilFail: THREE.KeepStencilOp };
 const M = {
   silk: new THREE.MeshStandardMaterial({ map: T.silk, roughness: 0.95 }),
   wood: new THREE.MeshStandardMaterial({ map: T.wood, roughness: 0.7 }),
@@ -445,7 +449,9 @@ function flush() {
   for (const { mat, cast, list } of bins.values()) {
     const mesh = new THREE.Mesh(mergeGeometries(list), mat);
     mesh.castShadow = cast;
-    mesh.receiveShadow = true;
+    // Only the floor takes the moon's shadows: on the walls the light only
+    // grazes, which shows as flicker.
+    mesh.receiveShadow = false;
     scene.add(mesh);
   }
   bins.clear();
@@ -777,7 +783,7 @@ function hang(P, x, z, n, maxW, maxH, cy) {
   const frame = new THREE.Mesh(box(w + border * 2, h + border * 2, 0.1, 0.5, 0.5), M.gold);
   frame.position.z = 0.05;
   frame.castShadow = true;
-  const pic = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: 0x222222, toneMapped: false, fog: false }));
+  const pic = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: 0x222222, toneMapped: false, fog: false, ...MARK }));
   pic.position.z = 0.102;
   loader.load(`${ROOT}photos/thumbs/${P.stem}-1200.jpg`, (t) => {
     t.colorSpace = THREE.SRGBColorSpace;
@@ -868,7 +874,7 @@ for (const z of [MID - 24, MID - 12, MID, MID + 12, MID + 24]) {
     const globe = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 12), globeMat);
     globe.position.set(x, 9, z);
     scene.add(globe);
-    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: 0xffb466, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }));
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: 0xffb466, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, ...SPARE }));
     halo.position.copy(globe.position);
     halo.scale.setScalar(3);
     scene.add(halo);
@@ -877,10 +883,10 @@ for (const z of [MID - 24, MID - 12, MID, MID + 12, MID + 24]) {
 flush();
 
 // ---------- Light ----------
-scene.add(new THREE.HemisphereLight(0x3a4870, 0x150f0c, 0.75));
+scene.add(new THREE.HemisphereLight(0x3a4870, 0x150f0c, 0.95));
 // Moonlight through the skylight, the beams striping the floor.
 const MOON_DIR = new THREE.Vector3(0, -52, -7).normalize(); // straight down the middle
-const moonLight = new THREE.DirectionalLight(0xa8bbff, 2.1);
+const moonLight = new THREE.DirectionalLight(0xa8bbff, 1.55);
 moonLight.position.set(0, 0, LEN / 2).addScaledVector(MOON_DIR, -80);
 moonLight.target.position.set(0, 0, LEN / 2);
 moonLight.castShadow = true;
@@ -888,6 +894,8 @@ moonLight.shadow.mapSize.set(TOUCH ? 1024 : 2048, TOUCH ? 1024 : 2048);
 Object.assign(moonLight.shadow.camera, { left: -44, right: 44, top: 44, bottom: -44, near: 1, far: 170 });
 moonLight.shadow.bias = -0.0004;
 moonLight.shadow.normalBias = 0.04;
+moonLight.shadow.radius = 10;
+moonLight.shadow.blurSamples = 16;
 scene.add(moonLight, moonLight.target);
 // A few warm lights for the picture-lit walls, and the Osprey's spot.
 for (const [x, z] of [[-(HW - 1.4), MID - 18], [HW - 1.4, MID - 18], [-(HW - 1.4), MID + 18], [HW - 1.4, MID + 18]]) {
@@ -926,7 +934,8 @@ for (const x0 of [-2.4, -0.8, 0.8, 2.4]) {
   g.setAttribute("position", new THREE.Float32BufferAttribute([x0, CEIL, 0, x0, CEIL, LEN, x0 + DX, 0, DZ, x0 + DX, 0, LEN + DZ], 3));
   g.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, LEN / 3, 0, 0, 1, LEN / 3, 1], 2));
   g.setIndex([0, 2, 1, 1, 2, 3]);
-  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: shaftTex, color: 0x8ea2e8, transparent: true, opacity: 0.075, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: shaftTex, color: 0x8ea2e8, transparent: true, opacity: 0.06, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, ...SPARE }));
+  m.renderOrder = 3;
   scene.add(m);
 }
 const DUST = TOUCH ? 180 : 330;
@@ -944,7 +953,76 @@ const dustSeed = new Float32Array(DUST);
 }
 const dustGeo = new THREE.BufferGeometry();
 dustGeo.setAttribute("position", new THREE.BufferAttribute(dustPos, 3));
-const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: 0xc8d4ff, size: 0.028, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false }));
+// Away from the moonlight: a low mist creeping along the floor (kept below
+// the photos), warm dust hanging in the air all down the hall, and the
+// floor darkening into the corners.
+const mistTex = (() => {
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d");
+  const r = rng(231);
+  for (let i = 0; i < 22; i++) {
+    const x = 20 + r() * 88;
+    const y = 40 + r() * 48;
+    const rad = 18 + r() * 26;
+    const grad = g.createRadialGradient(x, y, 0, x, y, rad);
+    grad.addColorStop(0, `rgba(255,255,255,${0.18 + r() * 0.16})`);
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 128, 128);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+const mists = [];
+{
+  const r = rng(233);
+  for (let i = 0; i < 30; i++) {
+    const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: mistTex, color: 0x76809c, transparent: true, opacity: 0.09 + r() * 0.06, depthWrite: false, ...SPARE }));
+    m.scale.set(6 + r() * 4, 1.3 + r() * 0.6, 1);
+    m.position.set((r() - 0.5) * (2 * HW - 3), 0.5 + r() * 0.25, r() * LEN);
+    m.userData.speed = 0.08 + r() * 0.12;
+    mists.push(m);
+    scene.add(m);
+  }
+}
+const MOTES = TOUCH ? 160 : 300;
+const motePos = new Float32Array(MOTES * 3);
+{
+  const r = rng(235);
+  for (let i = 0; i < MOTES; i++) motePos.set([(r() - 0.5) * (2 * HW - 2), 0.6 + r() * 9, 1 + r() * (LEN - 2)], i * 3);
+}
+const moteGeo = new THREE.BufferGeometry();
+moteGeo.setAttribute("position", new THREE.BufferAttribute(motePos, 3));
+const motes = new THREE.Points(moteGeo, new THREE.PointsMaterial({ color: 0xffd09a, size: 0.022, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, ...SPARE }));
+scene.add(motes);
+{
+  const c = document.createElement("canvas");
+  c.width = 4;
+  c.height = 64;
+  const g = c.getContext("2d");
+  const grad = g.createLinearGradient(0, 0, 0, 64);
+  grad.addColorStop(0, "rgba(0,0,0,0.62)");
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 4, 64);
+  const t = new THREE.CanvasTexture(c);
+  const edgeMat = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false });
+  const edge = (len, w, x, z, rot) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(len, w), edgeMat);
+    m.rotation.set(-Math.PI / 2, 0, rot);
+    m.position.set(x, 0.007, z);
+    m.renderOrder = 1;
+    scene.add(m);
+  };
+  // Each strip's dark edge (the texture's top) toward its wall.
+  edge(LEN, 2, -HW + 1, LEN / 2, -Math.PI / 2);
+  edge(LEN, 2, HW - 1, LEN / 2, Math.PI / 2);
+  edge(2 * HW, 2, 0, 1, Math.PI);
+  edge(2 * HW, 2, 0, LEN - 1, 0);
+}
+const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: 0xc8d4ff, size: 0.028, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, ...SPARE }));
 scene.add(dust);
 
 // ---------- Looks ----------
@@ -1069,6 +1147,31 @@ function startAudio() {
     setTimeout(creak, 18000 + Math.random() * 26000);
   };
   setTimeout(creak, 9000);
+  // A tall clock ticking somewhere down the hall: heard mostly as echo.
+  let next = ctx.currentTime + 0.5;
+  let tock = false;
+  setInterval(() => {
+    while (next < ctx.currentTime + 0.6) {
+      const src = ctx.createBufferSource();
+      src.buffer = noise;
+      const f = ctx.createBiquadFilter();
+      f.type = "bandpass";
+      f.frequency.value = tock ? 1300 : 1700;
+      f.Q.value = 8;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, next);
+      g.gain.linearRampToValueAtTime(0.05, next + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.0005, next + 0.05);
+      src.connect(f).connect(g);
+      g.connect(hall);
+      const dry = ctx.createGain();
+      dry.gain.value = 0.25;
+      g.connect(dry).connect(master);
+      src.start(next, Math.random(), 0.06);
+      next += 1;
+      tock = !tock;
+    }
+  }, 250);
   return ctx.resume();
 }
 function footstep(run) {
@@ -1287,6 +1390,13 @@ function frame() {
     }
   }
   dustGeo.attributes.position.needsUpdate = true;
+  for (const m of mists) {
+    m.position.z += m.userData.speed * dt;
+    m.position.x += Math.sin(t * 0.05 + m.userData.speed * 40) * 0.02 * dt;
+    if (m.position.z > LEN + 2) m.position.z = -2;
+  }
+  motes.rotation.y = Math.sin(t * 0.02) * 0.004;
+  motes.position.y = Math.sin(t * 0.13) * 0.15;
   // The globes and the desk lamp breathe a little.
   globeMat.emissiveIntensity = 0.55 + Math.sin(t * 0.7) * 0.03;
   if (running && !viewer.classList.contains("on")) showCard(pick(innerWidth / 2, innerHeight / 2));

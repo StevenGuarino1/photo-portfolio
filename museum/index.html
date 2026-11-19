@@ -45,6 +45,7 @@
     padding: 8px 10px; border-radius: 2px; cursor: pointer; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
   #styles button[aria-pressed="true"] { color: var(--ink); border-color: var(--brass); }
   #styles button kbd { font: inherit; opacity: 0.55; margin-right: 6px; }
+  #fps { bottom: 18px; right: 16px; font: 11px ui-monospace, monospace; color: var(--faint); }
   #hint { bottom: 18px; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--faint); letter-spacing: 0.03em;
     white-space: nowrap; transition: opacity 400ms ease; }
   #dot { top: 50%; left: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: rgba(241, 231, 214, 0.55); }
@@ -90,6 +91,7 @@
 </div>
 <div class="hud" id="dot" hidden></div>
 <div class="hud" id="hint"></div>
+<div class="hud" id="fps" hidden></div>
 <div class="hud" id="card" aria-live="polite"><h2></h2><div class="meta"></div><div class="exif"></div><div class="how"></div></div>
 <div id="viewer" role="dialog" aria-label="Photo"><img alt=""><p></p></div>
 
@@ -1357,6 +1359,24 @@ const mistMat = new THREE.ShaderMaterial({
   depthTest: false,
   depthWrite: false,
   toneMapped: false,
+  blending: THREE.NoBlending,
+});
+// The mist is marched at half resolution (a quarter of the pixels), then
+// laid over the room full size: soft stuff, so nobody can tell.
+const mistRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
+const mistOver = new THREE.ShaderMaterial({
+  uniforms: { tMist: { value: mistRT.texture } },
+  vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
+  fragmentShader: `
+    uniform sampler2D tMist;
+    varying vec2 vUv;
+    void main() {
+      gl_FragColor = texture2D(tMist, vUv);
+      #include <colorspace_fragment>
+    }`,
+  depthTest: false,
+  depthWrite: false,
+  toneMapped: false,
   transparent: true,
   blending: THREE.CustomBlending,
   blendSrc: THREE.OneFactor,
@@ -1368,18 +1388,26 @@ const mistMat = new THREE.ShaderMaterial({
   stencilFunc: THREE.NotEqualStencilFunc,
   stencilZPass: THREE.KeepStencilOp,
 });
+const quadGeo = new THREE.PlaneGeometry(2, 2);
+const mistScene = new THREE.Scene();
 const postScene = new THREE.Scene();
-{
-  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mistMat);
+for (const [sc, m] of [[mistScene, mistMat], [postScene, mistOver]]) {
+  const quad = new THREE.Mesh(quadGeo, m);
   quad.frustumCulled = false;
-  postScene.add(quad);
+  sc.add(quad);
 }
 const postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const bufSize = new THREE.Vector2();
 function sizeTargets() {
   renderer.getDrawingBufferSize(bufSize);
-  depthRT.setSize(bufSize.x, bufSize.y);
+  const hw = Math.max(1, Math.round(bufSize.x / 2)), hh = Math.max(1, Math.round(bufSize.y / 2));
+  depthRT.setSize(hw, hh);
+  mistRT.setSize(hw, hh);
+  shadowFrames = 2;
 }
+// The moon and everything it shadows stand still, so the shadows are drawn
+// once (and again after a resize), not every frame.
+let shadowFrames = 3;
 // What the depth pass leaves out: the mirror (it would redraw the whole
 // room), the sky, and every see-through thing (beams, glows, dust, sprites),
 // which would otherwise stop the mist behind them. The floor stays.
@@ -1401,8 +1429,7 @@ function render(t) {
   scene.overrideMaterial = null;
   skipDepth.forEach((o, i) => (o.visible = was[i]));
   renderer.setRenderTarget(null);
-  // Shadows are drawn for this pass only, not again for the depth pass.
-  renderer.shadowMap.needsUpdate = true;
+  if (shadowFrames > 0) { shadowFrames--; renderer.shadowMap.needsUpdate = true; }
   renderer.render(scene, camera);
   const u = mistMat.uniforms;
   u.uInvProj.value.copy(camera.projectionMatrixInverse);
@@ -1410,6 +1437,9 @@ function render(t) {
   u.uCamPos.value.copy(camera.position);
   u.uTime.value = t;
   u.uFrame.value = frameNo++ % 64;
+  renderer.setRenderTarget(mistRT);
+  renderer.render(mistScene, postCam);
+  renderer.setRenderTarget(null);
   renderer.autoClear = false;
   renderer.render(postScene, postCam);
   renderer.autoClear = true;
@@ -1423,11 +1453,15 @@ const STYLES = {
   retro: { lines: 300, mirror: false },
   between: { lines: 560, mirror: true },
 };
+let quality = 1; // eased down when frames run slow, back up when they don't
 let style = "sleek"; // settled on; 2 and 3 still switch, for comparison
 function applyStyle(name) {
   style = name;
   const S = STYLES[name];
-  const ratio = S.lines ? S.lines / innerHeight : Math.min(devicePixelRatio, 1.75);
+  // Sleek: sharp, but within a budget of about 3.7 million pixels (a big
+  // desktop monitor would otherwise draw two or three times what a laptop
+  // does), and lower still while frames run slow.
+  const ratio = S.lines ? S.lines / innerHeight : Math.min(devicePixelRatio, 1.75, Math.sqrt(3.7e6 / (innerWidth * innerHeight))) * quality;
   renderer.setPixelRatio(ratio);
   renderer.setSize(innerWidth, innerHeight);
   sizeTargets();
@@ -1810,6 +1844,7 @@ addEventListener("keydown", (e) => {
   if (e.code === "Digit3") applyStyle("between");
   if (e.code === "KeyG") $("floorBtn").click();
   if (e.code === "KeyV") $("wallBtn").click();
+  if (e.code === "KeyP" && perf.fps) perf.fps.hidden = !perf.fps.hidden;
   if ((e.code === "KeyF" || e.code === "Enter") && focus) openViewer(focus);
   if (e.code.startsWith("Arrow") || e.code === "Space") e.preventDefault();
 });
@@ -1918,8 +1953,30 @@ $("enter").addEventListener("click", () => {
 
 // ---------- Each frame ----------
 const clock = new THREE.Clock();
+// Watch the frame time and trade sharpness for smoothness when it's slow.
+const perf = { acc: 0, n: 0, ms: 16, fps: $("fps") };
+function watchSpeed(raw) {
+  perf.acc += raw;
+  perf.n++;
+  if (perf.acc < 1.2) return;
+  const ms = (perf.acc / perf.n) * 1000;
+  perf.ms = ms;
+  perf.acc = perf.n = 0;
+  if (perf.fps && !perf.fps.hidden) perf.fps.textContent = `${Math.round(1000 / ms)} fps · ${Math.round(quality * 100)}%`;
+  if (document.hidden || style !== "sleek") return;
+  let q = quality;
+  if (ms > 21) q = Math.max(0.5, q * (ms > 30 ? 0.8 : 0.9));
+  else if (ms < 13 && q < 1) q = Math.min(1, q * 1.08);
+  if (Math.abs(q - quality) > 0.01) {
+    quality = q;
+    mistMat.uniforms.uSteps.value = TOUCH ? 10 : quality < 0.7 ? 16 : 22;
+    applyStyle(style);
+  }
+}
 function frame() {
-  const dt = Math.min(clock.getDelta(), 0.1);
+  const raw = clock.getDelta();
+  const dt = Math.min(raw, 0.1);
+  if (running) watchSpeed(raw);
   const t = clock.elapsedTime;
   if (running && !viewer.classList.contains("on")) walk(dt);
   const bob = Math.sin(me.stride * 7.4) * 0.018 * Math.min(1, Math.hypot(me.vx, me.vz) / 2.3);

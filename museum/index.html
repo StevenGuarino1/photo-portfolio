@@ -143,7 +143,7 @@ canvas.tabIndex = 0;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x07080c);
-scene.fog = new THREE.FogExp2(0x0a0d17, 0.013);
+scene.fog = new THREE.FogExp2(0x090b14, 0.017);
 const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.05, 200);
 camera.rotation.order = "YXZ";
 
@@ -537,11 +537,11 @@ for (const s of [-1, 1]) {
 }
 // At the end of each passage, the faint glow of a doorway: rooms to come.
 for (const s of [-1, 1]) {
-  const door = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 2.6), new THREE.MeshBasicMaterial({ color: 0x7a4f26 }));
+  const door = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 2.6), new THREE.MeshBasicMaterial({ color: s > 0 ? 0xb07438 : 0x3a2614 }));
   door.position.set(s * (HW + 8.98), 1.3, (ARCH.z0 + ARCH.z1) / 2);
   door.rotation.y = -s * Math.PI / 2;
   scene.add(door);
-  const spill = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 2.2), new THREE.MeshBasicMaterial({ map: GLOW, color: 0x9a5c28, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const spill = new THREE.Mesh(new THREE.PlaneGeometry(s > 0 ? 5 : 3.4, s > 0 ? 3.4 : 2.2), new THREE.MeshBasicMaterial({ map: GLOW, color: s > 0 ? 0xb06a2c : 0x4a2c14, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
   spill.rotation.x = -Math.PI / 2;
   spill.position.set(s * (HW + 8.2), 0.01, (ARCH.z0 + ARCH.z1) / 2);
   scene.add(spill);
@@ -772,7 +772,7 @@ function plaqueTex(P) {
 }
 // Hang one: (x, z) is the wall's surface, n the way it faces, w and h the
 // most room it may take.
-function hang(P, x, z, n, maxW, maxH, cy) {
+function hang(P, x, z, n, maxW, maxH, cy, lit = true, bright = 0x8c8c8c) {
   const aspect = (P.width ?? 3) / (P.height ?? 2);
   let w = maxW;
   let h = w / aspect;
@@ -790,9 +790,9 @@ function hang(P, x, z, n, maxW, maxH, cy) {
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = Math.min(8, maxAniso);
     pic.material.map = t;
-    // Dimmed: the museum's closed, the photos are lit only by the picture
-    // lights left on for the night.
-    pic.material.color.set(0x8c8c8c);
+    // Dimmed: the museum's closed. Only a few picture lights are left on
+    // for the night; the rest of the photos sit in the dark.
+    pic.material.color.set(lit ? bright : 0x383838);
     pic.material.needsUpdate = true;
   });
   pic.userData.photo = P;
@@ -802,27 +802,35 @@ function hang(P, x, z, n, maxW, maxH, cy) {
   bar.position.set(0, h / 2 + border + 0.28, 0.42);
   const arm = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.4), M.brass);
   arm.position.set(0, h / 2 + border + 0.28, 0.21);
-  const lit = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(1.1, w * 0.4), 0.05), new THREE.MeshBasicMaterial({ color: 0xffe2b0 }));
-  lit.position.set(0, h / 2 + border + 0.243, 0.42);
-  lit.rotation.x = Math.PI / 2;
-  const wash = new THREE.Mesh(new THREE.PlaneGeometry(w * 1.9 + 1, h * 1.9 + 1.4), washMat);
-  wash.position.set(0, 0.25, 0.015);
-  const pool = new THREE.Mesh(new THREE.PlaneGeometry(w + 2, 2.2), poolMat);
-  pool.rotation.x = -Math.PI / 2;
-  pool.position.set(0, -cy + 0.01, 1.3);
-  group.add(frame, pic, bar, arm, lit, wash, pool);
+  group.add(frame, pic, bar, arm);
+  if (lit) {
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(1.1, w * 0.4), 0.05), new THREE.MeshBasicMaterial({ color: 0xffe2b0 }));
+    glow.position.set(0, h / 2 + border + 0.243, 0.42);
+    glow.rotation.x = Math.PI / 2;
+    const wash = new THREE.Mesh(new THREE.PlaneGeometry(w * 1.9 + 1, h * 1.9 + 1.4), washMat);
+    wash.position.set(0, 0.25, 0.015);
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(w + 2, 2.2), poolMat);
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.set(0, -cy + 0.01, 1.3);
+    group.add(glow, wash, pool);
+  }
   // Its label.
   const plaque = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.25), new THREE.MeshStandardMaterial({ map: plaqueTex(P), roughness: 0.7 }));
   plaque.position.set(w / 2 + border + 0.45, 1.55 - cy, 0.012);
   group.add(plaque);
   scene.add(group);
 }
+// Which bays still have their picture light on (by index into BAYS), left
+// and right: a few, unevenly, so the lit ones are found rather than lined up.
+const LIT = { "-1": new Set([1, 4, 8]), 1: new Set([2, 6, 9]) };
+const isLit = (s, z) => LIT[s].has(BAYS.indexOf(z));
 hung.forEach((P, i) => {
   const s = i % 2 ? 1 : -1;
   const z = BAYS.filter((b) => b !== MID)[Math.floor(i / 2)];
-  if (z !== undefined) hang(P, s * HW, z, { x: -s, z: 0 }, 3.4, 2.9, 4.4);
+  if (z !== undefined) hang(P, s * HW, z, { x: -s, z: 0 }, 3.4, 2.9, 4.4, isLit(s, z));
 });
-if (hero) hang(hero, 0, LEN, { x: 0, z: -1 }, 7, 5.6, 5.0);
+// The Osprey: the brightest thing in the building.
+if (hero) hang(hero, 0, LEN, { x: 0, z: -1 }, 7, 5.6, 5.0, true, 0xb4b4b4);
 
 // Potted palms, drawn flat and always turned to face you, the way the old
 // games did their furniture.
@@ -867,7 +875,8 @@ for (const [x, z] of PALMS.flatMap(([x, z]) => [[-x, z], [x, z]])) {
 
 // Pendant globes on long chains: they set the scale more than anything.
 const chainMat = new THREE.MeshStandardMaterial({ color: 0x2a2418, roughness: 0.5, metalness: 0.7 });
-const globeMat = new THREE.MeshStandardMaterial({ color: 0xffe9c4, emissive: 0xffb466, emissiveIntensity: 0.55, roughness: 0.4 });
+// Turned down to embers for the night.
+const globeMat = new THREE.MeshStandardMaterial({ color: 0x3a2c1e, emissive: 0xff8a3a, emissiveIntensity: 0.16, roughness: 0.4 });
 for (const z of [MID - 24, MID - 12, MID, MID + 12, MID + 24]) {
   for (const s of [-1, 1]) {
     const x = s * 6.6;
@@ -875,7 +884,7 @@ for (const z of [MID - 24, MID - 12, MID, MID + 12, MID + 24]) {
     const globe = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 12), globeMat);
     globe.position.set(x, 9, z);
     scene.add(globe);
-    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: 0xffb466, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, ...SPARE }));
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: 0xffb466, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, ...SPARE }));
     halo.position.copy(globe.position);
     halo.scale.setScalar(3);
     scene.add(halo);
@@ -884,7 +893,7 @@ for (const z of [MID - 24, MID - 12, MID, MID + 12, MID + 24]) {
 flush();
 
 // ---------- Light ----------
-scene.add(new THREE.HemisphereLight(0x3a4870, 0x150f0c, 0.95));
+scene.add(new THREE.HemisphereLight(0x3a4870, 0x150f0c, 0.55));
 // Moonlight through the skylight, the beams striping the floor.
 const MOON_DIR = new THREE.Vector3(0, -52, -7).normalize(); // straight down the middle
 const moonLight = new THREE.DirectionalLight(0xa8bbff, 1.55);
@@ -899,15 +908,169 @@ moonLight.shadow.radius = 10;
 moonLight.shadow.blurSamples = 16;
 scene.add(moonLight, moonLight.target);
 // A few warm lights for the picture-lit walls, and the Osprey's spot.
-for (const [x, z] of [[-(HW - 1.4), MID - 18], [HW - 1.4, MID - 18], [-(HW - 1.4), MID + 18], [HW - 1.4, MID + 18]]) {
-  const l = new THREE.PointLight(0xffaa62, 26, 18, 1.4);
-  l.position.set(x, 8.4, z);
+// Real warm light only where picture lights are on (four of the six).
+for (const [x, z] of [[-1, BAYS[4]], [1, BAYS[2]], [-1, BAYS[8]], [1, BAYS[6]]].map(([sx, z]) => [sx * (HW - 1.4), z])) {
+  const l = new THREE.PointLight(0xffaa62, 22, 14, 1.5);
+  l.position.set(x, 6, z);
   scene.add(l);
 }
-const heroSpot = new THREE.SpotLight(0xffc98c, 260, 32, 0.33, 0.55, 1.3);
+const heroSpot = new THREE.SpotLight(0xffc98c, 420, 34, 0.33, 0.55, 1.3);
 heroSpot.position.set(0, CEIL - 0.6, LEN - 11);
 heroSpot.target.position.set(0, 5, LEN);
 scene.add(heroSpot, heroSpot.target);
+
+// ---------- Someone else in the building ----------
+// A night guard doing his rounds, never quite met: out of the left-hand
+// passage, down the left side, across the far end in front of the Osprey,
+// back up the right and away down the right-hand passage, then a long wait,
+// and the same route back. All you see is his torch; all you hear, his
+// steps and keys. Come too close and he turns back the way he came.
+const GUARD_PATH = [[-HW - 8.4, MID], [-HW - 0.2, MID], [-HW + 2.6, MID + 1.6], [-HW + 2.6, LEN - 5.5], [HW - 2.6, LEN - 5.5], [HW - 2.6, MID + 1.6], [HW + 0.2, MID], [HW + 8.4, MID]].map(([x, z]) => new THREE.Vector2(x, z));
+const guardLen = [0];
+for (let i = 1; i < GUARD_PATH.length; i++) guardLen.push(guardLen[i - 1] + GUARD_PATH[i].distanceTo(GUARD_PATH[i - 1]));
+const guard = { s: 0, dir: 1, wait: 14, turned: 0, pos: new THREE.Vector3(GUARD_PATH[0].x, 1.3, GUARD_PATH[0].y), aim: new THREE.Vector3(1, -0.3, 0), heading: 0, step: 0, on: 0 };
+function guardAt(sv, out) {
+  let i = 1;
+  while (i < guardLen.length - 1 && guardLen[i] < sv) i++;
+  const a = GUARD_PATH[i - 1];
+  const b = GUARD_PATH[i];
+  const k = THREE.MathUtils.clamp((sv - guardLen[i - 1]) / (guardLen[i] - guardLen[i - 1]), 0, 1);
+  out.set(a.x + (b.x - a.x) * k, 1.3, a.y + (b.y - a.y) * k);
+  return Math.atan2(b.x - a.x, b.y - a.y);
+}
+const torch = new THREE.SpotLight(0xfff0d2, 0, 26, 0.3, 0.55, 1.4);
+scene.add(torch, torch.target);
+// The beam itself, hanging in the dusty air.
+const beamTex = (() => {
+  const c = document.createElement("canvas");
+  c.width = 4;
+  c.height = 64;
+  const g = c.getContext("2d");
+  const grad = g.createLinearGradient(0, 0, 0, 64);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 4, 64);
+  return new THREE.CanvasTexture(c);
+})();
+const beamGeo = new THREE.ConeGeometry(Math.tan(0.3) * 9, 9, 24, 1, true);
+beamGeo.translate(0, -4.5, 0);
+beamGeo.rotateX(-Math.PI / 2);
+const beamMat = new THREE.MeshBasicMaterial({ map: beamTex, color: 0xfff0d2, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, ...SPARE });
+const beam = new THREE.Mesh(beamGeo, beamMat);
+beam.renderOrder = 3;
+scene.add(beam);
+const lens = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: 0xfff4dc, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, ...SPARE }));
+lens.scale.setScalar(0.7);
+scene.add(lens);
+const guardSteps = []; // listeners for his footsteps (the sound)
+function stepGuard(t, dt) {
+  const you = new THREE.Vector2(me.x, me.z);
+  if (guard.wait > 0) {
+    guard.wait -= dt;
+    guard.on = Math.max(0, guard.on - dt * 2);
+  } else {
+    // Too close: turn back (not more than once every few seconds).
+    guard.turned -= dt;
+    const ahead = new THREE.Vector3();
+    guardAt(guard.s + guard.dir * 2, ahead);
+    if (guard.turned <= 0 && you.distanceTo(new THREE.Vector2(guard.pos.x, guard.pos.z)) < 9 && you.distanceTo(new THREE.Vector2(ahead.x, ahead.z)) < you.distanceTo(new THREE.Vector2(guard.pos.x, guard.pos.z))) {
+      guard.dir *= -1;
+      guard.turned = 6;
+    }
+    guard.s += guard.dir * 1.05 * dt;
+    if (guard.s <= 0 || guard.s >= guardLen[guardLen.length - 1]) {
+      guard.s = THREE.MathUtils.clamp(guard.s, 0, guardLen[guardLen.length - 1]);
+      guard.dir *= -1;
+      guard.wait = 25 + Math.random() * 25;
+    }
+    guard.on = Math.min(1, guard.on + dt * 2);
+    guard.step += dt;
+    if (guard.step > 0.62) {
+      guard.step = 0;
+      guardSteps.forEach((f) => f(guard.pos));
+    }
+  }
+  const head = guardAt(guard.s, guard.pos) + (guard.dir < 0 ? Math.PI : 0);
+  guard.heading += Math.atan2(Math.sin(head - guard.heading), Math.cos(head - guard.heading)) * Math.min(1, dt * 2.5);
+  // The torch wanders: along the floor ahead, over the walls, now and then
+  // up at a picture.
+  const yaw = guard.heading + Math.sin(t * 0.45) * 0.65 + Math.sin(t * 1.3) * 0.12;
+  const pitch = -0.32 + Math.sin(t * 0.31 + 1) * 0.18;
+  guard.aim.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+  torch.position.copy(guard.pos);
+  torch.target.position.copy(guard.pos).addScaledVector(guard.aim, 6);
+  torch.intensity = 70 * guard.on;
+  beam.position.copy(guard.pos);
+  beam.lookAt(torch.target.position);
+  beamMat.opacity = 0.055 * guard.on;
+  // The lens shows when it's turned your way.
+  const toYou = camera.position.clone().sub(guard.pos).normalize();
+  lens.position.copy(guard.pos).addScaledVector(guard.aim, 0.1);
+  lens.material.opacity = guard.on * THREE.MathUtils.smoothstep(toYou.dot(guard.aim), 0.75, 0.97);
+  const u = mistMat.uniforms;
+  u.uGuardPos.value.copy(guard.pos);
+  u.uGuardDir.value.copy(guard.aim);
+  u.uGuardOn.value = guard.on;
+}
+
+// Down the right-hand passage, a room with the light on and a radio
+// playing low: the next room, calling.
+const RADIO = new THREE.Vector3(HW + 8.6, 1, MID);
+
+// A car going by outside now and then: its headlights slide through the
+// high windows of the right wall and across the ceiling and the far wall.
+const sweepTex = (() => {
+  const c = document.createElement("canvas");
+  c.width = 64;
+  c.height = 64;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  // The glazing bars' shadows.
+  g.globalCompositeOperation = "destination-out";
+  g.fillStyle = "rgba(0,0,0,0.85)";
+  for (const x of [0, 21, 42, 63]) g.fillRect(x, 0, 2, 64);
+  for (const y of [0, 21, 42, 63]) g.fillRect(0, y, 64, 2);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+const sweeps = [];
+for (const where of ["ceiling", "wall"]) for (let k = 0; k < 2; k++) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(where === "ceiling" ? 3.4 : 3.6, where === "ceiling" ? 4.6 : 3.8), new THREE.MeshBasicMaterial({ map: sweepTex, color: 0xffe6c0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, ...SPARE }));
+  if (where === "ceiling") { m.rotation.x = Math.PI / 2; m.position.set(6 + k * 0.6, CEIL - 0.03, 0); }
+  else { m.rotation.y = Math.PI / 2; m.position.set(-HW + 0.03, WY - 0.4 + k * 0.3, 0); }
+  m.userData = { where, k };
+  sweeps.push(m);
+  scene.add(m);
+}
+const car = { next: 20 + Math.random() * 25, t: -1, dur: 5.5, dir: 1 };
+const carListeners = [];
+function stepCar(dt) {
+  car.next -= dt;
+  if (car.t < 0 && car.next <= 0) {
+    car.t = 0;
+    car.dir = Math.random() < 0.5 ? 1 : -1;
+    carListeners.forEach((f) => f(car.dir));
+    car.next = 40 + Math.random() * 60;
+  }
+  if (car.t < 0) return;
+  car.t += dt;
+  // The sound leads: the lights come in a moment after.
+  const u = (car.t - 1.2) / car.dur;
+  for (const m of sweeps) {
+    const k = m.userData.k;
+    const along = THREE.MathUtils.clamp(u - k * 0.04, 0, 1);
+    const z = car.dir > 0 ? -8 + along * (LEN + 16) : LEN + 8 - along * (LEN + 16);
+    m.position.z = z;
+    m.material.opacity = u > 0 && u < 1 ? Math.sin(along * Math.PI) * (m.userData.where === "ceiling" ? 0.22 : 0.16) : 0;
+  }
+  if (u > 1.1) car.t = -1;
+}
 
 // Shafts of moonlight hanging in the air, and dust drifting through them.
 const shaftTex = (() => {
@@ -1057,6 +1220,10 @@ const mistMat = new THREE.ShaderMaterial({
     uFrame: { value: 0 },
     uSteps: { value: TOUCH ? 10 : 22 },
     uExposure: { value: 1.15 },
+    uLit: { value: Array.from({ length: 22 }, (_, k) => (LIT[k < 11 ? "-1" : 1].has(k % 11) ? 1 : 0)) },
+    uGuardPos: { value: new THREE.Vector3() },
+    uGuardDir: { value: new THREE.Vector3(0, 0, 1) },
+    uGuardOn: { value: 0 },
   },
   vertexShader: "varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
   fragmentShader: `
@@ -1071,6 +1238,10 @@ const mistMat = new THREE.ShaderMaterial({
     uniform float uFrame;
     uniform int uSteps;
     uniform float uExposure;
+    uniform float uLit[22];
+    uniform vec3 uGuardPos;
+    uniform vec3 uGuardDir;
+    uniform float uGuardOn;
     varying vec2 vUv;
     const float HW = ${f2(HW)};
     const float LEN = ${f2(LEN)};
@@ -1121,7 +1292,17 @@ const mistMat = new THREE.ShaderMaterial({
       float side = exp(-pow(abs(p.x) - (HW - 1.3), 2.0) / 2.6);
       float bz = abs(fract(p.z / 6.0 + 0.5) - 0.5) * 6.0;
       float bay = exp(-bz * bz / 2.0) * step(4.5, p.z) * step(p.z, LEN - 4.5) * (1.0 - exp(-pow(p.z - MID, 2.0) / 5.0));
-      vec3 c = vec3(0.55, 0.32, 0.15) * side * bay;
+      int j = int(floor(p.z / 6.0 + 0.5)) - 1;
+      float on = 0.0;
+      if (j >= 0 && j < 11) on = p.x > 0.0 ? uLit[j + 11] : uLit[j];
+      vec3 c = vec3(0.55, 0.32, 0.15) * side * bay * on;
+      // The guard's torch, if it's on and pointing this way.
+      vec3 gv = p - uGuardPos;
+      float ga = dot(gv, uGuardDir);
+      if (uGuardOn > 0.0 && ga > 0.0) {
+        float cone = smoothstep(0.92, 0.975, ga / length(gv));
+        c += vec3(0.9, 0.85, 0.7) * cone * uGuardOn * 2.5 / (1.0 + ga * ga * 0.06);
+      }
       vec3 l0 = DESK0 - p;
       vec3 l1 = DESK1 - p;
       c += vec3(0.6, 0.45, 0.28) * (1.0 / (1.0 + dot(l0, l0) * 1.4) + 1.0 / (1.0 + dot(l1, l1) * 1.4));
@@ -1335,6 +1516,166 @@ function startAudio() {
   hush.connect(lp).connect(hg).connect(master);
   hush.start();
   audio = { ctx, master, noise, hall };
+  // Placed sounds go through a panner at a point in the room.
+  const placed = (x, y, z, ref = 3) => {
+    const p = ctx.createPanner();
+    p.panningModel = "HRTF";
+    p.distanceModel = "inverse";
+    p.refDistance = ref;
+    p.rolloffFactor = 1.1;
+    if (p.positionX) { p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z; } else p.setPosition(x, y, z);
+    p.connect(master);
+    return p;
+  };
+  // Wind leaning on the high windows, in slow gusts.
+  {
+    const src = ctx.createBufferSource();
+    src.buffer = noise;
+    src.loop = true;
+    const f = ctx.createBiquadFilter();
+    f.type = "bandpass";
+    f.frequency.value = 420;
+    f.Q.value = 0.6;
+    const g = ctx.createGain();
+    g.gain.value = 0.02;
+    src.connect(f).connect(g).connect(master);
+    g.connect(hall);
+    src.start();
+    const gust = () => {
+      const t = ctx.currentTime;
+      g.gain.setTargetAtTime(0.012 + Math.random() * 0.05, t, 1.2 + Math.random() * 1.5);
+      f.frequency.setTargetAtTime(320 + Math.random() * 300, t, 2);
+      setTimeout(gust, 2500 + Math.random() * 3500);
+    };
+    gust();
+  }
+  // The building's low hum.
+  for (const [hz, v] of [[55, 0.012], [110, 0.004]]) {
+    const o = ctx.createOscillator();
+    o.frequency.value = hz;
+    const g = ctx.createGain();
+    g.gain.value = v;
+    o.connect(g).connect(master);
+    o.start();
+  }
+  // An old radio in the room down the right-hand passage: a slow tune in
+  // a narrow band, with crackle, very low.
+  {
+    const out = placed(RADIO.x, RADIO.y, RADIO.z, 2);
+    const band = ctx.createBiquadFilter();
+    band.type = "bandpass";
+    band.frequency.value = 1100;
+    band.Q.value = 0.9;
+    const level = ctx.createGain();
+    level.gain.value = 0.11;
+    band.connect(level).connect(out);
+    level.connect(hall);
+    const crackle = ctx.createBufferSource();
+    crackle.buffer = noise;
+    crackle.loop = true;
+    const cg = ctx.createGain();
+    cg.gain.value = 0.05;
+    const hp = ctx.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 2500;
+    crackle.connect(hp).connect(cg).connect(band);
+    crackle.start();
+    // A slow waltz in A minor: melody over a bass and a chord.
+    const N = (n) => 220 * Math.pow(2, n / 12);
+    const tune = [[12, 2], [15, 1], [19, 1], [17, 2], [15, 1], [12, 1], [14, 2], [10, 1], [12, 3], [7, 2], [10, 1], [14, 1], [12, 2], [10, 1], [7, 1], [8, 3], [0, 3]];
+    const bass = [-12, -12, -7, -12, -9, -9, -5, -12];
+    let at = ctx.currentTime + 1;
+    let n = 0;
+    let b = 0;
+    const beat = 0.55;
+    const note = (freq, t, len, gain, type = "triangle") => {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = freq;
+      o.detune.setValueAtTime(0, t);
+      o.detune.linearRampToValueAtTime((Math.random() - 0.5) * 18, t + len); // a little wow
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(gain, t + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0008, t + len);
+      o.connect(g).connect(band);
+      o.start(t);
+      o.stop(t + len + 0.05);
+    };
+    setInterval(() => {
+      while (at < ctx.currentTime + 1.5) {
+        const [m, d] = tune[n % tune.length];
+        note(N(m), at, d * beat * 0.95, 0.5);
+        for (let k = 0; k < d; k++) {
+          const root = bass[b % bass.length];
+          note(N(root), at + k * beat, beat * 0.9, k === 0 ? 0.45 : 0.18, "sine");
+          if (k > 0) for (const iv of [3, 7]) note(N(root + 12 + iv), at + k * beat, beat * 0.5, 0.12);
+          if (k === d - 1) b++;
+        }
+        at += d * beat;
+        n++;
+        if (n % tune.length === 0) at += beat * 3;
+      }
+    }, 400);
+  }
+  // A car going by outside (its lights come through the windows).
+  carListeners.push((dir) => {
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = noise;
+    src.loop = true;
+    const f = ctx.createBiquadFilter();
+    f.type = "lowpass";
+    f.frequency.setValueAtTime(180, t);
+    f.frequency.linearRampToValueAtTime(700, t + 3);
+    f.frequency.linearRampToValueAtTime(220, t + 7);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.09, t + 3);
+    g.gain.linearRampToValueAtTime(0, t + 7.5);
+    const pan = ctx.createStereoPanner();
+    pan.pan.setValueAtTime(-0.8 * dir, t);
+    pan.pan.linearRampToValueAtTime(0.8 * dir, t + 7);
+    src.connect(f).connect(g).connect(pan).connect(master);
+    g.connect(hall);
+    src.start(t);
+    src.stop(t + 8);
+  });
+  // The guard: heavy heels, and now and then his keys.
+  guardSteps.push((p) => {
+    const t = ctx.currentTime;
+    const out = placed(p.x, 0.2, p.z, 2.5);
+    const src = ctx.createBufferSource();
+    src.buffer = noise;
+    const f = ctx.createBiquadFilter();
+    f.type = "bandpass";
+    f.frequency.value = 900 + Math.random() * 300;
+    f.Q.value = 1.6;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.5, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    src.connect(f).connect(g);
+    g.connect(out);
+    g.connect(hall);
+    src.start(t, Math.random() * 1.5, 0.15);
+    if (Math.random() < 0.18) {
+      for (let k = 0; k < 6; k++) {
+        const kt = t + 0.05 + k * (0.03 + Math.random() * 0.05);
+        const ks = ctx.createBufferSource();
+        ks.buffer = noise;
+        const kf = ctx.createBiquadFilter();
+        kf.type = "bandpass";
+        kf.frequency.value = 4200 + Math.random() * 1800;
+        kf.Q.value = 9;
+        const kg = ctx.createGain();
+        kg.gain.setValueAtTime(0.12, kt);
+        kg.gain.exponentialRampToValueAtTime(0.001, kt + 0.06);
+        ks.connect(kf).connect(kg).connect(out);
+        ks.start(kt, Math.random() * 1.5, 0.08);
+      }
+    }
+  });
   // The building settling: a low creak, once in a while.
   const creak = () => {
     if (ctx.state === "running") {
@@ -1603,12 +1944,24 @@ function frame() {
   motes.rotation.y = Math.sin(t * 0.02) * 0.004;
   motes.position.y = Math.sin(t * 0.13) * 0.15;
   // The globes and the desk lamp breathe a little.
-  globeMat.emissiveIntensity = 0.55 + Math.sin(t * 0.7) * 0.03;
+  globeMat.emissiveIntensity = 0.16 + Math.sin(t * 0.7) * 0.015;
+  stepGuard(t, dt);
+  stepCar(dt);
+  if (audio?.ctx.listener) {
+    const L = audio.ctx.listener;
+    const fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
+    if (L.positionX) {
+      L.positionX.value = camera.position.x; L.positionY.value = camera.position.y; L.positionZ.value = camera.position.z;
+      L.forwardX.value = fwd.x; L.forwardY.value = fwd.y; L.forwardZ.value = fwd.z;
+      L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0;
+    } else { L.setPosition(camera.position.x, camera.position.y, camera.position.z); L.setOrientation(fwd.x, fwd.y, fwd.z, 0, 1, 0); }
+  }
   if (running && !viewer.classList.contains("on")) showCard(pick(innerWidth / 2, innerHeight / 2));
   render(t);
 }
 renderer.setAnimationLoop(frame);
-window.__gallery = { me, camera, renderer, applyStyle, frame, get focus() { return focus; }, hung, hero };
+window.__gallery = { me, camera, renderer, applyStyle, frame, get focus() { return focus; }, hung, hero, guard, car };
 </script>
 </body>
 </html>

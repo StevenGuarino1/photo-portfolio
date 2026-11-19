@@ -1,0 +1,1148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="photo-root" content="../">
+<title>The Night Gallery</title>
+<meta name="description" content="Steven Guarino's photographs, hung in a museum after closing.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #07080c;
+    --ink: #f1e7d6;
+    --dim: rgba(241, 231, 214, 0.62);
+    --faint: rgba(241, 231, 214, 0.38);
+    --panel: rgba(10, 10, 14, 0.72);
+    --line: rgba(241, 231, 214, 0.14);
+    --brass: #c9a35a;
+  }
+  /* The gallery is always at night: the same tokens in either theme. */
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #07080c; --ink: #f1e7d6; } }
+  :root[data-theme="dark"] { --bg: #07080c; --ink: #f1e7d6; }
+
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden; font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; outline: none; }
+  canvas.pixel { image-rendering: pixelated; }
+  .serif { font-family: "Cormorant Garamond", Georgia, serif; }
+
+  #intro { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; text-align: center; padding: 24px;
+    background: radial-gradient(ellipse at 50% 60%, rgba(20, 24, 40, 0.55), rgba(5, 6, 9, 0.94) 70%); transition: opacity 600ms ease; }
+  #intro.gone { opacity: 0; pointer-events: none; }
+  #intro h1 { margin: 0; font: 600 clamp(40px, 8vw, 76px)/1 "Cormorant Garamond", Georgia, serif; letter-spacing: 0.02em; }
+  #intro p { margin: 14px 0 30px; color: var(--dim); font: italic 500 clamp(17px, 2.6vw, 22px)/1.4 "Cormorant Garamond", Georgia, serif; }
+  #intro button { font: 500 14px/1 Inter, sans-serif; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink);
+    background: transparent; border: 1px solid var(--line); padding: 14px 26px; border-radius: 2px; cursor: pointer; }
+  #intro button:hover, #intro button:focus-visible { border-color: var(--brass); color: #fff; outline: none; }
+  #intro small { display: block; margin-top: 22px; color: var(--faint); font-size: 12px; letter-spacing: 0.04em; }
+
+  .hud { position: fixed; z-index: 10; pointer-events: none; }
+  #name { top: 18px; left: 20px; font: 600 20px/1 "Cormorant Garamond", Georgia, serif; letter-spacing: 0.03em; color: var(--dim); }
+  #styles { top: 14px; right: 14px; display: flex; gap: 6px; pointer-events: auto; }
+  #styles button { font: 500 12px/1 Inter, sans-serif; color: var(--dim); background: var(--panel); border: 1px solid var(--line);
+    padding: 8px 10px; border-radius: 2px; cursor: pointer; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  #styles button[aria-pressed="true"] { color: var(--ink); border-color: var(--brass); }
+  #styles button kbd { font: inherit; opacity: 0.55; margin-right: 6px; }
+  #hint { bottom: 18px; left: 50%; transform: translateX(-50%); font-size: 12px; color: var(--faint); letter-spacing: 0.03em;
+    white-space: nowrap; transition: opacity 400ms ease; }
+  #dot { top: 50%; left: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: rgba(241, 231, 214, 0.55); }
+  #card { left: 20px; bottom: 20px; max-width: min(360px, calc(100vw - 40px)); padding: 14px 16px 13px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 2px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    opacity: 0; transform: translateY(6px); transition: opacity 260ms ease, transform 260ms ease; }
+  #card.on { opacity: 1; transform: none; }
+  #card h2 { margin: 0 0 4px; font: 600 22px/1.1 "Cormorant Garamond", Georgia, serif; }
+  #card .meta { font-size: 12px; color: var(--dim); }
+  #card .exif { font-size: 11px; color: var(--faint); margin-top: 3px; }
+  #card .how { font-size: 11px; color: var(--brass); margin-top: 8px; letter-spacing: 0.04em; }
+  #viewer { position: fixed; inset: 0; z-index: 40; display: none; place-items: center; background: rgba(4, 4, 6, 0.96); cursor: zoom-out; }
+  #viewer.on { display: grid; }
+  #viewer img { max-width: 94vw; max-height: 88vh; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); }
+  #viewer p { position: fixed; bottom: 18px; left: 0; right: 0; text-align: center; margin: 0; color: var(--dim); font: italic 500 18px/1.2 "Cormorant Garamond", Georgia, serif; }
+  @media (max-width: 640px) {
+    #hint { white-space: normal; text-align: center; width: calc(100vw - 32px); }
+    #styles button kbd { display: none; }
+    #name { font-size: 17px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+} }
+</script>
+<script src="../js/photos.js"></script>
+</head>
+<body>
+<div id="intro">
+  <div>
+    <h1>The Night Gallery</h1>
+    <p>After closing. Take your time.</p>
+    <button id="enter" type="button">Step inside</button>
+    <small id="howto">W A S D to walk · mouse to look · Shift to hurry</small>
+  </div>
+</div>
+<div class="hud" id="name">The Night Gallery</div>
+<div class="hud" id="styles" role="group" aria-label="Look">
+  <button type="button" data-style="sleek"><kbd>1</kbd>Sleek</button>
+  <button type="button" data-style="retro"><kbd>2</kbd>Retro</button>
+  <button type="button" data-style="between"><kbd>3</kbd>Between</button>
+</div>
+<div class="hud" id="dot" hidden></div>
+<div class="hud" id="hint"></div>
+<div class="hud" id="card" aria-live="polite"><h2></h2><div class="meta"></div><div class="exif"></div><div class="how"></div></div>
+<div id="viewer" role="dialog" aria-label="Photo"><img alt=""><p></p></div>
+
+<script type="module">
+import * as THREE from "three";
+import { Reflector } from "three/addons/objects/Reflector.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+
+// ---------- The Night Gallery ----------
+// One long, tall hall of a museum after closing, built the way the old
+// grid shooters were: straight walls, chunky pixel textures, flat sprite
+// plants. Moonlight falls through a skylight in stripes; each photograph
+// has its own warm picture light; two archways lead off into the dark.
+// 1, 2, 3 switch between three looks while we settle on one.
+
+const ROOT = document.querySelector('meta[name="photo-root"]')?.content ?? "../";
+const TOUCH = matchMedia("(pointer: coarse)").matches;
+const $ = (id) => document.getElementById(id);
+
+// The hall: x across (-8..8), z along (0 at the doors, 48 at the far end).
+const HW = 8; // half width
+const LEN = 48;
+const WALL = 7.6; // to the cornice
+const CEIL = 12;
+const PILASTERS = [3, 9, 15, 21, 27, 33, 39, 45];
+const BAYS = [6, 12, 18, 24, 30, 36, 42];
+const ARCH = { z0: 22.3, z1: 25.7, h: 5.6 };
+const EYE = 1.65;
+
+// ---------- Renderer, scene, camera ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+document.body.prepend(renderer.domElement);
+const canvas = renderer.domElement;
+canvas.tabIndex = 0;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07080c);
+scene.fog = new THREE.FogExp2(0x0a0d17, 0.02);
+const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.05, 200);
+camera.rotation.order = "YXZ";
+
+// ---------- Pixel textures ----------
+// Small canvases drawn a pixel at a time and shown without smoothing: the
+// grid-shooter look. Each repeats every `size` metres of wall.
+function rng(seed) {
+  let s = seed >>> 0;
+  return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+}
+const maxAniso = renderer.capabilities.getMaxAnisotropy();
+function pixelTex(w, h, draw, { repeat = true, srgb = true } = {}) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const g = c.getContext("2d");
+  g.imageSmoothingEnabled = false;
+  draw(g, w, h);
+  const t = new THREE.CanvasTexture(c);
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.anisotropy = Math.min(8, maxAniso);
+  if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+const hex = (c) => `#${c.toString(16).padStart(6, "0")}`;
+const shade = (c, k) => {
+  const r = Math.min(255, Math.max(0, ((c >> 16) & 255) * k));
+  const g = Math.min(255, Math.max(0, ((c >> 8) & 255) * k));
+  const b = Math.min(255, Math.max(0, (c & 255) * k));
+  return `rgb(${r | 0}, ${g | 0}, ${b | 0})`;
+};
+function speckle(g, w, h, base, amount, seed) {
+  const r = rng(seed);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    g.fillStyle = shade(base, 1 + (r() - 0.5) * amount);
+    g.fillRect(x, y, 1, 1);
+  }
+}
+
+const T = {
+  // Marble checkerboard: two 2 m tiles each way.
+  floor: pixelTex(64, 64, (g) => {
+    const r = rng(11);
+    for (let ty = 0; ty < 2; ty++) for (let tx = 0; tx < 2; tx++) {
+      const dark = (tx + ty) % 2 === 0;
+      const base = dark ? 0x1b1d20 : 0x6b655c;
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+        g.fillStyle = shade(base, 1 + (r() - 0.5) * 0.12);
+        g.fillRect(tx * 32 + x, ty * 32 + y, 1, 1);
+      }
+      // Veins wandering across the slab.
+      for (let v = 0; v < 3; v++) {
+        let x = r() * 32;
+        let y = r() * 32;
+        const dx = (r() - 0.5) * 1.6;
+        for (let k = 0; k < 40; k++) {
+          x += dx + (r() - 0.5);
+          y += 0.7;
+          if (x < 0 || x > 31 || y > 31) break;
+          g.fillStyle = shade(base, dark ? 1.9 : 0.78);
+          g.fillRect(tx * 32 + (x | 0), ty * 32 + (y | 0), 1, 1);
+        }
+      }
+      g.fillStyle = "#0d0d0e";
+      g.fillRect(tx * 32, ty * 32, 32, 1);
+      g.fillRect(tx * 32, ty * 32, 1, 32);
+    }
+  }),
+  // Oxblood silk with a diamond damask.
+  silk: pixelTex(32, 32, (g) => {
+    speckle(g, 32, 32, 0x4b1b1e, 0.08, 21);
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+      const a = (x + y) % 16;
+      const b = (x - y + 32) % 16;
+      if (a === 0 || b === 0) { g.fillStyle = "#5b2427"; g.fillRect(x, y, 1, 1); }
+    }
+    for (const [cx, cy] of [[8, 0], [0, 8], [8, 16], [24, 16], [16, 8], [16, 24], [24, 0], [0, 24], [8, 32], [24, 32]]) {
+      g.fillStyle = "#64292c";
+      g.fillRect(cx - 1, cy - 2, 2, 4);
+      g.fillRect(cx - 2, cy - 1, 4, 2);
+    }
+  }),
+  // Walnut wainscot: a raised panel with its moulding.
+  wood: pixelTex(64, 40, (g) => {
+    const r = rng(31);
+    for (let y = 0; y < 40; y++) {
+      const band = 1 + Math.sin(y * 0.9 + r() * 0.5) * 0.06;
+      for (let x = 0; x < 64; x++) {
+        g.fillStyle = shade(0x3a2417, band + (r() - 0.5) * 0.1);
+        g.fillRect(x, y, 1, 1);
+      }
+    }
+    g.fillStyle = "#24160e";
+    g.fillRect(6, 7, 52, 1);
+    g.fillRect(6, 7, 1, 26);
+    g.fillStyle = "#57391f";
+    g.fillRect(6, 33, 53, 1);
+    g.fillRect(58, 7, 1, 27);
+    g.fillStyle = "#1b100a";
+    g.fillRect(0, 39, 64, 1);
+    g.fillRect(0, 0, 64, 1);
+  }),
+  // Limestone pilaster: fluting, a capital at the top, a plinth below.
+  stone: pixelTex(16, 128, (g) => {
+    speckle(g, 16, 128, 0xb9b09c, 0.1, 41);
+    g.fillStyle = "#8f8775";
+    for (let x = 2; x < 16; x += 4) g.fillRect(x, 16, 1, 98);
+    g.fillStyle = "#d6cdb8";
+    for (let x = 3; x < 16; x += 4) g.fillRect(x, 16, 1, 98);
+    g.fillStyle = "#7c7564";
+    g.fillRect(0, 12, 16, 1);
+    g.fillRect(0, 115, 16, 1);
+    g.fillRect(0, 4, 16, 1);
+  }),
+  plain: pixelTex(16, 16, (g) => speckle(g, 16, 16, 0xb3aa96, 0.1, 43)),
+  // Cornice: mouldings and a row of dentils.
+  cornice: pixelTex(32, 12, (g) => {
+    speckle(g, 32, 12, 0xb3aa96, 0.08, 51);
+    g.fillStyle = "#7a7363";
+    g.fillRect(0, 2, 32, 1);
+    g.fillRect(0, 9, 32, 1);
+    g.fillStyle = "#cfc6b0";
+    for (let x = 0; x < 32; x += 4) g.fillRect(x, 4, 2, 3);
+  }),
+  plaster: pixelTex(32, 32, (g) => speckle(g, 32, 32, 0x24252c, 0.12, 61)),
+  // Coffered ceiling: sunk panels with a gilt edge.
+  coffer: pixelTex(32, 32, (g) => {
+    speckle(g, 32, 32, 0x1d1b1c, 0.1, 71);
+    g.fillStyle = "#121111";
+    g.fillRect(4, 4, 24, 24);
+    g.fillStyle = "#5a4524";
+    g.fillRect(4, 4, 24, 1);
+    g.fillRect(4, 4, 1, 24);
+    g.fillRect(4, 27, 24, 1);
+    g.fillRect(27, 4, 1, 24);
+  }),
+  darkwood: pixelTex(16, 16, (g) => speckle(g, 16, 16, 0x221610, 0.15, 81)),
+  gold: pixelTex(16, 16, (g) => {
+    speckle(g, 16, 16, 0x8c6a2e, 0.18, 91);
+    g.fillStyle = "#c79c4a";
+    g.fillRect(0, 0, 16, 1);
+    g.fillRect(0, 0, 1, 16);
+    g.fillStyle = "#5c4419";
+    g.fillRect(0, 15, 16, 1);
+    g.fillRect(15, 0, 1, 16);
+  }),
+  leather: pixelTex(16, 16, (g) => {
+    speckle(g, 16, 16, 0x3a1f17, 0.14, 101);
+    g.fillStyle = "#1f100b";
+    for (const [x, y] of [[3, 3], [11, 3], [7, 8], [3, 13], [11, 13]]) g.fillRect(x, y, 1, 1);
+  }),
+  // Night sky for the skylight and the high windows.
+  sky: pixelTex(32, 32, (g) => {
+    for (let y = 0; y < 32; y++) {
+      g.fillStyle = `rgb(${10 + y * 0.4 | 0}, ${16 + y * 0.6 | 0}, ${38 + y * 1.2 | 0})`;
+      g.fillRect(0, y, 32, 1);
+    }
+    const r = rng(111);
+    for (let i = 0; i < 9; i++) {
+      g.fillStyle = r() < 0.3 ? "#cdd8ff" : "#7d8bb8";
+      g.fillRect(r() * 32 | 0, r() * 32 | 0, 1, 1);
+    }
+  }),
+};
+// High windows: the sky through a grid of glazing bars.
+T.window = pixelTex(32, 26, (g) => {
+  for (let y = 0; y < 26; y++) {
+    g.fillStyle = `rgb(${16 + y * 0.6 | 0}, ${24 + y * 0.9 | 0}, ${56 + y * 1.6 | 0})`;
+    g.fillRect(0, y, 32, 1);
+  }
+  const r = rng(121);
+  for (let i = 0; i < 6; i++) { g.fillStyle = "#b8c4f0"; g.fillRect(r() * 32 | 0, r() * 20 | 0, 1, 1); }
+  g.fillStyle = "#0b0b0f";
+  for (const x of [0, 10, 21, 31]) g.fillRect(x, 0, 1, 26);
+  for (const y of [0, 8, 17, 25]) g.fillRect(0, y, 32, 1);
+}, { repeat: false });
+T.moon = pixelTex(16, 16, (g) => {
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const d = Math.hypot(x - 7.5, y - 7.5);
+    if (d > 7) continue;
+    g.fillStyle = d > 6 ? "#b9c3e6" : (x + y * 3) % 11 === 0 ? "#c9d1ee" : "#e9edfb";
+    g.fillRect(x, y, 1, 1);
+  }
+}, { repeat: false });
+// Soft round glow, smooth on purpose (light, not a surface).
+function glowTex(warm = true) {
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.35, "rgba(255,255,255,0.45)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const GLOW = glowTex();
+// The wash a picture light throws on the wall: brightest just above the
+// frame, falling away below.
+const WASH = (() => {
+  const c = document.createElement("canvas");
+  c.width = 128;
+  c.height = 128;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(64, 34, 2, 64, 54, 70);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.5, "rgba(255,255,255,0.35)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+
+// ---------- Building ----------
+const M = {
+  silk: new THREE.MeshStandardMaterial({ map: T.silk, roughness: 0.95 }),
+  wood: new THREE.MeshStandardMaterial({ map: T.wood, roughness: 0.7 }),
+  stone: new THREE.MeshStandardMaterial({ map: T.stone, roughness: 0.85 }),
+  plain: new THREE.MeshStandardMaterial({ map: T.plain, roughness: 0.85 }),
+  cornice: new THREE.MeshStandardMaterial({ map: T.cornice, roughness: 0.85 }),
+  plaster: new THREE.MeshStandardMaterial({ map: T.plaster, roughness: 1 }),
+  coffer: new THREE.MeshStandardMaterial({ map: T.coffer, roughness: 1 }),
+  darkwood: new THREE.MeshStandardMaterial({ map: T.darkwood, roughness: 0.8 }),
+  gold: new THREE.MeshStandardMaterial({ map: T.gold, roughness: 0.45, metalness: 0.6 }),
+  brass: new THREE.MeshStandardMaterial({ color: 0xa8843e, roughness: 0.35, metalness: 0.8 }),
+  leather: new THREE.MeshStandardMaterial({ map: T.leather, roughness: 0.6 }),
+  velvet: new THREE.MeshStandardMaterial({ color: 0x5a0f17, roughness: 0.9 }),
+  skirting: new THREE.MeshStandardMaterial({ color: 0x140d09, roughness: 0.6 }),
+};
+
+// Everything that never moves is gathered by material and drawn as one
+// mesh per material.
+const bins = new Map();
+const tmpM = new THREE.Matrix4();
+const tmpQ = new THREE.Quaternion();
+const tmpE = new THREE.Euler();
+function put(geo, mat, { x = 0, y = 0, z = 0, rx = 0, ry = 0, cast = false } = {}) {
+  geo.applyMatrix4(tmpM.compose(new THREE.Vector3(x, y, z), tmpQ.setFromEuler(tmpE.set(rx, ry, 0)), new THREE.Vector3(1, 1, 1)));
+  const key = mat.uuid + (cast ? "+" : "");
+  if (!bins.has(key)) bins.set(key, { mat, cast, list: [] });
+  bins.get(key).list.push(geo);
+}
+function flush() {
+  for (const { mat, cast, list } of bins.values()) {
+    const mesh = new THREE.Mesh(mergeGeometries(list), mat);
+    mesh.castShadow = cast;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  }
+  bins.clear();
+}
+// A plane whose texture repeats every tw x th metres.
+function plane(w, h, tw = w, th = h) {
+  const g = new THREE.PlaneGeometry(w, h);
+  const uv = g.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * w) / tw, (uv.getY(i) * h) / th);
+  return g;
+}
+// A box textured the same way on every face.
+function box(w, h, d, tw = 1, th = 1) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const uv = g.attributes.uv;
+  const dims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  for (let f = 0; f < 6; f++) for (let k = 0; k < 4; k++) {
+    const i = f * 4 + k;
+    uv.setXY(i, (uv.getX(i) * dims[f][0]) / tw, (uv.getY(i) * dims[f][1]) / th);
+  }
+  return g;
+}
+
+// The long walls, a bay at a time (the pilasters cover the joins). The
+// middle bay has an archway on each side.
+const edges = [0, ...PILASTERS, LEN];
+for (const s of [-1, 1]) {
+  const ry = -s * Math.PI / 2;
+  const wallPiece = (z0, z1, y0, y1, mat, tw, th) => {
+    if (z1 - z0 < 0.01 || y1 - y0 < 0.01) return;
+    put(plane(z1 - z0, y1 - y0, tw, th), mat, { x: s * HW, y: (y0 + y1) / 2, z: (z0 + z1) / 2, ry });
+  };
+  for (let k = 0; k < edges.length - 1; k++) {
+    const z0 = edges[k];
+    const z1 = edges[k + 1];
+    const arch = z0 < ARCH.z0 && z1 > ARCH.z1;
+    const runs = arch ? [[z0, ARCH.z0], [ARCH.z1, z1]] : [[z0, z1]];
+    for (const [a, b] of runs) {
+      wallPiece(a, b, 0, 1.2, M.wood, 2, 1.25);
+      wallPiece(a, b, 1.2, WALL, M.silk, 2, 2);
+      put(box(0.06, 0.08, b - a), M.darkwood, { x: s * (HW - 0.03), y: 1.22, z: (a + b) / 2 });
+      put(box(0.05, 0.16, b - a), M.skirting, { x: s * (HW - 0.025), y: 0.08, z: (a + b) / 2 });
+    }
+    if (arch) {
+      wallPiece(ARCH.z0, ARCH.z1, ARCH.h, WALL, M.silk, 2, 2);
+      // The archway's surround and keystone.
+      put(box(0.3, ARCH.h + 0.3, 0.3, 0.3, 1), M.plain, { x: s * (HW - 0.12), y: (ARCH.h + 0.3) / 2, z: ARCH.z0 - 0.15 });
+      put(box(0.3, ARCH.h + 0.3, 0.3, 0.3, 1), M.plain, { x: s * (HW - 0.12), y: (ARCH.h + 0.3) / 2, z: ARCH.z1 + 0.15 });
+      put(box(0.32, 0.3, ARCH.z1 - ARCH.z0 + 0.6, 1, 0.3), M.plain, { x: s * (HW - 0.12), y: ARCH.h + 0.15, z: (ARCH.z0 + ARCH.z1) / 2 });
+      put(box(0.4, 0.6, 0.5, 0.5, 0.6), M.stone, { x: s * (HW - 0.14), y: ARCH.h + 0.3, z: (ARCH.z0 + ARCH.z1) / 2 });
+      // Beyond it, a passage running off into the dark.
+      const deep = 9;
+      const pw = ARCH.z1 - ARCH.z0;
+      const px = s * (HW + deep / 2);
+      put(plane(deep, pw, 4, 4), M.darkwood, { x: px, y: 0.001, z: (ARCH.z0 + ARCH.z1) / 2, rx: -Math.PI / 2 });
+      put(plane(deep, ARCH.h, 2, 2), M.silk, { x: px, y: ARCH.h / 2, z: ARCH.z0, ry: 0 });
+      put(plane(deep, ARCH.h, 2, 2), M.silk, { x: px, y: ARCH.h / 2, z: ARCH.z1, ry: Math.PI });
+      put(plane(deep, pw, 3, 3), M.plaster, { x: px, y: ARCH.h, z: (ARCH.z0 + ARCH.z1) / 2, rx: Math.PI / 2 });
+      put(plane(pw, ARCH.h, 2, 2), M.silk, { x: s * (HW + deep), y: ARCH.h / 2, z: (ARCH.z0 + ARCH.z1) / 2, ry: -s * Math.PI / 2 });
+    }
+  }
+  // Pilasters with their capitals and plinths.
+  for (const z of PILASTERS) {
+    put(box(0.35, WALL, 0.9, 0.9, WALL), M.stone, { x: s * (HW - 0.175), y: WALL / 2, z, cast: true });
+    put(box(0.5, 0.36, 1.12, 0.5, 0.36), M.plain, { x: s * (HW - 0.25), y: WALL - 0.18, z, cast: true });
+    put(box(0.5, 0.34, 1.1, 0.5, 0.34), M.plain, { x: s * (HW - 0.25), y: 0.17, z });
+  }
+  // The cornice, the clerestory wall above it and its high windows.
+  put(box(0.5, 0.7, LEN, 2, 0.7), M.cornice, { x: s * (HW - 0.25), y: WALL + 0.35, z: LEN / 2, cast: true });
+  put(plane(LEN, CEIL - WALL - 0.7, 2, 2), M.plaster, { x: s * HW, y: (WALL + 0.7 + CEIL) / 2, z: LEN / 2, ry });
+  for (const z of BAYS) {
+    put(box(0.12, 2.9, 0.16, 0.12, 2.9), M.plain, { x: s * (HW - 0.06), y: 10.1, z: z - 1.68 });
+    put(box(0.12, 2.9, 0.16, 0.12, 2.9), M.plain, { x: s * (HW - 0.06), y: 10.1, z: z + 1.68 });
+    put(box(0.12, 0.16, 3.52, 3.5, 0.16), M.plain, { x: s * (HW - 0.06), y: 8.7, z });
+    put(box(0.12, 0.16, 3.52, 3.5, 0.16), M.plain, { x: s * (HW - 0.06), y: 11.5, z });
+  }
+}
+// At the end of each passage, the faint glow of a doorway: rooms to come.
+for (const s of [-1, 1]) {
+  const door = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 2.6), new THREE.MeshBasicMaterial({ color: 0x7a4f26 }));
+  door.position.set(s * (HW + 8.98), 1.3, (ARCH.z0 + ARCH.z1) / 2);
+  door.rotation.y = -s * Math.PI / 2;
+  scene.add(door);
+  const spill = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 2.2), new THREE.MeshBasicMaterial({ map: GLOW, color: 0x9a5c28, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+  spill.rotation.x = -Math.PI / 2;
+  spill.position.set(s * (HW + 8.2), 0.01, (ARCH.z0 + ARCH.z1) / 2);
+  scene.add(spill);
+}
+// The windows themselves give light rather than take it.
+const windowMat = new THREE.MeshBasicMaterial({ map: T.window, color: 0x8f9bd0 });
+for (const s of [-1, 1]) for (const z of BAYS) {
+  const w = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 2.66), windowMat);
+  w.position.set(s * (HW - 0.012), 10.1, z);
+  w.rotation.y = -s * Math.PI / 2;
+  scene.add(w);
+}
+
+// The end walls: the great doors at the near end, the far wall for the
+// Osprey.
+put(plane(2 * HW, 1.2, 2, 1.25), M.wood, { x: 0, y: 0.6, z: 0 });
+put(plane(2 * HW, WALL - 1.2, 2, 2), M.silk, { x: 0, y: (WALL + 1.2) / 2, z: 0 });
+put(plane(2 * HW, CEIL - WALL, 2, 2), M.plaster, { x: 0, y: (WALL + CEIL) / 2, z: 0 });
+put(plane(2 * HW, 1.2, 2, 1.25), M.wood, { x: 0, y: 0.6, z: LEN, ry: Math.PI });
+put(plane(2 * HW, WALL - 1.2, 2, 2), M.silk, { x: 0, y: (WALL + 1.2) / 2, z: LEN, ry: Math.PI });
+put(plane(2 * HW, CEIL - WALL, 2, 2), M.plaster, { x: 0, y: (WALL + CEIL) / 2, z: LEN, ry: Math.PI });
+for (const z of [0, LEN]) {
+  const d = z ? -1 : 1;
+  put(box(2 * HW, 0.7, 0.5, 2, 0.7), M.cornice, { x: 0, y: WALL + 0.35, z: z + d * 0.25, cast: true });
+  put(box(2 * HW, 0.08, 0.06, 1, 1), M.darkwood, { x: 0, y: 1.22, z: z + d * 0.03 });
+  for (const x of [-HW + 0.6, HW - 0.6]) {
+    put(box(0.9, WALL, 0.35, 0.9, WALL), M.stone, { x, y: WALL / 2, z: z + d * 0.175, cast: true });
+    put(box(1.12, 0.36, 0.5, 0.36, 0.36), M.plain, { x, y: WALL - 0.18, z: z + d * 0.25 });
+    put(box(1.1, 0.34, 0.5, 0.34, 0.34), M.plain, { x, y: 0.17, z: z + d * 0.25 });
+  }
+}
+// The doors: tall walnut leaves in a stone surround, an exit sign over them.
+{
+  put(box(3.9, 6.3, 0.2, 1, 1), M.plain, { x: 0, y: 3.15, z: 0.08 });
+  for (const sx of [-1, 1]) {
+    const leaf = box(1.72, 5.9, 0.12, 1.72, 1.25);
+    put(leaf, M.wood, { x: sx * 0.88, y: 2.95, z: 0.2 });
+    put(box(0.05, 0.5, 0.06), M.brass, { x: sx * 0.12, y: 1.1, z: 0.29 });
+  }
+}
+const exitSign = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.32, 0.08), new THREE.MeshBasicMaterial({
+  map: pixelTex(30, 10, (g) => {
+    g.fillStyle = "#0d5a2a";
+    g.fillRect(0, 0, 30, 10);
+    g.fillStyle = "#b8ffcc";
+    g.font = "bold 8px monospace";
+    g.textBaseline = "middle";
+    g.fillText("EXIT", 6, 5.5);
+  }, { repeat: false }),
+}));
+exitSign.position.set(0, 6.75, 0.12);
+scene.add(exitSign);
+
+// Floor: marble over a mirror, so the hall shows faintly in it.
+const floorMat = new THREE.MeshStandardMaterial({ map: T.floor, roughness: 0.32, transparent: true, opacity: 0.86 });
+const floorGeo = plane(2 * HW, LEN, 4, 4);
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.position.set(0, 0.004, LEN / 2);
+floor.receiveShadow = true;
+scene.add(floor);
+let mirror = null;
+function makeMirror() {
+  const k = Math.min(1, 1024 / Math.max(innerWidth, innerHeight));
+  mirror = new Reflector(new THREE.PlaneGeometry(2 * HW, LEN), {
+    textureWidth: Math.round(innerWidth * k * 0.75),
+    textureHeight: Math.round(innerHeight * k * 0.75),
+    color: 0x8a8a8a,
+  });
+  mirror.rotation.x = -Math.PI / 2;
+  mirror.position.set(0, 0, LEN / 2);
+  scene.add(mirror);
+}
+makeMirror();
+
+// Ceiling: coffered either side of a long skylight crossed by beams.
+const SKY = 2.2; // half width of the skylight
+for (const s of [-1, 1]) {
+  put(box(HW - SKY, 0.4, LEN, 3, 3), M.coffer, { x: s * (HW + SKY) / 2, y: CEIL + 0.2, z: LEN / 2, cast: true });
+  put(box(0.35, 0.7, LEN, 1, 1), M.darkwood, { x: s * (SKY + 0.17), y: CEIL - 0.05, z: LEN / 2, cast: true });
+}
+for (let z = 0; z <= LEN; z += 3) put(box(2 * SKY, 0.45, 0.3, 1, 1), M.darkwood, { x: 0, y: CEIL + 0.1, z, cast: true });
+for (const s of [-1, 1]) put(box(0.12, 0.3, LEN, 1, 1), M.darkwood, { x: s * 0.75, y: CEIL + 0.25, z: LEN / 2, cast: true });
+{
+  const sky = new THREE.Mesh(plane(2 * SKY + 0.4, LEN, 4.4, 4.4), new THREE.MeshBasicMaterial({ map: T.sky, fog: false }));
+  sky.rotation.x = Math.PI / 2;
+  sky.position.set(0, CEIL + 1.6, LEN / 2);
+  scene.add(sky);
+  const moon = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), new THREE.MeshBasicMaterial({ map: T.moon, transparent: true, alphaTest: 0.5, fog: false }));
+  moon.rotation.x = Math.PI / 2;
+  moon.position.set(1.1, CEIL + 1.55, 31);
+  scene.add(moon);
+}
+
+// Benches down the middle, a guard's desk by the doors.
+for (const z of [15.5, 32.5]) {
+  put(box(0.7, 0.14, 3.2, 0.7, 0.8), M.leather, { x: 0, y: 0.5, z, cast: true });
+  put(box(0.74, 0.06, 3.24, 1, 1), M.darkwood, { x: 0, y: 0.41, z, cast: true });
+  for (const dx of [-0.28, 0.28]) for (const dz of [-1.45, 1.45]) put(box(0.06, 0.38, 0.06, 1, 1), M.brass, { x: dx, y: 0.19, z: z + dz, cast: true });
+}
+const DESK = { x: 5.3, z: 4.6 };
+put(box(1.7, 0.08, 0.85, 1, 1), M.wood, { x: DESK.x, y: 0.78, z: DESK.z, cast: true });
+put(box(1.62, 0.7, 0.06, 1.6, 0.7), M.wood, { x: DESK.x, y: 0.4, z: DESK.z + 0.38, cast: true });
+for (const dx of [-0.8, 0.8]) put(box(0.08, 0.74, 0.8, 1, 1), M.darkwood, { x: DESK.x + dx, y: 0.37, z: DESK.z, cast: true });
+put(box(0.34, 0.03, 0.26, 1, 1), M.plain, { x: DESK.x + 0.3, y: 0.835, z: DESK.z - 0.05 }); // the night log
+put(box(0.5, 0.06, 0.5, 1, 1), M.leather, { x: DESK.x, y: 0.48, z: DESK.z - 0.75, cast: true }); // chair
+put(box(0.5, 0.6, 0.06, 1, 1), M.leather, { x: DESK.x, y: 0.8, z: DESK.z - 1.0, cast: true });
+// The banker's lamp on it.
+put(box(0.04, 0.32, 0.04), M.brass, { x: DESK.x - 0.45, y: 0.98, z: DESK.z + 0.1 });
+const shadeMat = new THREE.MeshStandardMaterial({ color: 0x0f4a26, emissive: 0x1f7a3e, emissiveIntensity: 0.6, roughness: 0.3 });
+const lampShade = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.16, 0.12, 12, 1, true, 0, Math.PI * 2), shadeMat);
+lampShade.position.set(DESK.x - 0.45, 1.16, DESK.z + 0.1);
+scene.add(lampShade);
+const deskLight = new THREE.PointLight(0xffd7a0, 7, 6, 1.5);
+deskLight.position.set(DESK.x - 0.45, 1.05, DESK.z + 0.05);
+scene.add(deskLight);
+
+// Velvet ropes on brass posts: across each archway and before the Osprey.
+const blockers = [];
+function rope(a, b) {
+  for (const p of [a, b]) {
+    put(new THREE.CylinderGeometry(0.035, 0.035, 0.95, 10), M.brass, { x: p.x, y: 0.5, z: p.z, cast: true });
+    put(new THREE.CylinderGeometry(0.16, 0.18, 0.05, 14), M.brass, { x: p.x, y: 0.025, z: p.z });
+    put(new THREE.SphereGeometry(0.06, 10, 8), M.brass, { x: p.x, y: 1.0, z: p.z });
+  }
+  const mid = new THREE.Vector3((a.x + b.x) / 2, 0.68, (a.z + b.z) / 2);
+  const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(a.x, 0.92, a.z), mid, new THREE.Vector3(b.x, 0.92, b.z));
+  put(new THREE.TubeGeometry(curve, 16, 0.025, 6, false), M.velvet, { cast: true });
+  blockers.push({ x0: Math.min(a.x, b.x) - 0.1, x1: Math.max(a.x, b.x) + 0.1, z0: Math.min(a.z, b.z) - 0.1, z1: Math.max(a.z, b.z) + 0.1 });
+}
+for (const s of [-1, 1]) rope({ x: s * 7.55, z: ARCH.z0 - 0.15 }, { x: s * 7.55, z: ARCH.z1 + 0.15 });
+rope({ x: -2.6, z: 45.4 }, { x: 2.6, z: 45.4 });
+
+// What you bump into.
+for (const s of [-1, 1]) for (const z of PILASTERS) blockers.push({ x0: s > 0 ? HW - 0.55 : -HW, x1: s > 0 ? HW : -HW + 0.55, z0: z - 0.6, z1: z + 0.6 });
+for (const z of [15.5, 32.5]) blockers.push({ x0: -0.4, x1: 0.4, z0: z - 1.65, z1: z + 1.65 });
+blockers.push({ x0: DESK.x - 0.9, x1: DESK.x + 0.9, z0: DESK.z - 1.1, z1: DESK.z + 0.45 });
+for (const x of [-HW + 0.6, HW - 0.6]) for (const z of [0, LEN]) blockers.push({ x0: x - 0.5, x1: x + 0.5, z0: z - 0.4, z1: z + 0.4 });
+
+// ---------- The photographs ----------
+const all = (typeof PHOTOS !== "undefined" ? PHOTOS : []).map((P) => ({ ...P, stem: P.file.split("/").pop().replace(/\.jpg$/i, "") }));
+const hero = all.find((P) => P.stem === "4") ?? all[0];
+// Twelve for the long walls, taking the categories in turn so the hall
+// has a mix. Night skies sit out: on a dark wall at night they read as
+// blank.
+const byCat = new Map();
+for (const P of all) if (P !== hero && P.category !== "Night Sky") (byCat.get(P.category) ?? byCat.set(P.category, []).get(P.category)).push(P);
+const hung = [];
+const cats = [...byCat.keys()];
+for (let i = 0; hung.length < 12 && i < 40; i++) {
+  const list = byCat.get(cats[i % cats.length]);
+  if (list?.length) hung.push(list.shift());
+}
+const loader = new THREE.TextureLoader();
+const photoMeshes = [];
+const washMat = new THREE.MeshBasicMaterial({ map: WASH, color: 0xffb86e, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
+const poolMat = new THREE.MeshBasicMaterial({ map: GLOW, color: 0xff9d52, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false });
+const month = (d) => (d ? new Date(d).toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "");
+function plaqueTex(P) {
+  return pixelTex(64, 40, (g) => {
+    g.fillStyle = "#d8ceb6";
+    g.fillRect(0, 0, 64, 40);
+    g.fillStyle = "#2a2118";
+    g.font = "bold 8px Georgia, serif";
+    g.textBaseline = "top";
+    const words = (P.title ?? "").split(" ");
+    let line = "";
+    let y = 5;
+    for (const w of words) {
+      if (g.measureText(line + w).width > 56 && line) { g.fillText(line.trim(), 4, y); y += 9; line = ""; }
+      line += w + " ";
+    }
+    g.fillText(line.trim(), 4, y);
+    g.fillStyle = "#6d5f4a";
+    g.font = "7px Georgia, serif";
+    g.fillText(P.category ?? "", 4, 30);
+  }, { repeat: false });
+}
+// Hang one: (x, z) is the wall's surface, n the way it faces, w and h the
+// most room it may take.
+function hang(P, x, z, n, maxW, maxH, cy) {
+  const aspect = (P.width ?? 3) / (P.height ?? 2);
+  let w = maxW;
+  let h = w / aspect;
+  if (h > maxH) { h = maxH; w = h * aspect; }
+  const group = new THREE.Group();
+  group.position.set(x, cy, z);
+  group.rotation.y = Math.atan2(n.x, n.z);
+  const border = Math.max(0.12, w * 0.05);
+  const frame = new THREE.Mesh(box(w + border * 2, h + border * 2, 0.1, 0.5, 0.5), M.gold);
+  frame.position.z = 0.05;
+  frame.castShadow = true;
+  const pic = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: 0x222222, toneMapped: false, fog: false }));
+  pic.position.z = 0.102;
+  loader.load(`${ROOT}photos/thumbs/${P.stem}-1200.jpg`, (t) => {
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = Math.min(8, maxAniso);
+    pic.material.map = t;
+    pic.material.color.set(0xffffff);
+    pic.material.needsUpdate = true;
+  });
+  pic.userData.photo = P;
+  photoMeshes.push(pic);
+  // The picture light: a brass bar on an arm, and the warm wash it throws.
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(Math.min(1.2, w * 0.45), 0.07, 0.09), M.brass);
+  bar.position.set(0, h / 2 + border + 0.28, 0.42);
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.4), M.brass);
+  arm.position.set(0, h / 2 + border + 0.28, 0.21);
+  const lit = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(1.1, w * 0.4), 0.05), new THREE.MeshBasicMaterial({ color: 0xffe2b0 }));
+  lit.position.set(0, h / 2 + border + 0.243, 0.42);
+  lit.rotation.x = Math.PI / 2;
+  const wash = new THREE.Mesh(new THREE.PlaneGeometry(w * 1.9 + 1, h * 1.9 + 1.4), washMat);
+  wash.position.set(0, 0.25, 0.015);
+  const pool = new THREE.Mesh(new THREE.PlaneGeometry(w + 2, 2.2), poolMat);
+  pool.rotation.x = -Math.PI / 2;
+  pool.position.set(0, -cy + 0.01, 1.3);
+  group.add(frame, pic, bar, arm, lit, wash, pool);
+  // Its label.
+  const plaque = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.25), new THREE.MeshStandardMaterial({ map: plaqueTex(P), roughness: 0.7 }));
+  plaque.position.set(w / 2 + border + 0.45, 1.55 - cy, 0.012);
+  group.add(plaque);
+  scene.add(group);
+}
+hung.forEach((P, i) => {
+  const s = i % 2 ? 1 : -1;
+  const z = BAYS.filter((b) => b !== 24)[Math.floor(i / 2)];
+  hang(P, s * HW, z, { x: -s, z: 0 }, 2.7, 2.3, 3.6);
+});
+if (hero) hang(hero, 0, LEN, { x: 0, z: -1 }, 5.2, 4.4, 4.0);
+
+// Potted palms, drawn flat and always turned to face you, the way the old
+// games did their furniture.
+const palmTex = pixelTex(32, 48, (g) => {
+  const r = rng(131);
+  // Fronds: arcs out from the top of the stem.
+  const leaf = (ang, len) => {
+    let x = 16;
+    let y = 22;
+    for (let k = 0; k < len; k++) {
+      x += Math.cos(ang) * 1;
+      y += Math.sin(ang) * 1 + k * 0.035;
+      g.fillStyle = k % 3 === 0 ? "#1f3d1c" : "#2f5a28";
+      g.fillRect(x | 0, y | 0, 1, 1);
+      if (k > 2 && k % 2 === 0) {
+        g.fillStyle = "#3d7031";
+        g.fillRect((x + Math.sin(ang) * 1.5) | 0, (y - Math.cos(ang) * 1.5 + 1) | 0, 1, 2);
+        g.fillRect((x - Math.sin(ang) * 1.5) | 0, (y + Math.cos(ang) * 1.5) | 0, 1, 2);
+      }
+    }
+  };
+  g.fillStyle = "#4a3320";
+  g.fillRect(15, 20, 2, 16);
+  for (let i = 0; i < 9; i++) leaf(-Math.PI / 2 + (i - 4) * 0.36 + (r() - 0.5) * 0.1, 11 + r() * 5);
+  // The pot.
+  for (let y = 34; y < 48; y++) {
+    const half = 7 - (y - 34) * 0.2;
+    g.fillStyle = y === 34 ? "#a2552f" : y % 5 === 0 ? "#6f3518" : "#8c4422";
+    g.fillRect((16 - half) | 0, y, (half * 2) | 0, 1);
+  }
+}, { repeat: false });
+const palmMat = new THREE.SpriteMaterial({ map: palmTex, color: 0x8f8f8f, alphaTest: 0.5 });
+for (const [x, z] of [[-6.4, 2.2], [6.4, 1.6], [-5.8, 46.4], [5.8, 46.4], [-6.9, 18], [6.9, 30]]) {
+  const p = new THREE.Sprite(palmMat);
+  p.center.set(0.5, 0);
+  p.scale.set(1.5, 2.25, 1);
+  p.position.set(x, 0, z);
+  scene.add(p);
+  blockers.push({ x0: x - 0.35, x1: x + 0.35, z0: z - 0.35, z1: z + 0.35 });
+}
+
+// Pendant globes on long chains: they set the scale more than anything.
+const chainMat = new THREE.MeshStandardMaterial({ color: 0x2a2418, roughness: 0.5, metalness: 0.7 });
+const globeMat = new THREE.MeshStandardMaterial({ color: 0xffe9c4, emissive: 0xffb466, emissiveIntensity: 0.55, roughness: 0.4 });
+for (const z of [10.5, 24, 37.5]) {
+  for (const s of [-1, 1]) {
+    const x = s * 4.6;
+    put(new THREE.CylinderGeometry(0.012, 0.012, CEIL - 7.2, 4), chainMat, { x, y: (CEIL + 7.2) / 2, z });
+    const globe = new THREE.Mesh(new THREE.SphereGeometry(0.32, 16, 12), globeMat);
+    globe.position.set(x, 7, z);
+    scene.add(globe);
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: 0xffb466, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }));
+    halo.position.copy(globe.position);
+    halo.scale.setScalar(2.4);
+    scene.add(halo);
+  }
+}
+flush();
+
+// ---------- Light ----------
+scene.add(new THREE.HemisphereLight(0x3a4870, 0x150f0c, 0.75));
+// Moonlight through the skylight, the beams striping the floor.
+const MOON_DIR = new THREE.Vector3(-12, -52, -2).normalize();
+const moonLight = new THREE.DirectionalLight(0xa8bbff, 2.1);
+moonLight.position.set(0, 0, LEN / 2).addScaledVector(MOON_DIR, -60);
+moonLight.target.position.set(0, 0, LEN / 2);
+moonLight.castShadow = true;
+moonLight.shadow.mapSize.set(TOUCH ? 1024 : 2048, TOUCH ? 1024 : 2048);
+Object.assign(moonLight.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 140 });
+moonLight.shadow.bias = -0.0004;
+moonLight.shadow.normalBias = 0.04;
+scene.add(moonLight, moonLight.target);
+// A few warm lights for the picture-lit walls, and the Osprey's spot.
+for (const [x, z] of [[-6.6, 12], [6.6, 12], [-6.6, 36], [6.6, 36]]) {
+  const l = new THREE.PointLight(0xffaa62, 16, 13, 1.4);
+  l.position.set(x, 6.4, z);
+  scene.add(l);
+}
+const heroSpot = new THREE.SpotLight(0xffc98c, 140, 24, 0.33, 0.55, 1.3);
+heroSpot.position.set(0, CEIL - 0.6, LEN - 8);
+heroSpot.target.position.set(0, 4, LEN);
+scene.add(heroSpot, heroSpot.target);
+
+// Shafts of moonlight hanging in the air, and dust drifting through them.
+const shaftTex = (() => {
+  const c = document.createElement("canvas");
+  c.width = 32;
+  c.height = 64;
+  const g = c.getContext("2d");
+  for (let y = 0; y < 64; y++) {
+    const a = Math.pow(1 - y / 64, 1.6);
+    for (let x = 0; x < 32; x++) {
+      const beam = x < 3 ? 0.15 : 1; // the beams' shadows, one every 3 m
+      g.fillStyle = `rgba(255,255,255,${(a * beam).toFixed(3)})`;
+      g.fillRect(x, y, 1, 1);
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = THREE.RepeatWrapping;
+  return t;
+})();
+const drop = CEIL / -MOON_DIR.y;
+const DX = MOON_DIR.x * drop;
+const DZ = MOON_DIR.z * drop;
+for (const x0 of [-1.5, -0.5, 0.5, 1.5]) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute([x0, CEIL, 0, x0, CEIL, LEN, x0 + DX, 0, DZ, x0 + DX, 0, LEN + DZ], 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, LEN / 3, 0, 0, 1, LEN / 3, 1], 2));
+  g.setIndex([0, 2, 1, 1, 2, 3]);
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: shaftTex, color: 0x8ea2e8, transparent: true, opacity: 0.075, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  scene.add(m);
+}
+const DUST = TOUCH ? 120 : 220;
+const dustPos = new Float32Array(DUST * 3);
+const dustSeed = new Float32Array(DUST);
+{
+  const r = rng(141);
+  for (let i = 0; i < DUST; i++) {
+    const t = r();
+    dustPos[i * 3] = (r() - 0.5) * 4 + DX * t;
+    dustPos[i * 3 + 1] = CEIL * (1 - t);
+    dustPos[i * 3 + 2] = r() * LEN + DZ * t;
+    dustSeed[i] = r() * 100;
+  }
+}
+const dustGeo = new THREE.BufferGeometry();
+dustGeo.setAttribute("position", new THREE.BufferAttribute(dustPos, 3));
+const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: 0xc8d4ff, size: 0.028, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false }));
+scene.add(dust);
+
+// ---------- Looks ----------
+// Sleek: full resolution, the floor mirrored. Retro: about 300 pixels
+// tall, no mirror. Between: half-way.
+const STYLES = {
+  sleek: { lines: 0, mirror: true },
+  retro: { lines: 300, mirror: false },
+  between: { lines: 560, mirror: true },
+};
+let style = "sleek";
+try { style = STYLES[localStorage.getItem("night-gallery-style")] ? localStorage.getItem("night-gallery-style") : "sleek"; } catch { /* private window */ }
+function applyStyle(name) {
+  style = name;
+  const S = STYLES[name];
+  const ratio = S.lines ? S.lines / innerHeight : Math.min(devicePixelRatio, 2);
+  renderer.setPixelRatio(ratio);
+  renderer.setSize(innerWidth, innerHeight);
+  canvas.classList.toggle("pixel", !!S.lines);
+  mirror.visible = S.mirror;
+  floorMat.opacity = S.mirror ? 0.86 : 1;
+  floorMat.transparent = S.mirror;
+  floorMat.needsUpdate = true;
+  for (const b of document.querySelectorAll("#styles button")) b.setAttribute("aria-pressed", String(b.dataset.style === name));
+  try { localStorage.setItem("night-gallery-style", name); } catch { /* fine */ }
+}
+for (const b of document.querySelectorAll("#styles button")) b.addEventListener("click", (e) => { e.stopPropagation(); applyStyle(b.dataset.style); });
+applyStyle(style);
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  applyStyle(style);
+  const k = Math.min(1, 1024 / Math.max(innerWidth, innerHeight));
+  mirror.getRenderTarget().setSize(Math.round(innerWidth * k * 0.75), Math.round(innerHeight * k * 0.75));
+});
+
+// ---------- Sound ----------
+// A big room's hush, footsteps that carry, and now and then the building
+// settling.
+let audio = null;
+function startAudio() {
+  if (audio) return audio.ctx.resume();
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const master = ctx.createGain();
+  master.gain.value = 0.9;
+  master.connect(ctx.destination);
+  const noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+  noise.getChannelData(0).forEach((_, i, d) => (d[i] = Math.random() * 2 - 1));
+  const hall = ctx.createConvolver();
+  const len = ctx.sampleRate * 3.2;
+  const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let c = 0; c < 2; c++) {
+    const d = ir.getChannelData(c);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6) * (i < 600 ? i / 600 : 1);
+  }
+  hall.buffer = ir;
+  const wet = ctx.createGain();
+  wet.gain.value = 0.7;
+  hall.connect(wet).connect(master);
+  const hush = ctx.createBufferSource();
+  hush.buffer = noise;
+  hush.loop = true;
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 260;
+  const hg = ctx.createGain();
+  hg.gain.value = 0.05;
+  hush.connect(lp).connect(hg).connect(master);
+  hush.start();
+  audio = { ctx, master, noise, hall };
+  // The building settling: a low creak, once in a while.
+  const creak = () => {
+    if (ctx.state === "running") {
+      const t = ctx.currentTime;
+      const src = ctx.createBufferSource();
+      src.buffer = noise;
+      const f = ctx.createBiquadFilter();
+      f.type = "bandpass";
+      f.Q.value = 9;
+      f.frequency.setValueAtTime(180 + Math.random() * 120, t);
+      f.frequency.linearRampToValueAtTime(120 + Math.random() * 60, t + 1.4);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.18, t + 0.3);
+      g.gain.linearRampToValueAtTime(0, t + 1.5);
+      src.connect(f).connect(g);
+      g.connect(hall);
+      src.start(t, Math.random(), 1.6);
+    }
+    setTimeout(creak, 18000 + Math.random() * 26000);
+  };
+  setTimeout(creak, 9000);
+  return ctx.resume();
+}
+function footstep(run) {
+  if (!audio || audio.ctx.state !== "running") return;
+  const { ctx, noise, master, hall } = audio;
+  const t = ctx.currentTime;
+  const src = ctx.createBufferSource();
+  src.buffer = noise;
+  const f = ctx.createBiquadFilter();
+  f.type = "bandpass";
+  f.frequency.value = 1500 + Math.random() * 500;
+  f.Q.value = 1.4;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(run ? 0.16 : 0.11, t + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0005, t + 0.09);
+  src.connect(f).connect(g);
+  g.connect(master);
+  g.connect(hall);
+  src.start(t, Math.random() * 1.5, 0.12);
+}
+
+// ---------- You ----------
+const me = { x: 0, z: 2.6, yaw: Math.PI, pitch: 0.04, stride: 0, vx: 0, vz: 0 };
+const R = 0.3;
+let running = false;
+let locked = false;
+const keys = new Set();
+const stick = { x: 0, y: 0 };
+function collide() {
+  me.x = THREE.MathUtils.clamp(me.x, -HW + R + 0.05, HW - R - 0.05);
+  me.z = THREE.MathUtils.clamp(me.z, 0.35 + R, LEN - 0.3 - R);
+  for (const b of blockers) {
+    const cx = THREE.MathUtils.clamp(me.x, b.x0, b.x1);
+    const cz = THREE.MathUtils.clamp(me.z, b.z0, b.z1);
+    const dx = me.x - cx;
+    const dz = me.z - cz;
+    const d = Math.hypot(dx, dz);
+    if (d >= R) continue;
+    if (d > 1e-5) { me.x = cx + (dx / d) * R; me.z = cz + (dz / d) * R; }
+    else {
+      // Inside: out by the nearest side.
+      const opts = [[b.x0 - R - me.x, 0], [b.x1 + R - me.x, 0], [0, b.z0 - R - me.z], [0, b.z1 + R - me.z]];
+      opts.sort((p, q) => Math.hypot(...p) - Math.hypot(...q));
+      me.x += opts[0][0];
+      me.z += opts[0][1];
+    }
+  }
+}
+function walk(dt) {
+  let mx = (keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0) - (keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0) + stick.x;
+  let mz = (keys.has("KeyW") || keys.has("ArrowUp") ? 1 : 0) - (keys.has("KeyS") || keys.has("ArrowDown") ? 1 : 0) + stick.y;
+  const l = Math.hypot(mx, mz);
+  if (l > 1) { mx /= l; mz /= l; }
+  const run = keys.has("ShiftLeft") || keys.has("ShiftRight");
+  const speed = run ? 4.4 : 2.3;
+  const sin = Math.sin(me.yaw);
+  const cos = Math.cos(me.yaw);
+  const tx = (mx * cos - mz * sin) * speed;
+  const tz = (-mx * sin - mz * cos) * speed;
+  // Ease in and out rather than snapping to speed.
+  const k = 1 - Math.exp(-dt * 10);
+  me.vx += (tx - me.vx) * k;
+  me.vz += (tz - me.vz) * k;
+  const steps = Math.max(1, Math.ceil(Math.hypot(me.vx, me.vz) * dt / 0.1));
+  for (let i = 0; i < steps; i++) {
+    me.x += (me.vx * dt) / steps;
+    me.z += (me.vz * dt) / steps;
+    collide();
+  }
+  const moved = Math.hypot(me.vx, me.vz) * dt;
+  const before = Math.floor(me.stride / 0.85);
+  me.stride += moved;
+  if (Math.floor(me.stride / 0.85) !== before && moved > 0.001) footstep(run);
+}
+
+// ---------- Input ----------
+addEventListener("keydown", (e) => {
+  if (e.code === "Escape" && viewer.classList.contains("on")) return closeViewer();
+  if (!running) return;
+  if (viewer.classList.contains("on")) { if (e.code === "KeyF" || e.code === "Enter" || e.code === "Space") closeViewer(); return; }
+  keys.add(e.code);
+  if (e.code === "Digit1") applyStyle("sleek");
+  if (e.code === "Digit2") applyStyle("retro");
+  if (e.code === "Digit3") applyStyle("between");
+  if ((e.code === "KeyF" || e.code === "Enter") && focus) openViewer(focus);
+  if (e.code.startsWith("Arrow") || e.code === "Space") e.preventDefault();
+});
+addEventListener("keyup", (e) => keys.delete(e.code));
+addEventListener("blur", () => keys.clear());
+canvas.addEventListener("click", () => {
+  if (!running || TOUCH) return;
+  if (!locked) { try { canvas.requestPointerLock()?.catch?.(() => {}); } catch { /* drag instead */ } }
+  else if (focus) openViewer(focus);
+});
+document.addEventListener("pointerlockchange", () => {
+  locked = document.pointerLockElement === canvas;
+  $("dot").hidden = !locked && !TOUCH;
+});
+addEventListener("mousemove", (e) => {
+  if (!locked) return;
+  me.yaw -= e.movementX * 0.0022;
+  me.pitch = THREE.MathUtils.clamp(me.pitch - e.movementY * 0.0022, -1.3, 1.3);
+});
+// Touch, or a mouse that can't be captured: drag on the left to walk, on
+// the right to look. A quick tap on a photograph opens it.
+const drags = new Map();
+canvas.addEventListener("pointerdown", (e) => {
+  if (!running || locked) return;
+  const left = e.clientX < innerWidth * 0.42 && e.pointerType === "touch";
+  drags.set(e.pointerId, { left, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t: performance.now() });
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener("pointermove", (e) => {
+  const d = drags.get(e.pointerId);
+  if (!d) return;
+  if (d.left) {
+    const max = 60;
+    stick.x = THREE.MathUtils.clamp((e.clientX - d.x0) / max, -1, 1);
+    stick.y = THREE.MathUtils.clamp(-(e.clientY - d.y0) / max, -1, 1);
+  } else {
+    const k = e.pointerType === "touch" ? 0.005 : 0.0035;
+    me.yaw -= (e.clientX - d.x) * k;
+    me.pitch = THREE.MathUtils.clamp(me.pitch - (e.clientY - d.y) * k, -1.3, 1.3);
+  }
+  d.x = e.clientX;
+  d.y = e.clientY;
+});
+const endDrag = (e) => {
+  const d = drags.get(e.pointerId);
+  if (!d) return;
+  drags.delete(e.pointerId);
+  if (d.left) { stick.x = 0; stick.y = 0; }
+  const tap = Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 10 && performance.now() - d.t < 300;
+  if (tap && e.pointerType === "touch") {
+    const hit = pick(e.clientX, e.clientY);
+    if (hit) openViewer(hit);
+  }
+};
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+
+// ---------- Looking at a photograph ----------
+const ray = new THREE.Raycaster();
+ray.far = 11;
+const ndc = new THREE.Vector2();
+function pick(px, py) {
+  ndc.set((px / innerWidth) * 2 - 1, -(py / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(photoMeshes, false)[0];
+  return hit?.object.userData.photo ?? null;
+}
+let focus = null;
+const card = $("card");
+function showCard(P) {
+  if (P === focus) return;
+  focus = P;
+  card.classList.toggle("on", !!P);
+  if (!P) return;
+  card.querySelector("h2").textContent = P.title ?? "Untitled";
+  card.querySelector(".meta").textContent = ["Steven Guarino", P.category, month(P.dateTaken)].filter(Boolean).join(" · ");
+  card.querySelector(".exif").textContent = [P.aperture, P.shutter && `${P.shutter} s`, P.iso && `ISO ${P.iso}`].filter(Boolean).join(" · ");
+  card.querySelector(".how").textContent = TOUCH ? "Tap the photo to see it" : "Click or press F to see it";
+}
+const viewer = $("viewer");
+function openViewer(P) {
+  viewer.querySelector("img").src = `${ROOT}photos/thumbs/${P.stem}-1200.jpg`;
+  viewer.querySelector("img").alt = P.alt ?? P.title ?? "";
+  viewer.querySelector("p").textContent = P.title ?? "";
+  viewer.classList.add("on");
+  keys.clear();
+  if (locked) document.exitPointerLock();
+}
+function closeViewer() {
+  viewer.classList.remove("on");
+  if (!TOUCH) { try { canvas.requestPointerLock()?.catch?.(() => {}); } catch { /* fine */ } }
+}
+viewer.addEventListener("click", closeViewer);
+
+// ---------- Going in ----------
+$("hint").textContent = TOUCH ? "Drag on the left to walk · drag on the right to look · tap a photo" : "W A S D to walk · Shift to hurry · 1 2 3 change the look · F to view a photo";
+if (TOUCH) $("howto").textContent = "Drag on the left to walk, on the right to look";
+$("enter").addEventListener("click", () => {
+  $("intro").classList.add("gone");
+  running = true;
+  startAudio();
+  if (!TOUCH) { try { canvas.requestPointerLock()?.catch?.(() => {}); } catch { /* drag instead */ } }
+  setTimeout(() => ($("hint").style.opacity = "0"), 9000);
+  canvas.focus();
+});
+
+// ---------- Each frame ----------
+const clock = new THREE.Clock();
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  const t = clock.elapsedTime;
+  if (running && !viewer.classList.contains("on")) walk(dt);
+  const bob = Math.sin(me.stride * 7.4) * 0.018 * Math.min(1, Math.hypot(me.vx, me.vz) / 2.3);
+  camera.position.set(me.x, EYE + bob, me.z);
+  camera.rotation.set(me.pitch, me.yaw, 0);
+  // Dust drifting down the moonlight, and lifting again at the top.
+  const p = dustGeo.attributes.position.array;
+  for (let i = 0; i < DUST; i++) {
+    const s = dustSeed[i];
+    const fall = 0.004 * (0.5 + (s % 1));
+    p[i * 3] += Math.sin(t * 0.3 + s) * 0.0016 + (DX / CEIL) * fall;
+    p[i * 3 + 1] -= fall;
+    p[i * 3 + 2] += Math.cos(t * 0.23 + s) * 0.0016 + (DZ / CEIL) * fall;
+    if (p[i * 3 + 1] < 0.1) {
+      p[i * 3] -= DX;
+      p[i * 3 + 1] = CEIL;
+      p[i * 3 + 2] -= DZ;
+    }
+  }
+  dustGeo.attributes.position.needsUpdate = true;
+  // The globes and the desk lamp breathe a little.
+  globeMat.emissiveIntensity = 0.55 + Math.sin(t * 0.7) * 0.03;
+  if (running && !viewer.classList.contains("on")) showCard(pick(innerWidth / 2, innerHeight / 2));
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(frame);
+window.__gallery = { me, camera, renderer, applyStyle, frame, get focus() { return focus; }, hung, hero };
+</script>
+</body>
+</html>

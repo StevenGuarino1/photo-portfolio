@@ -66,7 +66,7 @@ function gate(t, side, k) {
 }
 
 // ---------- The roads between towns ----------
-const ROAD_HW = 5.5; // half the width of a country road
+const ROAD_HW = 9; // half the width of a country road: two lanes each way
 const roads = [];
 function makeRoad(name, a, b, via, seed) {
   const r = rng(seed);
@@ -79,18 +79,30 @@ function makeRoad(name, a, b, via, seed) {
     const len = Math.hypot(x1 - x0, z1 - z0);
     const nx = -(z1 - z0) / len;
     const nz = (x1 - x0) / len;
-    // A bend or two between each pair of waypoints.
-    for (const f of [0.33, 0.66]) {
-      const off = (r() - 0.5) * len * 0.28;
-      pts.push([x0 + (x1 - x0) * f + nx * off, z0 + (z1 - z0) * f + nz * off]);
-    }
+    // One long bend between each pair of waypoints.
+    const off = (r() < 0.5 ? -1 : 1) * (0.1 + r() * 0.12) * len;
+    pts.push([x0 + (x1 - x0) * 0.5 + nx * off, z0 + (z1 - z0) * 0.5 + nz * off]);
     pts.push([x1, z1]);
   }
   pts.push([b.x + b.dx * 70, b.z + b.dz * 70], [b.x + b.dx * RW, b.z + b.dz * RW]);
   const curve = new THREE.CatmullRomCurve3(pts.map(([x, z]) => new THREE.Vector3(x, 0, z)), false, "centripetal");
   const total = curve.getLength();
   const n = Math.round(total / 4);
-  const S = curve.getSpacedPoints(n).map((v, i) => ({ x: v.x, z: v.z, y: 0, s: i * (total / n) }));
+  const S = curve.getSpacedPoints(n).map((v, i) => ({ x: v.x, z: v.z, y: 0, s: 0 }));
+  // Ease every bend out into a long sweep you can take at speed, leaving
+  // the straight runs out of town as they are.
+  const K = 38;
+  for (let it = 0; it < 2500; it++) {
+    const xs = S.map((p) => p.x);
+    const zs = S.map((p) => p.z);
+    for (let i = 1; i < S.length - 1; i++) {
+      // Full strength in the middle, fading to nothing at the town gates.
+      const w = smooth(0, K, Math.min(i, S.length - 1 - i));
+      S[i].x += w * ((xs[i - 1] + 2 * xs[i] + xs[i + 1]) / 4 - xs[i]);
+      S[i].z += w * ((zs[i - 1] + 2 * zs[i] + zs[i + 1]) / 4 - zs[i]);
+    }
+  }
+  for (let i = 1; i < S.length; i++) S[i].s = S[i - 1].s + Math.hypot(S[i].x - S[i - 1].x, S[i].z - S[i - 1].z);
   // Heights: follow the land, smoothed, no steeper than about 1 in 12, and
   // level with the towns at either end.
   const ends = (i) => (i < 40 ? a.t.y : i > S.length - 41 ? b.t.y : null);
@@ -116,7 +128,13 @@ function makeRoad(name, a, b, via, seed) {
     S[i].dx = (q.x - p.x) / l;
     S[i].dz = (q.z - p.z) / l;
   }
-  const road = { name, S, a, b, length: total };
+  // The tightest bend, as a radius (for checking).
+  let minR = 1e9;
+  for (let i = 30; i < S.length - 30; i++) {
+    const t = Math.acos(clamp(S[i - 5].dx * S[i + 5].dx + S[i - 5].dz * S[i + 5].dz, -1, 1));
+    if (t > 1e-4) minR = Math.min(minR, (S[i + 5].s - S[i - 5].s) / t);
+  }
+  const road = { name, S, a, b, length: S[S.length - 1].s, minR };
   roads.push(road);
   return road;
 }

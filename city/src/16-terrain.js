@@ -1,14 +1,15 @@
 // ---------- Ground tiles, woods, sea ----------
 const CH = 200; // a tile's size
 const CV = CH / GSTEP; // cells along a tile
-const TERRAIN_R = TOUCH ? 1100 : 1500;
+const TERRAIN_R = TOUCH ? 1500 : 2600; // how far the ground is drawn
+const FINE_R = TOUCH ? 600 : 900; // full detail within this
 const TREE_R = TOUCH ? 520 : 760;
-scene.fog.near = 260;
-scene.fog.far = TERRAIN_R + 50;
+scene.fog.near = 450;
+scene.fog.far = TERRAIN_R + 150;
 
 // The sea.
 {
-  const water = new THREE.Mesh(new THREE.PlaneGeometry(20000, 20000), new THREE.MeshPhongMaterial({ color: 0x2b8db0, specular: 0xcfeeff, shininess: 70 }));
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(80000, 80000), new THREE.MeshPhongMaterial({ color: 0x2b8db0, specular: 0xcfeeff, shininess: 70 }));
   water.rotation.x = -Math.PI / 2;
   water.position.set(ISLE.cx, SEA, ISLE.cz);
   water.receiveShadow = true;
@@ -41,42 +42,64 @@ function groundColour(x, z, h, slope) {
   return _c;
 }
 const tiles = new Map();
-function buildTile(cx, cz) {
-  const n = CV + 1;
-  const pos = new Float32Array(n * n * 3);
-  const col = new Float32Array(n * n * 3);
-  const uv = new Float32Array(n * n * 2);
+// A tile of ground. Far off, every fourth point only (20 m apart), with a
+// skirt hanging down round the edge so no gaps show where a coarse tile
+// meets a fine one.
+function buildTile(cx, cz, lod = 1) {
+  const st = lod;
+  const m = CV / st;
+  const n = m + 1;
+  const pos = [];
+  const col = [];
+  const uv = [];
   let maxH = -99;
   for (let b = 0; b < n; b++) for (let a = 0; a < n; a++) {
-    const i = cx * CV + a;
-    const j = cz * CV + b;
+    const i = cx * CV + a * st;
+    const j = cz * CV + b * st;
     const h = gridH(i, j);
     maxH = Math.max(maxH, h);
-    const k = b * n + a;
-    pos.set([i * GSTEP, h, j * GSTEP], k * 3);
-    uv.set([(i * GSTEP) / 9, (j * GSTEP) / 9], k * 2);
-    const slope = Math.hypot(gridH(i + 1, j) - gridH(i - 1, j), gridH(i, j + 1) - gridH(i, j - 1)) / (2 * GSTEP);
+    pos.push(i * GSTEP, h, j * GSTEP);
+    uv.push((i * GSTEP) / 9, (j * GSTEP) / 9);
+    const slope = Math.hypot(gridH(i + st, j) - gridH(i - st, j), gridH(i, j + st) - gridH(i, j - st)) / (2 * GSTEP * st);
     const c = groundColour(i * GSTEP, j * GSTEP, h, slope);
-    col.set([c.r, c.g, c.b], k * 3);
+    col.push(c.r, c.g, c.b);
   }
-  if (maxH < -2) return { cx, cz, mesh: null, maxH };
+  if (maxH < -2) return { cx, cz, mesh: null, maxH, lod };
   const idx = [];
-  for (let b = 0; b < CV; b++) for (let a = 0; a < CV; a++) {
+  for (let b = 0; b < m; b++) for (let a = 0; a < m; a++) {
     const p = b * n + a;
-    // Split each cell the same way terrainH reads it.
     idx.push(p, p + n, p + 1, p + 1, p + n, p + n + 1);
   }
+  // The skirt.
+  const border = [];
+  for (let a = 0; a < n; a++) border.push(a);
+  for (let b = 1; b < n; b++) border.push(b * n + m);
+  for (let a = m - 1; a >= 0; a--) border.push(m * n + a);
+  for (let b = m - 1; b >= 0; b--) border.push(b * n);
+  const base = pos.length / 3;
+  border.forEach((k, q) => {
+    pos.push(pos[k * 3], pos[k * 3 + 1] - 14, pos[k * 3 + 2]);
+    uv.push(uv[k * 2], uv[k * 2 + 1]);
+    col.push(col[k * 3] * 0.8, col[k * 3 + 1] * 0.8, col[k * 3 + 2] * 0.8);
+    if (q) {
+      const a0 = border[q - 1];
+      const a1 = k;
+      const b0 = base + q - 1;
+      const b1 = base + q;
+      idx.push(a0, b0, a1, a1, b0, b1, a0, a1, b0, a1, b1, b0);
+    }
+  });
   const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-  g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-  g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
   g.setIndex(idx);
   g.computeVertexNormals();
   const mesh = new THREE.Mesh(g, groundMat);
-  mesh.receiveShadow = true;
+  mesh.receiveShadow = lod === 1;
   mesh.matrixAutoUpdate = false;
   scene.add(mesh);
-  return { cx, cz, mesh, maxH };
+  return { cx, cz, mesh, maxH, lod };
 }
 
 // ---------- Trees in the countryside ----------
@@ -160,7 +183,7 @@ function disposeGroup(g) {
   scene.remove(g);
   g.traverse((o) => { if (o.isInstancedMesh) o.dispose(); });
 }
-function streamLand(px, pz, budget = 2) {
+function streamLand(px, pz, budget = 2, limit = TERRAIN_R) {
   const want = [];
   const R1 = Math.ceil(TERRAIN_R / CH);
   const pcx = Math.floor(px / CH);
@@ -169,14 +192,20 @@ function streamLand(px, pz, budget = 2) {
     const cx = pcx + dx;
     const cz = pcz + dz;
     const d = Math.hypot((cx + 0.5) * CH - px, (cz + 0.5) * CH - pz);
-    if (d > TERRAIN_R + CH * 0.7) continue;
+    if (d > Math.min(limit, TERRAIN_R) + CH * 0.7) continue;
     const key = cx * 4096 + cz;
-    if (!tiles.has(key)) want.push([d, cx, cz, key, "tile"]);
+    const have = tiles.get(key);
+    const lod = d < FINE_R || (have && have.lod === 1 && d < FINE_R + 200) ? 1 : 4;
+    if (!have || have.lod !== lod) want.push([have ? d + 100 : d, cx, cz, key, "tile", lod]);
     else if (d < TREE_R && !treeTiles.has(key) && tiles.get(key).maxH > 1) want.push([d + 50, cx, cz, key, "trees"]);
   }
   want.sort((a, b) => a[0] - b[0]);
-  for (const [, cx, cz, key, what] of want.slice(0, budget)) {
-    if (what === "tile") tiles.set(key, buildTile(cx, cz));
+  for (const [, cx, cz, key, what, lod] of want.slice(0, budget)) {
+    if (what === "tile") {
+      const old = tiles.get(key);
+      if (old && old.mesh) { scene.remove(old.mesh); old.mesh.geometry.dispose(); }
+      tiles.set(key, buildTile(cx, cz, lod));
+    }
     else treeTiles.set(key, buildTrees(cx, cz));
   }
   // Let go of what's well behind.
@@ -195,12 +224,16 @@ function streamLand(px, pz, budget = 2) {
 // ---------- The country roads themselves ----------
 {
   const tex = canvasTex(64, 256, (g) => {
+    // 18 m across: two lanes each way, a double yellow down the middle,
+    // dashed lines between the lanes, solid white at the edges.
     noiseFill(g, 64, 256, 0x55585d, 0.14, 91, 2);
     g.fillStyle = "#eeeeea";
-    g.fillRect(3, 0, 2, 256);
-    g.fillRect(59, 0, 2, 256);
+    g.fillRect(2, 0, 1, 256);
+    g.fillRect(61, 0, 1, 256);
+    for (let y = 0; y < 256; y += 64) { g.fillRect(16, y, 1, 26); g.fillRect(47, y, 1, 26); }
     g.fillStyle = "#f1c232";
-    for (let y = 0; y < 256; y += 64) g.fillRect(31, y, 2, 30);
+    g.fillRect(30, 0, 1, 256);
+    g.fillRect(33, 0, 1, 256);
   });
   const mat = new THREE.MeshLambertMaterial({ map: tex, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   for (const road of roads) {
@@ -212,7 +245,7 @@ function streamLand(px, pz, budget = 2) {
       const rx = -p.dz;
       const rz = p.dx;
       pos.push(p.x - rx * ROAD_HW, p.y + 0.03, p.z - rz * ROAD_HW, p.x + rx * ROAD_HW, p.y + 0.03, p.z + rz * ROAD_HW);
-      uv.push(0, p.s / 16, 1, p.s / 16);
+      uv.push(0, p.s / 24, 1, p.s / 24);
       if (i) { const a = (i - 1) * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
     });
     const g = new THREE.BufferGeometry();
@@ -287,4 +320,64 @@ const turbines = [];
 }
 function updateLandmarks(dt) {
   for (const t of turbines) t.rotor.rotation.z += t.speed * dt;
+}
+
+// ---------- The mountain ----------
+// A great snow-capped peak on its own island out to the north-west, about
+// eight kilometres off and two and a half high: on the skyline from almost
+// anywhere. Drawn past the fog, with the haze of distance painted into its
+// colours instead.
+const MOUNT = { x: -5600, z: 7600, h: 2600, r: 6200 };
+{
+  const RINGS = 70;
+  const SEGS = 160;
+  const pos = [];
+  const col = [];
+  const idx = [];
+  const haze = new THREE.Color(0xc4d8ec);
+  const snow = new THREE.Color(0xf4f7fb);
+  const rock = new THREE.Color(0x5d6676);
+  const forest = new THREE.Color(0x3f5f4a);
+  const c = new THREE.Color();
+  const heightAt = (r, a) => {
+    const t = r / MOUNT.r;
+    // A broad cone, steeper near the top, with ridges running down it and a
+    // shoulder off to one side.
+    const ridges = 1 + 0.12 * Math.sin(a * 7 + Math.sin(a * 3) * 2) * t + (fbm(Math.cos(a) * 6 * t + 3, Math.sin(a) * 6 * t, 4) - 0.5) * 0.35 * t;
+    const cone = Math.pow(Math.max(0, 1 - t * ridges), 1.7);
+    const shoulder = 0.28 * Math.exp(-Math.pow((a - 2.2) / 0.5, 2)) * Math.exp(-Math.pow((t - 0.45) / 0.18, 2));
+    return MOUNT.h * (cone + shoulder) - 60;
+  };
+  pos.push(MOUNT.x, heightAt(0, 0), MOUNT.z);
+  col.push(snow.r, snow.g, snow.b);
+  for (let k = 1; k <= RINGS; k++) {
+    const r = Math.pow(k / RINGS, 1.35) * MOUNT.r;
+    for (let s = 0; s < SEGS; s++) {
+      const a = (s / SEGS) * Math.PI * 2;
+      const h = heightAt(r, a);
+      pos.push(MOUNT.x + Math.cos(a) * r, h, MOUNT.z + Math.sin(a) * r);
+      const snowLine = 1300 + Math.sin(a * 5) * 150 + (fbm(a * 4, k * 0.3, 2) - 0.5) * 300;
+      if (h > snowLine) c.copy(snow);
+      else if (h > 500) c.copy(rock).lerp(snow, smooth(snowLine - 250, snowLine, h) * 0.6);
+      else c.copy(forest).lerp(rock, smooth(150, 500, h));
+      c.lerp(haze, 0.42);
+      col.push(c.r, c.g, c.b);
+    }
+  }
+  for (let s = 0; s < SEGS; s++) idx.push(0, 1 + ((s + 1) % SEGS), 1 + s);
+  for (let k = 1; k < RINGS; k++) for (let s = 0; s < SEGS; s++) {
+    const a = 1 + (k - 1) * SEGS + s;
+    const b = 1 + (k - 1) * SEGS + ((s + 1) % SEGS);
+    const a2 = a + SEGS;
+    const b2 = b + SEGS;
+    idx.push(a, b, a2, b, b2, a2);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, fog: false, flatShading: true }));
+  mesh.renderOrder = -1;
+  scene.add(mesh);
 }

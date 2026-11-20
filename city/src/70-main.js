@@ -289,7 +289,7 @@ function step(dt) {
   const pz = state.mode === "drive" ? car.z : me.z;
   if (townAt(px, pz, 300)) { for (const p of peds) p.g.visible = true; updatePeds(dt, px, pz); }
   else for (const p of peds) p.g.visible = false;
-  streamLand(px, pz, state.started ? 2 : 6);
+  streamLand(px, pz, state.started ? 3 : 6);
   updateLights(state.time);
   updateLandmarks(dt);
   skidT -= dt;
@@ -388,7 +388,8 @@ function frame() {
   btn.textContent = "Building the island…";
   let ticks = 0;
   const pre = () => {
-    const left = streamLand(START.x, START.z, 10);
+    // Just the near ground first; the rest fills in once you're driving.
+    const left = streamLand(START.x, START.z, 10, 1000);
     if (left > 0 && ticks++ < 400) { requestAnimationFrame(pre); return; }
     state.ready = true;
     btn.disabled = false;

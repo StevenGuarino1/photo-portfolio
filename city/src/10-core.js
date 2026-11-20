@@ -32,7 +32,7 @@ const scene = new THREE.Scene();
 const HAZE = new THREE.Color(0xcfe3f5);
 scene.background = HAZE.clone();
 scene.fog = new THREE.Fog(HAZE, 220, 760);
-const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 2500);
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.25, 40000);
 camera.rotation.order = "YXZ";
 
 // ---------- Sun and sky ----------

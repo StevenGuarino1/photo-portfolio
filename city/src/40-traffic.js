@@ -6,7 +6,7 @@
 // you are moved to roads nearer you.
 const TRAFFIC = TOUCH ? 24 : 36;
 const PARKED = 80;
-const HW_LANE = 2.4; // a country road lane's middle, from the road's middle
+const HW_LANE = 6.75; // the slow (outer) lane's middle, from the road's middle; the inner lane is for passing
 const rightOf = (dx, dz) => [-dz, dx];
 
 // ---------- Town driving ----------
@@ -195,7 +195,9 @@ function driveRoad(c, dt) {
   const p = S[ai.i];
   const f = S[clamp(ai.i + ai.dir * 15, 0, S.length - 1)];
   const turn = Math.acos(clamp(p.dx * f.dx + p.dz * f.dz, -1, 1));
-  speedTo(c, ai.cruise * (1 - Math.min(0.45, turn * 0.6)), dt);
+  // No faster than the tyres can hold round the bend ahead.
+  const radius = 60 / Math.max(turn, 1e-3);
+  speedTo(c, Math.min(ai.cruise, Math.sqrt(c.T.grip * 0.7 * radius)), dt);
 }
 // After a knock: back to the nearest lane and carry on.
 function rejoin(c) {

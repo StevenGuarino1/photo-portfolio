@@ -461,7 +461,7 @@ function baseH(x, z) {
 // ---------- Towns ----------
 const TOWNS = [
   { name: "Verdant Bay", ox: 0, oz: 0, n: 10, y: 3, style: "city", downtown: [6.5, 6.5], parks: ["3,3", "3,4", "4,3", "4,4", "8,1", "1,7"] },
-  { name: "Saltmarsh", ox: -600, oz: -2950, n: 4, y: 2.5, style: "harbor", downtown: [2, 2], parks: ["0,3"] },
+  { name: "Saltmarsh", ox: -600, oz: -2950, n: 4, y: 4, style: "harbor", downtown: [2, 2], parks: ["0,3"] },
   { name: "Larkhill", ox: -2900, oz: 560, n: 3, y: 46, style: "village", downtown: [1.5, 1.5], parks: ["1,1"] },
 ];
 for (const t of TOWNS) { t.size = t.n * P; t.x0 = t.ox - EDGE - 6; t.z0 = t.oz - EDGE - 6; t.x1 = t.ox + t.size + EDGE + 6; t.z1 = t.oz + t.size + EDGE + 6; }
@@ -517,7 +517,7 @@ function makeRoad(name, a, b, via, seed) {
   // Heights: follow the land, smoothed, no steeper than about 1 in 12, and
   // level with the towns at either end.
   const ends = (i) => (i < 40 ? a.t.y : i > S.length - 41 ? b.t.y : null);
-  let ys = S.map((p, i) => ends(i) ?? Math.max(2, baseH(p.x, p.z)));
+  let ys = S.map((p, i) => ends(i) ?? Math.max(2, natH(p.x, p.z)));
   for (let pass = 0; pass < 3; pass++) {
     const out = ys.slice();
     for (let i = 0; i < S.length; i++) {
@@ -596,14 +596,22 @@ function roadAt(x, z, maxD = 40) {
 
 // ---------- The ground's height ----------
 // The land, flattened under the towns and graded under the roads.
-function landH(x, z) {
+// The land with the towns settled into it: hills ease down to a town's
+// level over most of a kilometre, so each sits in a broad hollow or on a
+// broad shelf rather than at the foot of a cliff.
+function natH(x, z) {
   let h = baseH(x, z);
   for (const t of TOWNS) {
     const dx = Math.max(t.x0 - x, 0, x - t.x1);
     const dz = Math.max(t.z0 - z, 0, z - t.z1);
     const d = Math.hypot(dx, dz);
-    if (d < 260) h += (t.y - 0.06 - h) * smooth(260, 0, d);
+    const reach = h > t.y ? 1000 : t.y > 10 ? 650 : 170;
+    if (d < reach) h += (t.y - 0.06 - h) * smooth(reach, 30, d);
   }
+  return h;
+}
+function landH(x, z) {
+  let h = natH(x, z);
   const r = roadAt(x, z, 42);
   if (r) h += (r.y - 0.2 - h) * smooth(42, ROAD_HW + 3, r.d);
   return h;
@@ -690,8 +698,10 @@ const _c = new THREE.Color();
 function groundColour(x, z, h, slope) {
   const r = roadAt(x, z, ROAD_HW + 3);
   if (r && r.d > ROAD_HW - 0.5) return _c.copy(COL.gravel);
-  if (h < 1.2) return _c.copy(COL.wet);
-  if (h < 3.4) return _c.copy(COL.sand).lerp(COL.grass, smooth(2.4, 3.4, h));
+  // Sand only on the real shore, not on ground levelled down for a town.
+  const shore = Math.min(h, baseH(x, z));
+  if (shore < 1.2) return _c.copy(COL.wet);
+  if (shore < 3.4) return _c.copy(COL.sand).lerp(COL.grass, smooth(2.4, 3.4, shore));
   const m = fbm(x * 0.004, z * 0.004, 3);
   _c.copy(COL.grass).lerp(COL.meadow, smooth(0.45, 0.7, m)).lerp(COL.dark, smooth(0.55, 0.75, fbm(x * 0.0025 + 5, z * 0.0025, 3)));
   if (slope > 0.55) _c.lerp(COL.rock, smooth(0.55, 0.9, slope));
@@ -779,6 +789,7 @@ const TREE = {
   leaf: new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }),
   greens: [0x4f9a3a, 0x5aa646, 0x3f8a36, 0x6cb04a, 0x478f3e, 0x7aaa3a].map((c) => new THREE.Color(c)),
   pine: [0x2f6a3a, 0x356f3c, 0x2a5f36].map((c) => new THREE.Color(c)),
+  rocks: [0x8a8880, 0x9c978c, 0x76777a].map((c) => new THREE.Color(c)),
 };
 function instanced(geo, mat, list, f, color) {
   if (!list.length) return null;
@@ -804,7 +815,7 @@ function treesFor(cx, cz) {
     if (road) continue;
     const h = terrainH(x, z);
     if (h < 1.5) continue;
-    const kind = h < 4.5 ? (r() < 0.5 ? "palm" : null) : h > 55 || r() < 0.3 ? "pine" : "round";
+    const kind = Math.min(h, baseH(x, z)) < 4.5 ? (r() < 0.5 ? "palm" : null) : h > 55 || r() < 0.3 ? "pine" : "round";
     if (!kind) continue;
     list.push({ x, z, y: h - 0.2, s: 0.8 + r() * 0.7, kind, k: r() });
   }
@@ -819,6 +830,18 @@ function buildTrees(cx, cz) {
   const pines = list.filter((t) => t.kind === "pine");
   const palms = list.filter((t) => t.kind === "palm");
   const blobs = [];
+  // Rocks and bushes scattered through the fields and under the trees.
+  const r2 = rng(cx * 31 + cz * 977 + 5);
+  for (let k = 0; k < 70; k++) {
+    const x = cx * CH + r2() * CH;
+    const z = cz * CH + r2() * CH;
+    if (townAt(x, z, 10) || roadAt(x, z, ROAD_HW + 2)) continue;
+    const h = terrainH(x, z);
+    if (h < 1) continue;
+    const rock = r2() < 0.35 || h > 70;
+    const s = rock ? 0.4 + Math.pow(r2(), 3) * 2.2 : 0.5 + r2() * 0.8;
+    blobs.push({ x, y: h + (rock ? s * 0.15 : s * 0.4), z, s, sy: s * (rock ? 0.55 : 0.75), c: rock ? TREE.rocks[Math.floor(r2() * 3)] : TREE.greens[Math.floor(r2() * 6)] });
+  }
   for (const t of round) {
     blobs.push({ x: t.x, y: t.y + 3.7 * t.s, z: t.z, s: 2.2 * t.s, sy: 1.8 * t.s, c: TREE.greens[Math.floor(t.k * 6)] });
     blobs.push({ x: t.x + (t.k - 0.5) * 1.8 * t.s, y: t.y + 4.9 * t.s, z: t.z + (0.5 - t.k) * 1.4 * t.s, s: 1.5 * t.s, sy: 1.3 * t.s, c: TREE.greens[Math.floor(t.k * 6)] });
@@ -831,6 +854,56 @@ function buildTrees(cx, cz) {
   add(instanced(TREE.fronds, TREE.leaf, palms, (t, m) => m.compose(tmpV.set(t.x, t.y + 8 * t.s, t.z), tmpQ.setFromEuler(tmpE.set(0, t.k * 6, 0)), new THREE.Vector3(t.s, t.s, t.s)), () => TREE.greens[0]));
   scene.add(grp);
   return grp;
+}
+
+// ---------- Grass and wildflowers close by ----------
+const GRASS_R = TOUCH ? 160 : 300;
+const tuftTex = (() => {
+  const c = document.createElement("canvas");
+  c.width = 64;
+  c.height = 64;
+  const g = c.getContext("2d");
+  const r = rng(404);
+  for (let k = 0; k < 26; k++) {
+    const x = 6 + r() * 52;
+    const h = 30 + r() * 32;
+    const lean = (r() - 0.5) * 18;
+    g.strokeStyle = `rgb(${200 + r() * 55 | 0},${200 + r() * 55 | 0},${190 + r() * 40 | 0})`;
+    g.lineWidth = 2 + r() * 2;
+    g.beginPath();
+    g.moveTo(x, 64);
+    g.quadraticCurveTo(x + lean * 0.3, 64 - h * 0.6, x + lean, 64 - h);
+    g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+const tuftGeo = (() => {
+  const a = new THREE.PlaneGeometry(1, 0.7).translate(0, 0.35, 0);
+  const b = a.clone().rotateY(Math.PI / 2);
+  return mergeGeometries([a, b]);
+})();
+const tuftMat = new THREE.MeshLambertMaterial({ map: tuftTex, alphaTest: 0.45, side: THREE.DoubleSide });
+const TUFT_COLS = [0x6aa548, 0x7cb552, 0x5d9a40, 0x8fbd5a, 0x6aa548, 0x7cb552, 0xf2d64b, 0xffffff, 0xe889b8, 0xb59de8].map((c) => new THREE.Color(c));
+const grassTiles = new Map();
+function buildGrass(cx, cz) {
+  const r = rng(cx * 7333 + cz * 1013 + 77);
+  const list = [];
+  for (let k = 0; k < 900; k++) {
+    const x = cx * CH + r() * CH;
+    const z = cz * CH + r() * CH;
+    if (townAt(x, z, 4) || roadAt(x, z, ROAD_HW + 1.5)) continue;
+    const h = terrainH(x, z);
+    if (h < 3.2) continue;
+    // In clumps, thicker in the meadows.
+    if (fbm(x * 0.02, z * 0.02, 2) < 0.42) continue;
+    const flower = r() < 0.12;
+    list.push({ x, y: h - 0.05, z, s: 0.7 + r() * 0.9, a: r() * 6, c: TUFT_COLS[flower ? 6 + Math.floor(r() * 4) : Math.floor(r() * 6)] });
+  }
+  const im = instanced(tuftGeo, tuftMat, list, (t, m) => m.compose(tmpV.set(t.x, t.y, t.z), tmpQ.setFromEuler(tmpE.set(0, t.a, 0)), new THREE.Vector3(t.s, t.s, t.s)), (t) => t.c);
+  if (im) { im.castShadow = false; im.receiveShadow = true; scene.add(im); }
+  return im;
 }
 
 // ---------- Streaming tiles in and out as you move ----------
@@ -854,6 +927,7 @@ function streamLand(px, pz, budget = 2, limit = TERRAIN_R) {
     const lod = d < FINE_R || (have && have.lod === 1 && d < FINE_R + 200) ? 1 : 4;
     if (!have || have.lod !== lod) want.push([have ? d + 100 : d, cx, cz, key, "tile", lod]);
     else if (d < TREE_R && !treeTiles.has(key) && tiles.get(key).maxH > 1) want.push([d + 50, cx, cz, key, "trees"]);
+    else if (d < GRASS_R && !grassTiles.has(key) && tiles.get(key).maxH > 3) want.push([d + 80, cx, cz, key, "grass"]);
   }
   want.sort((a, b) => a[0] - b[0]);
   for (const [, cx, cz, key, what, lod] of want.slice(0, budget)) {
@@ -862,7 +936,8 @@ function streamLand(px, pz, budget = 2, limit = TERRAIN_R) {
       if (old && old.mesh) { scene.remove(old.mesh); old.mesh.geometry.dispose(); }
       tiles.set(key, buildTile(cx, cz, lod));
     }
-    else treeTiles.set(key, buildTrees(cx, cz));
+    else if (what === "trees") treeTiles.set(key, buildTrees(cx, cz));
+    else grassTiles.set(key, buildGrass(cx, cz));
   }
   // Let go of what's well behind.
   for (const [key, t] of tiles) {
@@ -873,6 +948,11 @@ function streamLand(px, pz, budget = 2, limit = TERRAIN_R) {
     const t = tiles.get(key);
     const d = t ? Math.hypot((t.cx + 0.5) * CH - px, (t.cz + 0.5) * CH - pz) : 1e9;
     if (d > TREE_R + CH * 1.5) { disposeGroup(g); treeTiles.delete(key); }
+  }
+  for (const [key, im] of grassTiles) {
+    const t = tiles.get(key);
+    const d = t ? Math.hypot((t.cx + 0.5) * CH - px, (t.cz + 0.5) * CH - pz) : 1e9;
+    if (d > GRASS_R + CH) { if (im) { scene.remove(im); im.dispose(); } grassTiles.delete(key); }
   }
   return want.length;
 }
@@ -918,6 +998,35 @@ function streamLand(px, pz, budget = 2, limit = TERRAIN_R) {
       const p = S[i];
       postGeo.push(colored(new THREE.BoxGeometry(0.14, 1.0, 0.14).translate(p.x - p.dz * s * (ROAD_HW + 1.2), p.y + 0.5, p.z + p.dx * s * (ROAD_HW + 1.2)), 0xf4f4f0));
       postGeo.push(colored(new THREE.BoxGeometry(0.15, 0.12, 0.15).translate(p.x - p.dz * s * (ROAD_HW + 1.2), p.y + 0.85, p.z + p.dx * s * (ROAD_HW + 1.2)), s > 0 ? 0xe03a2a : 0xf0a020));
+    }
+    // Post-and-rail fences along stretches of verge, where the fields are.
+    const fence = [];
+    for (const side of [-1, 1]) {
+      let prev = null;
+      for (let i = 50; i < S.length - 50; i++) {
+        const p = S[i];
+        const on = fbm(p.s * 0.004 + side * 7, 3.3, 2) > 0.52;
+        if (!on || i % 1) { prev = null; continue; }
+        const x = p.x - p.dz * side * (ROAD_HW + 3.2);
+        const z = p.z + p.dx * side * (ROAD_HW + 3.2);
+        const y = terrainH(x, z);
+        if (i % 1 === 0 && (p.s % 3.2) < 4) fence.push(colored(new THREE.BoxGeometry(0.12, 1.15, 0.12).translate(x, y + 0.5, z), 0x8a6a48));
+        if (prev) {
+          const len = Math.hypot(x - prev[0], z - prev[1]);
+          for (const ry of [0.55, 0.95]) {
+            const g = new THREE.BoxGeometry(0.05, 0.1, len);
+            g.rotateY(Math.atan2(x - prev[0], z - prev[1]));
+            g.translate((x + prev[0]) / 2, (y + prev[2]) / 2 + ry, (z + prev[1]) / 2);
+            fence.push(colored(g, 0x9a7a55));
+          }
+        }
+        prev = [x, z, y];
+      }
+    }
+    if (fence.length) {
+      const fm = new THREE.Mesh(mergeGeometries(fence), new THREE.MeshLambertMaterial({ vertexColors: true }));
+      fm.castShadow = true;
+      scene.add(fm);
     }
     const pm = new THREE.Mesh(mergeGeometries(postGeo), new THREE.MeshLambertMaterial({ vertexColors: true }));
     pm.castShadow = true;
@@ -979,61 +1088,89 @@ function updateLandmarks(dt) {
 }
 
 // ---------- The mountain ----------
-// A great snow-capped peak on its own island out to the north-west, about
-// eight kilometres off and two and a half high: on the skyline from almost
-// anywhere. Drawn past the fog, with the haze of distance painted into its
-// colours instead.
-const MOUNT = { x: -5600, z: 7600, h: 2600, r: 6200 };
-{
-  const RINGS = 70;
-  const SEGS = 160;
-  const pos = [];
-  const col = [];
-  const idx = [];
-  const haze = new THREE.Color(0xc4d8ec);
-  const snow = new THREE.Color(0xf4f7fb);
-  const rock = new THREE.Color(0x5d6676);
-  const forest = new THREE.Color(0x3f5f4a);
-  const c = new THREE.Color();
-  const heightAt = (r, a) => {
-    const t = r / MOUNT.r;
-    // A broad cone, steeper near the top, with ridges running down it and a
-    // shoulder off to one side.
-    const ridges = 1 + 0.12 * Math.sin(a * 7 + Math.sin(a * 3) * 2) * t + (fbm(Math.cos(a) * 6 * t + 3, Math.sin(a) * 6 * t, 4) - 0.5) * 0.35 * t;
-    const cone = Math.pow(Math.max(0, 1 - t * ridges), 1.7);
-    const shoulder = 0.28 * Math.exp(-Math.pow((a - 2.2) / 0.5, 2)) * Math.exp(-Math.pow((t - 0.45) / 0.18, 2));
-    return MOUNT.h * (cone + shoulder) - 60;
-  };
-  pos.push(MOUNT.x, heightAt(0, 0), MOUNT.z);
-  col.push(snow.r, snow.g, snow.b);
-  for (let k = 1; k <= RINGS; k++) {
-    const r = Math.pow(k / RINGS, 1.35) * MOUNT.r;
-    for (let s = 0; s < SEGS; s++) {
-      const a = (s / SEGS) * Math.PI * 2;
-      const h = heightAt(r, a);
-      pos.push(MOUNT.x + Math.cos(a) * r, h, MOUNT.z + Math.sin(a) * r);
-      const snowLine = 1300 + Math.sin(a * 5) * 150 + (fbm(a * 4, k * 0.3, 2) - 0.5) * 300;
-      if (h > snowLine) c.copy(snow);
-      else if (h > 500) c.copy(rock).lerp(snow, smooth(snowLine - 250, snowLine, h) * 0.6);
-      else c.copy(forest).lerp(rock, smooth(150, 500, h));
-      c.lerp(haze, 0.42);
-      col.push(c.r, c.g, c.b);
-    }
+// A great snow-capped massif on its own island out to the north-west,
+// about eight kilometres off and 2.6 km high, on the skyline from almost
+// anywhere. Ridges, gullies and lesser peaks come from layers of "ridged"
+// noise; snow lies on the high ground except where it's too steep to hold;
+// below it bare rock, then forest down to a beach. Drawn past the fog, with
+// the haze of distance painted into its colours instead.
+const MOUNT = { x: -5600, z: 7600, h: 2600, r: 6400 };
+function ridged(x, z, oct) {
+  let s = 0;
+  let a = 0.5;
+  let f = 1;
+  let w = 1;
+  for (let k = 0; k < oct; k++) {
+    let n = 1 - Math.abs(vnoise(x * f + k * 31.7, z * f - k * 17.3) * 2 - 1);
+    n *= n * w;
+    w = clamp(n * 1.6, 0, 1);
+    s += n * a;
+    f *= 2.07;
+    a *= 0.52;
   }
-  for (let s = 0; s < SEGS; s++) idx.push(0, 1 + ((s + 1) % SEGS), 1 + s);
-  for (let k = 1; k < RINGS; k++) for (let s = 0; s < SEGS; s++) {
-    const a = 1 + (k - 1) * SEGS + s;
-    const b = 1 + (k - 1) * SEGS + ((s + 1) % SEGS);
-    const a2 = a + SEGS;
-    const b2 = b + SEGS;
-    idx.push(a, b, a2, b, b2, a2);
+  return s;
+}
+function mountainH(x, z) {
+  const dx = x - MOUNT.x;
+  const dz = z - MOUNT.z;
+  const d = Math.hypot(dx, dz) / MOUNT.r;
+  if (d > 1.05) return -60;
+  const body = Math.pow(Math.max(0, 1 - d), 2.1);
+  const peaks = 0.35 * Math.exp(-((dx + 1700) ** 2 + (dz - 900) ** 2) / 1.3e6) + 0.28 * Math.exp(-((dx - 1500) ** 2 + (dz + 1300) ** 2) / 1.1e6);
+  const rough = ridged(x * 0.00055, z * 0.00055, 7);
+  return MOUNT.h * (body * (0.62 + 0.62 * rough) + peaks * (0.5 + rough)) - 60 + smooth(1.0, 0.8, d) * 8;
+}
+{
+  const N = 300;
+  const span = MOUNT.r * 2.15;
+  const step = span / N;
+  const x0 = MOUNT.x - span / 2;
+  const z0 = MOUNT.z - span / 2;
+  const hs = new Float32Array((N + 1) * (N + 1));
+  for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) hs[j * (N + 1) + i] = mountainH(x0 + i * step, z0 + j * step);
+  const H = (i, j) => hs[clamp(j, 0, N) * (N + 1) + clamp(i, 0, N)];
+  const pos = new Float32Array((N + 1) * (N + 1) * 3);
+  const col = new Float32Array((N + 1) * (N + 1) * 3);
+  const haze = new THREE.Color(0xc4d8ec);
+  const snow = new THREE.Color(0xf6f8fc);
+  const rock = new THREE.Color(0x646a74);
+  const darkRock = new THREE.Color(0x4a4f58);
+  const forest = new THREE.Color(0x355a40);
+  const sand = new THREE.Color(0xd9cba0);
+  const c = new THREE.Color();
+  for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
+    const k = j * (N + 1) + i;
+    const h = H(i, j);
+    const x = x0 + i * step;
+    const z = z0 + j * step;
+    pos[k * 3] = x;
+    pos[k * 3 + 1] = h;
+    pos[k * 3 + 2] = z;
+    const slope = Math.hypot(H(i + 1, j) - H(i - 1, j), H(i, j + 1) - H(i, j - 1)) / (2 * step);
+    const snowLine = 1150 + (fbm(x * 0.002, z * 0.002, 3) - 0.5) * 500;
+    if (h < 12) c.copy(sand);
+    else if (h < 600) c.copy(forest).lerp(rock, smooth(380, 650, h) + smooth(0.6, 1.1, slope) * 0.6);
+    else c.copy(rock).lerp(darkRock, smooth(0.5, 1.0, slope) * 0.7);
+    // Snow, where the ground is high and not too steep to hold it.
+    const snowy = smooth(snowLine - 120, snowLine + 150, h) * (1 - smooth(0.75, 1.15, slope));
+    c.lerp(snow, snowy);
+    c.lerp(haze, 0.4);
+    col[k * 3] = c.r;
+    col[k * 3 + 1] = c.g;
+    col[k * 3 + 2] = c.b;
+  }
+  const idx = [];
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const p = j * (N + 1) + i;
+    if (hs[p] < -50 && hs[p + 1] < -50 && hs[p + N + 1] < -50 && hs[p + N + 2] < -50) continue;
+    idx.push(p, p + N + 1, p + 1, p + 1, p + N + 1, p + N + 2);
   }
   const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.BufferAttribute(col, 3));
   g.setIndex(idx);
   g.computeVertexNormals();
-  const mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, fog: false, flatShading: true }));
+  const mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, fog: false }));
   mesh.renderOrder = -1;
   scene.add(mesh);
 }
@@ -1427,6 +1564,259 @@ function placeName(x, z) {
   return "Countryside";
 }
 
+// ---------- Car models, close up ----------
+// Near the camera each car is drawn properly: a body pressed from its side
+// profile (hood, wheel arches, trunk, rounded edges), a glasshouse that
+// leans in toward the roof, pillars, bumpers, grille, lamps, mirrors and
+// door lines, all in glossy paint that reflects the sky. Further off, the
+// plain box version stands in.
+
+// A small sky for the paint and glass to reflect.
+{
+  const pm = new THREE.PMREMGenerator(renderer);
+  const env = new THREE.Scene();
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    uniforms: { uSun: { value: SUN_DIR } },
+    vertexShader: `varying vec3 vDir; void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+      uniform vec3 uSun;
+      varying vec3 vDir;
+      void main() {
+        float y = vDir.y;
+        vec3 c = y > 0.0 ? mix(vec3(0.85, 0.92, 1.0), vec3(0.3, 0.55, 0.95), pow(y, 0.5)) : mix(vec3(0.55, 0.6, 0.5), vec3(0.32, 0.38, 0.26), pow(-y, 0.4));
+        float s = max(dot(vDir, uSun), 0.0);
+        c += vec3(1.0, 0.95, 0.85) * (pow(s, 300.0) * 30.0 + pow(s, 8.0) * 0.4);
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  }));
+  env.add(sky);
+  const rt = pm.fromScene(env, 0.02);
+  scene.environment = rt.texture;
+  pm.dispose();
+}
+const CM = {
+  glass: new THREE.MeshStandardMaterial({ color: 0x101820, metalness: 0.7, roughness: 0.04 }),
+  trim: new THREE.MeshStandardMaterial({ color: 0x18191c, metalness: 0.1, roughness: 0.65, side: THREE.DoubleSide }),
+  chrome: new THREE.MeshStandardMaterial({ color: 0xe4e6ea, metalness: 1, roughness: 0.12 }),
+  head: new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff3d6, emissiveIntensity: 0.6, metalness: 0.2, roughness: 0.1 }),
+  tailOff: new THREE.MeshStandardMaterial({ color: 0x8a1410, emissive: 0x500806, emissiveIntensity: 1, roughness: 0.2 }),
+  tailOn: new THREE.MeshStandardMaterial({ color: 0xff3a24, emissive: 0xff2010, emissiveIntensity: 3, roughness: 0.2, toneMapped: false }),
+  plate: new THREE.MeshStandardMaterial({ color: 0xf2f0e6, roughness: 0.5 }),
+};
+const paintMats = new Map();
+function paintMat(col) {
+  if (!paintMats.has(col)) paintMats.set(col, new THREE.MeshStandardMaterial({ color: col, metalness: 0.45, roughness: 0.27 }));
+  return paintMats.get(col);
+}
+// Extrude a side profile (points in car z, y) across the car's width.
+function sideExtrude(shape, width, bevel = 0.06) {
+  const g = new THREE.ExtrudeGeometry(shape, { depth: width - bevel * 2, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 3, curveSegments: 12 });
+  g.rotateY(-Math.PI / 2);
+  g.translate((width - bevel * 2) / 2, 0, 0);
+  g.deleteAttribute("uv");
+  return g;
+}
+const TIRE_R = 0.36;
+const detailCache = new Map();
+function detailGeo(type) {
+  if (detailCache.has(type)) return detailCache.get(type);
+  const T = TYPES[type];
+  const { L, W, H, wb } = T;
+  const cl = 0.3;
+  const belt = cl + T.bodyH;
+  const cabL = T.cabL * L;
+  const zf = T.cabZ * L + cabL / 2; // where the windscreen meets the hood
+  const zr = T.cabZ * L - cabL / 2; // where the back window meets the body
+  const top = H;
+  const rise = top - belt;
+  const ws = T.van ? rise * 0.4 : rise * 1.3; // how far the windscreen leans back
+  const rw = T.van ? 0.05 : type === "hatch" ? rise * 0.35 : type === "coupe" ? rise * 1.5 : T.bed ? 0.08 : rise * 0.95;
+  const ra = TIRE_R + 0.08; // wheel arch radius
+  const yw = TIRE_R;
+  const paint = [];
+  const trim = [];
+  const chrome = [];
+  const glass = [];
+  const head = [];
+  const tail = [];
+  const plate = [];
+  const bx = (list, w, h, d, x, y, z, rx = 0) => { const g = new THREE.BoxGeometry(w, h, d); if (rx) g.rotateX(rx); g.translate(x, y, z); g.deleteAttribute("uv"); list.push(g); };
+  // The body, from the side.
+  {
+    const s = new THREE.Shape();
+    const a = Math.asin(clamp((cl - yw) / ra, -1, 1));
+    const rearZ = -L / 2;
+    const frontZ = L / 2;
+    s.moveTo(rearZ + 0.12, cl);
+    s.lineTo(-wb / 2 - ra * Math.cos(a), cl);
+    s.absarc(-wb / 2, yw, ra, Math.PI - a, a, true);
+    s.lineTo(wb / 2 - ra * Math.cos(a), cl);
+    s.absarc(wb / 2, yw, ra, Math.PI - a, a, true);
+    s.lineTo(frontZ - 0.14, cl);
+    s.quadraticCurveTo(frontZ, cl, frontZ, cl + 0.16);
+    s.lineTo(frontZ - 0.02, belt - 0.16);
+    s.quadraticCurveTo(frontZ - 0.03, belt - 0.03, frontZ - 0.32, belt - 0.03);
+    s.lineTo(zf + 0.06, belt + 0.02);
+    if (T.bed) {
+      s.lineTo(zr - 0.02, belt + 0.02);
+      s.lineTo(zr - 0.02, belt + 0.34);
+      s.lineTo(rearZ + 0.03, belt + 0.34);
+      s.lineTo(rearZ, belt - 0.1);
+    } else if (type === "hatch" || T.van) {
+      s.lineTo(zr + 0.02, belt + 0.02);
+      s.quadraticCurveTo(rearZ + 0.02, belt + 0.02, rearZ, belt - 0.12);
+    } else {
+      s.lineTo(zr - 0.04, belt + 0.03);
+      s.lineTo(rearZ + 0.3, belt + 0.01);
+      s.quadraticCurveTo(rearZ + 0.02, belt, rearZ, belt - 0.16);
+    }
+    s.lineTo(rearZ + 0.01, cl + 0.16);
+    s.quadraticCurveTo(rearZ, cl, rearZ + 0.12, cl);
+    paint.push(sideExtrude(s, W, 0.07));
+  }
+  // The glasshouse, narrowing toward the roof.
+  const gw = W * 0.86;
+  {
+    const s = new THREE.Shape();
+    s.moveTo(zf, belt);
+    s.lineTo(zf - ws, top);
+    s.lineTo(zr + rw, top);
+    s.lineTo(zr, belt);
+    s.lineTo(zf, belt);
+    const g = sideExtrude(s, gw, 0.05);
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const k = clamp((p.getY(i) - belt) / rise, 0, 1);
+      p.setX(i, p.getX(i) * (1 - 0.1 * k));
+    }
+    glass.push(g);
+    // The roof over it, and the pillars down its corners.
+    const r = new THREE.Shape();
+    r.moveTo(zf - ws + 0.02, top - 0.02);
+    r.lineTo(zr + rw - 0.02, top - 0.02);
+    r.lineTo(zr + rw - 0.06, top + 0.035);
+    r.lineTo(zf - ws + 0.06, top + 0.035);
+    r.lineTo(zf - ws + 0.02, top - 0.02);
+    paint.push(sideExtrude(r, gw * 0.9 + 0.04, 0.02));
+    const px = (gw / 2) * 0.95 + 0.01;
+    const pillar = (z0, y0, z1, y1, t = 0.07) => {
+      const len = Math.hypot(z1 - z0, y1 - y0);
+      for (const sx of [-1, 1]) {
+        const g = new THREE.BoxGeometry(t, len, t);
+        g.rotateX(Math.atan2(z1 - z0, y1 - y0));
+        const k = 0.5;
+        g.translate(sx * (px - 0.05 * k), (y0 + y1) / 2, (z0 + z1) / 2);
+        g.deleteAttribute("uv");
+        paint.push(g);
+      }
+    };
+    pillar(zf, belt, zf - ws, top);
+    pillar(zr, belt, zr + rw, top, T.van ? 0.1 : 0.12);
+    if (!T.bed && type !== "coupe") pillar((zf - ws + zr + rw) / 2 + 0.1, belt, (zf - ws + zr + rw) / 2 + 0.1, top, 0.09);
+    // A trim line along the bottom of the windows.
+    for (const sx of [-1, 1]) bx(chrome, 0.02, 0.025, zf - zr, sx * gw / 2, belt + 0.02, (zf + zr) / 2);
+  }
+  if (T.bed) bx(trim, W - 0.22, 0.04, -L / 2 - zr + 0.1, 0, belt + 0.3, (zr - 0.02 - L / 2 + 0.03) / 2);
+  // Bumpers, grille, sills, the dark under the arches.
+  bx(trim, W * 1.01, 0.24, 0.24, 0, cl + 0.12, L / 2 - 0.06);
+  bx(trim, W * 1.01, 0.24, 0.24, 0, cl + 0.12, -L / 2 + 0.06);
+  bx(trim, W * 0.5, 0.17, 0.05, 0, belt - 0.24, L / 2 - 0.005);
+  bx(chrome, W * 0.52, 0.025, 0.06, 0, belt - 0.15, L / 2 - 0.01);
+  for (const sx of [-1, 1]) {
+    bx(trim, 0.05, 0.12, wb - ra * 2 - 0.1, sx * (W / 2 + 0.005), cl + 0.07, 0);
+    for (const sz of [-1, 1]) {
+      const liner = new THREE.CylinderGeometry(ra - 0.01, ra - 0.01, W * 0.96, 16, 1, true, -Math.PI / 2, Math.PI);
+      liner.rotateZ(Math.PI / 2);
+      liner.translate(0, yw, sz * wb / 2);
+      liner.deleteAttribute("uv");
+      trim.push(liner);
+    }
+    // Lamps, mirrors, door lines and handles.
+    bx(head, 0.44, 0.12, 0.08, sx * (W / 2 - 0.3), belt - 0.13, L / 2 - 0.03);
+    bx(tail, 0.4, 0.13, 0.06, sx * (W / 2 - 0.24), belt - 0.17, -L / 2 + 0.005);
+    bx(paint, 0.2, 0.11, 0.12, sx * (W / 2 + 0.07), belt + 0.1, zf - 0.18);
+    bx(glass, 0.012, 0.08, 0.1, sx * (W / 2 + 0.172), belt + 0.1, zf - 0.18);
+    const doors = T.van ? [zf - 0.05, zf - 0.95] : type === "coupe" || T.bed ? [zf - 0.05, zr + 0.05] : [zf - 0.05, (zf + zr) / 2 + 0.1, zr + 0.15];
+    for (const z of doors) bx(trim, 0.012, T.bodyH - 0.12, 0.014, sx * (W / 2 + 0.003), cl + 0.06 + (T.bodyH - 0.12) / 2, z);
+    for (let k = 0; k < doors.length - 1; k++) bx(chrome, 0.03, 0.03, 0.14, sx * (W / 2 + 0.01), belt - 0.1, doors[k + 1] + 0.18);
+  }
+  bx(plate, 0.52, 0.12, 0.02, 0, cl + 0.22, L / 2 + 0.07);
+  bx(plate, 0.52, 0.12, 0.02, 0, cl + 0.3, -L / 2 - 0.07);
+  const ex = new THREE.CylinderGeometry(0.045, 0.045, 0.22, 10);
+  ex.rotateX(Math.PI / 2);
+  ex.translate(W * 0.3, cl + 0.02, -L / 2 - 0.02);
+  ex.deleteAttribute("uv");
+  chrome.push(ex);
+  const merge = (l) => (l.length ? mergeGeometries(l.map((g) => (g.index ? g.toNonIndexed() : g))) : null);
+  const out = { paint: merge(paint), trim: merge(trim), chrome: merge(chrome), glass: merge(glass), head: merge(head), tail: merge(tail), plate: merge(plate) };
+  detailCache.set(type, out);
+  return out;
+}
+function buildDetail(type, col) {
+  const G = detailGeo(type);
+  const grp = new THREE.Group();
+  grp.rotation.order = "YXZ";
+  const add = (geo, mat, cast = false) => { if (!geo) return null; const m = new THREE.Mesh(geo, mat); m.castShadow = cast; m.receiveShadow = cast; grp.add(m); return m; };
+  add(G.paint, paintMat(col), true);
+  add(G.trim, CM.trim, true);
+  add(G.glass, CM.glass, true);
+  add(G.chrome, CM.chrome);
+  add(G.head, CM.head);
+  add(G.plate, CM.plate);
+  const tail = add(G.tail, CM.tailOff);
+  grp.visible = false;
+  scene.add(grp);
+  return { grp, tail };
+}
+
+// Wheels: a rounded tyre and a spoked alloy, every wheel in town in two draws.
+const tireGeo = (() => {
+  const pts = [];
+  const w = 0.13;
+  for (let k = 0; k <= 10; k++) {
+    const a = -Math.PI / 2 + (k / 10) * Math.PI;
+    pts.push(new THREE.Vector2(TIRE_R - 0.05 + Math.cos(a) * 0.05, Math.sin(a) * w));
+  }
+  pts.unshift(new THREE.Vector2(0.25, -w));
+  pts.push(new THREE.Vector2(0.25, w));
+  const g = new THREE.LatheGeometry(pts, 24);
+  g.rotateZ(Math.PI / 2);
+  return g;
+})();
+const rimTex = (() => {
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d");
+  g.fillStyle = "#c9ccd1";
+  g.fillRect(0, 0, 128, 128);
+  g.fillStyle = "#2a2c30";
+  for (let k = 0; k < 5; k++) {
+    g.save();
+    g.translate(64, 64);
+    g.rotate((k / 5) * Math.PI * 2 + Math.PI / 5);
+    g.beginPath();
+    g.moveTo(-9, 20);
+    g.lineTo(9, 20);
+    g.lineTo(16, 54);
+    g.lineTo(-16, 54);
+    g.fill();
+    g.restore();
+  }
+  g.fillStyle = "#9a9da3";
+  g.beginPath(); g.arc(64, 64, 14, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#3a3c40";
+  g.beginPath(); g.arc(64, 64, 5, 0, Math.PI * 2); g.fill();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+const rimGeo = (() => {
+  const g = new THREE.CylinderGeometry(0.255, 0.255, 0.2, 24);
+  g.rotateZ(Math.PI / 2);
+  return g;
+})();
+
 // ---------- Cars ----------
 // Simple, chunky cars built from boxes, one mesh each (painted with vertex
 // colours, so they all share one material), with every wheel in the city
@@ -1495,24 +1885,9 @@ function carGeo(type, paint) {
 }
 const carMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 const MAXCARS = 150;
-const wheelGeo = (() => {
-  const g = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 14);
-  g.rotateZ(Math.PI / 2);
-  const n = g.attributes.position.count;
-  const a = new Float32Array(n * 3);
-  const pos = g.attributes.position;
-  for (let i = 0; i < n; i++) {
-    const hub = Math.abs(pos.getX(i)) > 0.11 && Math.hypot(pos.getY(i), pos.getZ(i)) < 0.2;
-    const c = hub ? [0.62, 0.64, 0.67] : [0.08, 0.08, 0.09];
-    a.set(c, i * 3);
-  }
-  g.setAttribute("color", new THREE.BufferAttribute(a, 3));
-  return g;
-})();
-const wheels = new THREE.InstancedMesh(wheelGeo, new THREE.MeshLambertMaterial({ vertexColors: true }), MAXCARS * 4);
-wheels.castShadow = true;
-wheels.frustumCulled = false;
-scene.add(wheels);
+const tires = new THREE.InstancedMesh(tireGeo, new THREE.MeshStandardMaterial({ color: 0x151517, roughness: 0.85 }), MAXCARS * 4);
+const rims = new THREE.InstancedMesh(rimGeo, new THREE.MeshStandardMaterial({ map: rimTex, metalness: 0.9, roughness: 0.25 }), MAXCARS * 4);
+for (const m of [tires, rims]) { m.castShadow = true; m.frustumCulled = false; scene.add(m); }
 
 const cars = [];
 function makeCar(type, paint, x, z, h) {
@@ -1522,7 +1897,8 @@ function makeCar(type, paint, x, z, h) {
   mesh.receiveShadow = true;
   mesh.rotation.order = "YXZ";
   scene.add(mesh);
-  const c = { id: cars.length, type, T, paint, x, z, y: groundAt(x, z), h, vx: 0, vz: 0, vl: 0, vy: 0, gear: 1, rpm: 900, shift: 0, land: 0, steer: 0, spin: 0, in: { thr: 0, brk: 0, steer: 0, hb: true }, mesh, ai: null, awake: false, pitch: 0, roll: 0, slip: 0, prevVl: 0, skidT: 0 };
+  const detail = buildDetail(type, paint);
+  const c = { detail, type, T, paint, x, z, y: groundAt(x, z), h, vx: 0, vz: 0, vl: 0, vy: 0, gear: 1, rpm: 900, shift: 0, land: 0, steer: 0, spin: 0, in: { thr: 0, brk: 0, steer: 0, hb: true }, mesh, ai: null, awake: false, pitch: 0, roll: 0, slip: 0, prevVl: 0, skidT: 0 };
   cars.push(c);
   return c;
 }
@@ -1749,21 +2125,34 @@ function drawCars(camX, camZ) {
   for (const c of cars) {
     c.mesh.position.set(c.x, c.y - (c.land || 0) * 0.12, c.z);
     c.mesh.rotation.set(c.pitch, c.h, c.roll);
-    const far = Math.abs(c.x - camX) > 260 || Math.abs(c.z - camZ) > 260;
-    c.mesh.visible = !far;
+    const dist = Math.hypot(c.x - camX, c.z - camZ);
+    const far = dist > 260;
+    // Close up, the proper model; further off, the plain one.
+    const near = dist < 120;
+    c.mesh.visible = !far && !near;
+    c.detail.grp.visible = near;
     if (far) continue;
     c.mesh.updateMatrix();
+    if (near) {
+      c.detail.grp.position.copy(c.mesh.position);
+      c.detail.grp.rotation.copy(c.mesh.rotation);
+      const braking = c.in.brk > 0 && c.vl > 0.5;
+      c.detail.tail.material = braking || (c.ai && c.in.hb) ? CM.tailOn : CM.tailOff;
+    }
     const T = c.T;
     for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
       _we.set(c.spin, sz > 0 ? -c.steer : 0, 0);
-      tmpM.compose(tmpV.set(sx * (T.W / 2 - 0.13), 0.34, sz * T.wb / 2), _wq.setFromEuler(_we), ONE);
+      tmpM.compose(tmpV.set(sx * (T.W / 2 - 0.16), TIRE_R, sz * T.wb / 2), _wq.setFromEuler(_we), ONE);
       _wm.multiplyMatrices(c.mesh.matrix, tmpM);
-      wheels.setMatrixAt(w++, _wm);
+      tires.setMatrixAt(w, _wm);
+      // The rim's face points outward on both sides.
+      if (sx < 0) { tmpM.makeRotationY(Math.PI); _wm.multiply(tmpM); }
+      rims.setMatrixAt(w++, _wm);
     }
   }
-  for (let i = w; i < wheels.count; i++) wheels.setMatrixAt(i, _wm.makeScale(0, 0, 0));
-  wheels.count = Math.max(w, 1);
-  wheels.instanceMatrix.needsUpdate = true;
+  tires.count = rims.count = Math.max(w, 1);
+  tires.instanceMatrix.needsUpdate = true;
+  rims.instanceMatrix.needsUpdate = true;
 }
 
 // ---------- Traffic ----------
@@ -2472,7 +2861,7 @@ const worldMap = document.createElement("canvas");
   for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step) {
     const wx = MAP.x0 + x / MAP.s;
     const wz = MAP.z0 + y / MAP.s;
-    const e = baseH(wx, wz);
+    const e = natH(wx, wz);
     g.fillStyle = e < 0 ? "#7cc3dd" : e < 3 ? "#eadcae" : e > 60 ? "#7fa86a" : "#9cc77e";
     g.fillRect(x, y, step, step);
   }

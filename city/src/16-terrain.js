@@ -34,8 +34,10 @@ const _c = new THREE.Color();
 function groundColour(x, z, h, slope) {
   const r = roadAt(x, z, ROAD_HW + 3);
   if (r && r.d > ROAD_HW - 0.5) return _c.copy(COL.gravel);
-  if (h < 1.2) return _c.copy(COL.wet);
-  if (h < 3.4) return _c.copy(COL.sand).lerp(COL.grass, smooth(2.4, 3.4, h));
+  // Sand only on the real shore, not on ground levelled down for a town.
+  const shore = Math.min(h, baseH(x, z));
+  if (shore < 1.2) return _c.copy(COL.wet);
+  if (shore < 3.4) return _c.copy(COL.sand).lerp(COL.grass, smooth(2.4, 3.4, shore));
   const m = fbm(x * 0.004, z * 0.004, 3);
   _c.copy(COL.grass).lerp(COL.meadow, smooth(0.45, 0.7, m)).lerp(COL.dark, smooth(0.55, 0.75, fbm(x * 0.0025 + 5, z * 0.0025, 3)));
   if (slope > 0.55) _c.lerp(COL.rock, smooth(0.55, 0.9, slope));
@@ -123,6 +125,7 @@ const TREE = {
   leaf: new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }),
   greens: [0x4f9a3a, 0x5aa646, 0x3f8a36, 0x6cb04a, 0x478f3e, 0x7aaa3a].map((c) => new THREE.Color(c)),
   pine: [0x2f6a3a, 0x356f3c, 0x2a5f36].map((c) => new THREE.Color(c)),
+  rocks: [0x8a8880, 0x9c978c, 0x76777a].map((c) => new THREE.Color(c)),
 };
 function instanced(geo, mat, list, f, color) {
   if (!list.length) return null;
@@ -148,7 +151,7 @@ function treesFor(cx, cz) {
     if (road) continue;
     const h = terrainH(x, z);
     if (h < 1.5) continue;
-    const kind = h < 4.5 ? (r() < 0.5 ? "palm" : null) : h > 55 || r() < 0.3 ? "pine" : "round";
+    const kind = Math.min(h, baseH(x, z)) < 4.5 ? (r() < 0.5 ? "palm" : null) : h > 55 || r() < 0.3 ? "pine" : "round";
     if (!kind) continue;
     list.push({ x, z, y: h - 0.2, s: 0.8 + r() * 0.7, kind, k: r() });
   }
@@ -163,6 +166,18 @@ function buildTrees(cx, cz) {
   const pines = list.filter((t) => t.kind === "pine");
   const palms = list.filter((t) => t.kind === "palm");
   const blobs = [];
+  // Rocks and bushes scattered through the fields and under the trees.
+  const r2 = rng(cx * 31 + cz * 977 + 5);
+  for (let k = 0; k < 70; k++) {
+    const x = cx * CH + r2() * CH;
+    const z = cz * CH + r2() * CH;
+    if (townAt(x, z, 10) || roadAt(x, z, ROAD_HW + 2)) continue;
+    const h = terrainH(x, z);
+    if (h < 1) continue;
+    const rock = r2() < 0.35 || h > 70;
+    const s = rock ? 0.4 + Math.pow(r2(), 3) * 2.2 : 0.5 + r2() * 0.8;
+    blobs.push({ x, y: h + (rock ? s * 0.15 : s * 0.4), z, s, sy: s * (rock ? 0.55 : 0.75), c: rock ? TREE.rocks[Math.floor(r2() * 3)] : TREE.greens[Math.floor(r2() * 6)] });
+  }
   for (const t of round) {
     blobs.push({ x: t.x, y: t.y + 3.7 * t.s, z: t.z, s: 2.2 * t.s, sy: 1.8 * t.s, c: TREE.greens[Math.floor(t.k * 6)] });
     blobs.push({ x: t.x + (t.k - 0.5) * 1.8 * t.s, y: t.y + 4.9 * t.s, z: t.z + (0.5 - t.k) * 1.4 * t.s, s: 1.5 * t.s, sy: 1.3 * t.s, c: TREE.greens[Math.floor(t.k * 6)] });
@@ -175,6 +190,56 @@ function buildTrees(cx, cz) {
   add(instanced(TREE.fronds, TREE.leaf, palms, (t, m) => m.compose(tmpV.set(t.x, t.y + 8 * t.s, t.z), tmpQ.setFromEuler(tmpE.set(0, t.k * 6, 0)), new THREE.Vector3(t.s, t.s, t.s)), () => TREE.greens[0]));
   scene.add(grp);
   return grp;
+}
+
+// ---------- Grass and wildflowers close by ----------
+const GRASS_R = TOUCH ? 160 : 300;
+const tuftTex = (() => {
+  const c = document.createElement("canvas");
+  c.width = 64;
+  c.height = 64;
+  const g = c.getContext("2d");
+  const r = rng(404);
+  for (let k = 0; k < 26; k++) {
+    const x = 6 + r() * 52;
+    const h = 30 + r() * 32;
+    const lean = (r() - 0.5) * 18;
+    g.strokeStyle = `rgb(${200 + r() * 55 | 0},${200 + r() * 55 | 0},${190 + r() * 40 | 0})`;
+    g.lineWidth = 2 + r() * 2;
+    g.beginPath();
+    g.moveTo(x, 64);
+    g.quadraticCurveTo(x + lean * 0.3, 64 - h * 0.6, x + lean, 64 - h);
+    g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+const tuftGeo = (() => {
+  const a = new THREE.PlaneGeometry(1, 0.7).translate(0, 0.35, 0);
+  const b = a.clone().rotateY(Math.PI / 2);
+  return mergeGeometries([a, b]);
+})();
+const tuftMat = new THREE.MeshLambertMaterial({ map: tuftTex, alphaTest: 0.45, side: THREE.DoubleSide });
+const TUFT_COLS = [0x6aa548, 0x7cb552, 0x5d9a40, 0x8fbd5a, 0x6aa548, 0x7cb552, 0xf2d64b, 0xffffff, 0xe889b8, 0xb59de8].map((c) => new THREE.Color(c));
+const grassTiles = new Map();
+function buildGrass(cx, cz) {
+  const r = rng(cx * 7333 + cz * 1013 + 77);
+  const list = [];
+  for (let k = 0; k < 900; k++) {
+    const x = cx * CH + r() * CH;
+    const z = cz * CH + r() * CH;
+    if (townAt(x, z, 4) || roadAt(x, z, ROAD_HW + 1.5)) continue;
+    const h = terrainH(x, z);
+    if (h < 3.2) continue;
+    // In clumps, thicker in the meadows.
+    if (fbm(x * 0.02, z * 0.02, 2) < 0.42) continue;
+    const flower = r() < 0.12;
+    list.push({ x, y: h - 0.05, z, s: 0.7 + r() * 0.9, a: r() * 6, c: TUFT_COLS[flower ? 6 + Math.floor(r() * 4) : Math.floor(r() * 6)] });
+  }
+  const im = instanced(tuftGeo, tuftMat, list, (t, m) => m.compose(tmpV.set(t.x, t.y, t.z), tmpQ.setFromEuler(tmpE.set(0, t.a, 0)), new THREE.Vector3(t.s, t.s, t.s)), (t) => t.c);
+  if (im) { im.castShadow = false; im.receiveShadow = true; scene.add(im); }
+  return im;
 }
 
 // ---------- Streaming tiles in and out as you move ----------
@@ -198,6 +263,7 @@ function streamLand(px, pz, budget = 2, limit = TERRAIN_R) {
     const lod = d < FINE_R || (have && have.lod === 1 && d < FINE_R + 200) ? 1 : 4;
     if (!have || have.lod !== lod) want.push([have ? d + 100 : d, cx, cz, key, "tile", lod]);
     else if (d < TREE_R && !treeTiles.has(key) && tiles.get(key).maxH > 1) want.push([d + 50, cx, cz, key, "trees"]);
+    else if (d < GRASS_R && !grassTiles.has(key) && tiles.get(key).maxH > 3) want.push([d + 80, cx, cz, key, "grass"]);
   }
   want.sort((a, b) => a[0] - b[0]);
   for (const [, cx, cz, key, what, lod] of want.slice(0, budget)) {
@@ -206,7 +272,8 @@ function streamLand(px, pz, budget = 2, limit = TERRAIN_R) {
       if (old && old.mesh) { scene.remove(old.mesh); old.mesh.geometry.dispose(); }
       tiles.set(key, buildTile(cx, cz, lod));
     }
-    else treeTiles.set(key, buildTrees(cx, cz));
+    else if (what === "trees") treeTiles.set(key, buildTrees(cx, cz));
+    else grassTiles.set(key, buildGrass(cx, cz));
   }
   // Let go of what's well behind.
   for (const [key, t] of tiles) {
@@ -217,6 +284,11 @@ function streamLand(px, pz, budget = 2, limit = TERRAIN_R) {
     const t = tiles.get(key);
     const d = t ? Math.hypot((t.cx + 0.5) * CH - px, (t.cz + 0.5) * CH - pz) : 1e9;
     if (d > TREE_R + CH * 1.5) { disposeGroup(g); treeTiles.delete(key); }
+  }
+  for (const [key, im] of grassTiles) {
+    const t = tiles.get(key);
+    const d = t ? Math.hypot((t.cx + 0.5) * CH - px, (t.cz + 0.5) * CH - pz) : 1e9;
+    if (d > GRASS_R + CH) { if (im) { scene.remove(im); im.dispose(); } grassTiles.delete(key); }
   }
   return want.length;
 }
@@ -262,6 +334,35 @@ function streamLand(px, pz, budget = 2, limit = TERRAIN_R) {
       const p = S[i];
       postGeo.push(colored(new THREE.BoxGeometry(0.14, 1.0, 0.14).translate(p.x - p.dz * s * (ROAD_HW + 1.2), p.y + 0.5, p.z + p.dx * s * (ROAD_HW + 1.2)), 0xf4f4f0));
       postGeo.push(colored(new THREE.BoxGeometry(0.15, 0.12, 0.15).translate(p.x - p.dz * s * (ROAD_HW + 1.2), p.y + 0.85, p.z + p.dx * s * (ROAD_HW + 1.2)), s > 0 ? 0xe03a2a : 0xf0a020));
+    }
+    // Post-and-rail fences along stretches of verge, where the fields are.
+    const fence = [];
+    for (const side of [-1, 1]) {
+      let prev = null;
+      for (let i = 50; i < S.length - 50; i++) {
+        const p = S[i];
+        const on = fbm(p.s * 0.004 + side * 7, 3.3, 2) > 0.52;
+        if (!on || i % 1) { prev = null; continue; }
+        const x = p.x - p.dz * side * (ROAD_HW + 3.2);
+        const z = p.z + p.dx * side * (ROAD_HW + 3.2);
+        const y = terrainH(x, z);
+        if (i % 1 === 0 && (p.s % 3.2) < 4) fence.push(colored(new THREE.BoxGeometry(0.12, 1.15, 0.12).translate(x, y + 0.5, z), 0x8a6a48));
+        if (prev) {
+          const len = Math.hypot(x - prev[0], z - prev[1]);
+          for (const ry of [0.55, 0.95]) {
+            const g = new THREE.BoxGeometry(0.05, 0.1, len);
+            g.rotateY(Math.atan2(x - prev[0], z - prev[1]));
+            g.translate((x + prev[0]) / 2, (y + prev[2]) / 2 + ry, (z + prev[1]) / 2);
+            fence.push(colored(g, 0x9a7a55));
+          }
+        }
+        prev = [x, z, y];
+      }
+    }
+    if (fence.length) {
+      const fm = new THREE.Mesh(mergeGeometries(fence), new THREE.MeshLambertMaterial({ vertexColors: true }));
+      fm.castShadow = true;
+      scene.add(fm);
     }
     const pm = new THREE.Mesh(mergeGeometries(postGeo), new THREE.MeshLambertMaterial({ vertexColors: true }));
     pm.castShadow = true;
@@ -323,61 +424,89 @@ function updateLandmarks(dt) {
 }
 
 // ---------- The mountain ----------
-// A great snow-capped peak on its own island out to the north-west, about
-// eight kilometres off and two and a half high: on the skyline from almost
-// anywhere. Drawn past the fog, with the haze of distance painted into its
-// colours instead.
-const MOUNT = { x: -5600, z: 7600, h: 2600, r: 6200 };
-{
-  const RINGS = 70;
-  const SEGS = 160;
-  const pos = [];
-  const col = [];
-  const idx = [];
-  const haze = new THREE.Color(0xc4d8ec);
-  const snow = new THREE.Color(0xf4f7fb);
-  const rock = new THREE.Color(0x5d6676);
-  const forest = new THREE.Color(0x3f5f4a);
-  const c = new THREE.Color();
-  const heightAt = (r, a) => {
-    const t = r / MOUNT.r;
-    // A broad cone, steeper near the top, with ridges running down it and a
-    // shoulder off to one side.
-    const ridges = 1 + 0.12 * Math.sin(a * 7 + Math.sin(a * 3) * 2) * t + (fbm(Math.cos(a) * 6 * t + 3, Math.sin(a) * 6 * t, 4) - 0.5) * 0.35 * t;
-    const cone = Math.pow(Math.max(0, 1 - t * ridges), 1.7);
-    const shoulder = 0.28 * Math.exp(-Math.pow((a - 2.2) / 0.5, 2)) * Math.exp(-Math.pow((t - 0.45) / 0.18, 2));
-    return MOUNT.h * (cone + shoulder) - 60;
-  };
-  pos.push(MOUNT.x, heightAt(0, 0), MOUNT.z);
-  col.push(snow.r, snow.g, snow.b);
-  for (let k = 1; k <= RINGS; k++) {
-    const r = Math.pow(k / RINGS, 1.35) * MOUNT.r;
-    for (let s = 0; s < SEGS; s++) {
-      const a = (s / SEGS) * Math.PI * 2;
-      const h = heightAt(r, a);
-      pos.push(MOUNT.x + Math.cos(a) * r, h, MOUNT.z + Math.sin(a) * r);
-      const snowLine = 1300 + Math.sin(a * 5) * 150 + (fbm(a * 4, k * 0.3, 2) - 0.5) * 300;
-      if (h > snowLine) c.copy(snow);
-      else if (h > 500) c.copy(rock).lerp(snow, smooth(snowLine - 250, snowLine, h) * 0.6);
-      else c.copy(forest).lerp(rock, smooth(150, 500, h));
-      c.lerp(haze, 0.42);
-      col.push(c.r, c.g, c.b);
-    }
+// A great snow-capped massif on its own island out to the north-west,
+// about eight kilometres off and 2.6 km high, on the skyline from almost
+// anywhere. Ridges, gullies and lesser peaks come from layers of "ridged"
+// noise; snow lies on the high ground except where it's too steep to hold;
+// below it bare rock, then forest down to a beach. Drawn past the fog, with
+// the haze of distance painted into its colours instead.
+const MOUNT = { x: -5600, z: 7600, h: 2600, r: 6400 };
+function ridged(x, z, oct) {
+  let s = 0;
+  let a = 0.5;
+  let f = 1;
+  let w = 1;
+  for (let k = 0; k < oct; k++) {
+    let n = 1 - Math.abs(vnoise(x * f + k * 31.7, z * f - k * 17.3) * 2 - 1);
+    n *= n * w;
+    w = clamp(n * 1.6, 0, 1);
+    s += n * a;
+    f *= 2.07;
+    a *= 0.52;
   }
-  for (let s = 0; s < SEGS; s++) idx.push(0, 1 + ((s + 1) % SEGS), 1 + s);
-  for (let k = 1; k < RINGS; k++) for (let s = 0; s < SEGS; s++) {
-    const a = 1 + (k - 1) * SEGS + s;
-    const b = 1 + (k - 1) * SEGS + ((s + 1) % SEGS);
-    const a2 = a + SEGS;
-    const b2 = b + SEGS;
-    idx.push(a, b, a2, b, b2, a2);
+  return s;
+}
+function mountainH(x, z) {
+  const dx = x - MOUNT.x;
+  const dz = z - MOUNT.z;
+  const d = Math.hypot(dx, dz) / MOUNT.r;
+  if (d > 1.05) return -60;
+  const body = Math.pow(Math.max(0, 1 - d), 2.1);
+  const peaks = 0.35 * Math.exp(-((dx + 1700) ** 2 + (dz - 900) ** 2) / 1.3e6) + 0.28 * Math.exp(-((dx - 1500) ** 2 + (dz + 1300) ** 2) / 1.1e6);
+  const rough = ridged(x * 0.00055, z * 0.00055, 7);
+  return MOUNT.h * (body * (0.62 + 0.62 * rough) + peaks * (0.5 + rough)) - 60 + smooth(1.0, 0.8, d) * 8;
+}
+{
+  const N = 300;
+  const span = MOUNT.r * 2.15;
+  const step = span / N;
+  const x0 = MOUNT.x - span / 2;
+  const z0 = MOUNT.z - span / 2;
+  const hs = new Float32Array((N + 1) * (N + 1));
+  for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) hs[j * (N + 1) + i] = mountainH(x0 + i * step, z0 + j * step);
+  const H = (i, j) => hs[clamp(j, 0, N) * (N + 1) + clamp(i, 0, N)];
+  const pos = new Float32Array((N + 1) * (N + 1) * 3);
+  const col = new Float32Array((N + 1) * (N + 1) * 3);
+  const haze = new THREE.Color(0xc4d8ec);
+  const snow = new THREE.Color(0xf6f8fc);
+  const rock = new THREE.Color(0x646a74);
+  const darkRock = new THREE.Color(0x4a4f58);
+  const forest = new THREE.Color(0x355a40);
+  const sand = new THREE.Color(0xd9cba0);
+  const c = new THREE.Color();
+  for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
+    const k = j * (N + 1) + i;
+    const h = H(i, j);
+    const x = x0 + i * step;
+    const z = z0 + j * step;
+    pos[k * 3] = x;
+    pos[k * 3 + 1] = h;
+    pos[k * 3 + 2] = z;
+    const slope = Math.hypot(H(i + 1, j) - H(i - 1, j), H(i, j + 1) - H(i, j - 1)) / (2 * step);
+    const snowLine = 1150 + (fbm(x * 0.002, z * 0.002, 3) - 0.5) * 500;
+    if (h < 12) c.copy(sand);
+    else if (h < 600) c.copy(forest).lerp(rock, smooth(380, 650, h) + smooth(0.6, 1.1, slope) * 0.6);
+    else c.copy(rock).lerp(darkRock, smooth(0.5, 1.0, slope) * 0.7);
+    // Snow, where the ground is high and not too steep to hold it.
+    const snowy = smooth(snowLine - 120, snowLine + 150, h) * (1 - smooth(0.75, 1.15, slope));
+    c.lerp(snow, snowy);
+    c.lerp(haze, 0.4);
+    col[k * 3] = c.r;
+    col[k * 3 + 1] = c.g;
+    col[k * 3 + 2] = c.b;
+  }
+  const idx = [];
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const p = j * (N + 1) + i;
+    if (hs[p] < -50 && hs[p + 1] < -50 && hs[p + N + 1] < -50 && hs[p + N + 2] < -50) continue;
+    idx.push(p, p + N + 1, p + 1, p + 1, p + N + 1, p + N + 2);
   }
   const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.BufferAttribute(col, 3));
   g.setIndex(idx);
   g.computeVertexNormals();
-  const mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, fog: false, flatShading: true }));
+  const mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, fog: false }));
   mesh.renderOrder = -1;
   scene.add(mesh);
 }

@@ -28,7 +28,7 @@ const worldMap = document.createElement("canvas");
   for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step) {
     const wx = MAP.x0 + x / MAP.s;
     const wz = MAP.z0 + y / MAP.s;
-    const e = baseH(wx, wz);
+    const e = natH(wx, wz);
     g.fillStyle = e < 0 ? "#7cc3dd" : e < 3 ? "#eadcae" : e > 60 ? "#7fa86a" : "#9cc77e";
     g.fillRect(x, y, step, step);
   }

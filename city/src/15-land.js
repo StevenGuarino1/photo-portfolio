@@ -50,7 +50,7 @@ function baseH(x, z) {
 // ---------- Towns ----------
 const TOWNS = [
   { name: "Verdant Bay", ox: 0, oz: 0, n: 10, y: 3, style: "city", downtown: [6.5, 6.5], parks: ["3,3", "3,4", "4,3", "4,4", "8,1", "1,7"] },
-  { name: "Saltmarsh", ox: -600, oz: -2950, n: 4, y: 2.5, style: "harbor", downtown: [2, 2], parks: ["0,3"] },
+  { name: "Saltmarsh", ox: -600, oz: -2950, n: 4, y: 4, style: "harbor", downtown: [2, 2], parks: ["0,3"] },
   { name: "Larkhill", ox: -2900, oz: 560, n: 3, y: 46, style: "village", downtown: [1.5, 1.5], parks: ["1,1"] },
 ];
 for (const t of TOWNS) { t.size = t.n * P; t.x0 = t.ox - EDGE - 6; t.z0 = t.oz - EDGE - 6; t.x1 = t.ox + t.size + EDGE + 6; t.z1 = t.oz + t.size + EDGE + 6; }
@@ -106,7 +106,7 @@ function makeRoad(name, a, b, via, seed) {
   // Heights: follow the land, smoothed, no steeper than about 1 in 12, and
   // level with the towns at either end.
   const ends = (i) => (i < 40 ? a.t.y : i > S.length - 41 ? b.t.y : null);
-  let ys = S.map((p, i) => ends(i) ?? Math.max(2, baseH(p.x, p.z)));
+  let ys = S.map((p, i) => ends(i) ?? Math.max(2, natH(p.x, p.z)));
   for (let pass = 0; pass < 3; pass++) {
     const out = ys.slice();
     for (let i = 0; i < S.length; i++) {
@@ -185,14 +185,22 @@ function roadAt(x, z, maxD = 40) {
 
 // ---------- The ground's height ----------
 // The land, flattened under the towns and graded under the roads.
-function landH(x, z) {
+// The land with the towns settled into it: hills ease down to a town's
+// level over most of a kilometre, so each sits in a broad hollow or on a
+// broad shelf rather than at the foot of a cliff.
+function natH(x, z) {
   let h = baseH(x, z);
   for (const t of TOWNS) {
     const dx = Math.max(t.x0 - x, 0, x - t.x1);
     const dz = Math.max(t.z0 - z, 0, z - t.z1);
     const d = Math.hypot(dx, dz);
-    if (d < 260) h += (t.y - 0.06 - h) * smooth(260, 0, d);
+    const reach = h > t.y ? 1000 : t.y > 10 ? 650 : 170;
+    if (d < reach) h += (t.y - 0.06 - h) * smooth(reach, 30, d);
   }
+  return h;
+}
+function landH(x, z) {
+  let h = natH(x, z);
   const r = roadAt(x, z, 42);
   if (r) h += (r.y - 0.2 - h) * smooth(42, ROAD_HW + 3, r.d);
   return h;

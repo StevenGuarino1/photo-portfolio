@@ -66,24 +66,9 @@ function carGeo(type, paint) {
 }
 const carMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 const MAXCARS = 150;
-const wheelGeo = (() => {
-  const g = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 14);
-  g.rotateZ(Math.PI / 2);
-  const n = g.attributes.position.count;
-  const a = new Float32Array(n * 3);
-  const pos = g.attributes.position;
-  for (let i = 0; i < n; i++) {
-    const hub = Math.abs(pos.getX(i)) > 0.11 && Math.hypot(pos.getY(i), pos.getZ(i)) < 0.2;
-    const c = hub ? [0.62, 0.64, 0.67] : [0.08, 0.08, 0.09];
-    a.set(c, i * 3);
-  }
-  g.setAttribute("color", new THREE.BufferAttribute(a, 3));
-  return g;
-})();
-const wheels = new THREE.InstancedMesh(wheelGeo, new THREE.MeshLambertMaterial({ vertexColors: true }), MAXCARS * 4);
-wheels.castShadow = true;
-wheels.frustumCulled = false;
-scene.add(wheels);
+const tires = new THREE.InstancedMesh(tireGeo, new THREE.MeshStandardMaterial({ color: 0x151517, roughness: 0.85 }), MAXCARS * 4);
+const rims = new THREE.InstancedMesh(rimGeo, new THREE.MeshStandardMaterial({ map: rimTex, metalness: 0.9, roughness: 0.25 }), MAXCARS * 4);
+for (const m of [tires, rims]) { m.castShadow = true; m.frustumCulled = false; scene.add(m); }
 
 const cars = [];
 function makeCar(type, paint, x, z, h) {
@@ -93,7 +78,8 @@ function makeCar(type, paint, x, z, h) {
   mesh.receiveShadow = true;
   mesh.rotation.order = "YXZ";
   scene.add(mesh);
-  const c = { id: cars.length, type, T, paint, x, z, y: groundAt(x, z), h, vx: 0, vz: 0, vl: 0, vy: 0, gear: 1, rpm: 900, shift: 0, land: 0, steer: 0, spin: 0, in: { thr: 0, brk: 0, steer: 0, hb: true }, mesh, ai: null, awake: false, pitch: 0, roll: 0, slip: 0, prevVl: 0, skidT: 0 };
+  const detail = buildDetail(type, paint);
+  const c = { detail, type, T, paint, x, z, y: groundAt(x, z), h, vx: 0, vz: 0, vl: 0, vy: 0, gear: 1, rpm: 900, shift: 0, land: 0, steer: 0, spin: 0, in: { thr: 0, brk: 0, steer: 0, hb: true }, mesh, ai: null, awake: false, pitch: 0, roll: 0, slip: 0, prevVl: 0, skidT: 0 };
   cars.push(c);
   return c;
 }
@@ -320,19 +306,32 @@ function drawCars(camX, camZ) {
   for (const c of cars) {
     c.mesh.position.set(c.x, c.y - (c.land || 0) * 0.12, c.z);
     c.mesh.rotation.set(c.pitch, c.h, c.roll);
-    const far = Math.abs(c.x - camX) > 260 || Math.abs(c.z - camZ) > 260;
-    c.mesh.visible = !far;
+    const dist = Math.hypot(c.x - camX, c.z - camZ);
+    const far = dist > 260;
+    // Close up, the proper model; further off, the plain one.
+    const near = dist < 120;
+    c.mesh.visible = !far && !near;
+    c.detail.grp.visible = near;
     if (far) continue;
     c.mesh.updateMatrix();
+    if (near) {
+      c.detail.grp.position.copy(c.mesh.position);
+      c.detail.grp.rotation.copy(c.mesh.rotation);
+      const braking = c.in.brk > 0 && c.vl > 0.5;
+      c.detail.tail.material = braking || (c.ai && c.in.hb) ? CM.tailOn : CM.tailOff;
+    }
     const T = c.T;
     for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
       _we.set(c.spin, sz > 0 ? -c.steer : 0, 0);
-      tmpM.compose(tmpV.set(sx * (T.W / 2 - 0.13), 0.34, sz * T.wb / 2), _wq.setFromEuler(_we), ONE);
+      tmpM.compose(tmpV.set(sx * (T.W / 2 - 0.16), TIRE_R, sz * T.wb / 2), _wq.setFromEuler(_we), ONE);
       _wm.multiplyMatrices(c.mesh.matrix, tmpM);
-      wheels.setMatrixAt(w++, _wm);
+      tires.setMatrixAt(w, _wm);
+      // The rim's face points outward on both sides.
+      if (sx < 0) { tmpM.makeRotationY(Math.PI); _wm.multiply(tmpM); }
+      rims.setMatrixAt(w++, _wm);
     }
   }
-  for (let i = w; i < wheels.count; i++) wheels.setMatrixAt(i, _wm.makeScale(0, 0, 0));
-  wheels.count = Math.max(w, 1);
-  wheels.instanceMatrix.needsUpdate = true;
+  tires.count = rims.count = Math.max(w, 1);
+  tires.instanceMatrix.needsUpdate = true;
+  rims.instanceMatrix.needsUpdate = true;
 }

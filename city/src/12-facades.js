@@ -147,6 +147,7 @@ atlasTex.colorSpace = THREE.SRGBColorSpace;
 atlasTex.anisotropy = Math.min(8, maxAniso);
 // The wall material: repeat one tile of the atlas across each wall.
 const wallMat = new THREE.MeshLambertMaterial({ map: atlasTex });
+wallMat.userData.atlas = true;
 wallMat.onBeforeCompile = (sh) => {
   sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute vec4 tile;\nvarying vec4 vTile;").replace("#include <uv_vertex>", "#include <uv_vertex>\nvTile = tile;");
   sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying vec4 vTile;").replace(
@@ -174,3 +175,5 @@ function tiledPlane(w, h, tw, th, u0, v0, tile) {
   g.setAttribute("tile", new THREE.BufferAttribute(a, 4));
   return g;
 }
+cloudShadows(wallMat);
+for (const k of ["asphalt", "sidewalk", "grass", "plaza", "roof", "hedge", "path"]) cloudShadows(M[k]);

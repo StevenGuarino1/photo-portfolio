@@ -57,17 +57,17 @@ function detailGeo(type) {
   if (detailCache.has(type)) return detailCache.get(type);
   const T = TYPES[type];
   const { L, W, H, wb } = T;
-  const cl = 0.3;
+  const cl = T.clear ?? 0.3;
   const belt = cl + T.bodyH;
   const cabL = T.cabL * L;
   const zf = T.cabZ * L + cabL / 2; // where the windscreen meets the hood
   const zr = T.cabZ * L - cabL / 2; // where the back window meets the body
   const top = H;
   const rise = top - belt;
-  const ws = T.van ? rise * 0.4 : rise * 1.3; // how far the windscreen leans back
-  const rw = T.van ? 0.05 : type === "hatch" ? rise * 0.35 : type === "coupe" ? rise * 1.5 : T.bed ? 0.08 : rise * 0.95;
-  const ra = TIRE_R + 0.08; // wheel arch radius
-  const yw = TIRE_R;
+  const ws = T.van ? rise * 0.4 : T.rover ? rise * 0.32 : rise * 1.3; // how far the windscreen leans back
+  const rw = T.van || T.rover ? 0.05 : type === "hatch" ? rise * 0.35 : type === "coupe" ? rise * 1.5 : T.bed ? 0.08 : rise * 0.95;
+  const ra = (T.tire ?? TIRE_R) + 0.08; // wheel arch radius
+  const yw = T.tire ?? TIRE_R;
   const paint = [];
   const trim = [];
   const chrome = [];
@@ -97,7 +97,7 @@ function detailGeo(type) {
       s.lineTo(zr - 0.02, belt + 0.34);
       s.lineTo(rearZ + 0.03, belt + 0.34);
       s.lineTo(rearZ, belt - 0.1);
-    } else if (type === "hatch" || T.van) {
+    } else if (type === "hatch" || T.van || T.rover) {
       s.lineTo(zr + 0.02, belt + 0.02);
       s.quadraticCurveTo(rearZ + 0.02, belt + 0.02, rearZ, belt - 0.12);
     } else {
@@ -174,6 +174,24 @@ function detailGeo(type) {
     const doors = T.van ? [zf - 0.05, zf - 0.95] : type === "coupe" || T.bed ? [zf - 0.05, zr + 0.05] : [zf - 0.05, (zf + zr) / 2 + 0.1, zr + 0.15];
     for (const z of doors) bx(trim, 0.012, T.bodyH - 0.12, 0.014, sx * (W / 2 + 0.003), cl + 0.06 + (T.bodyH - 0.12) / 2, z);
     for (let k = 0; k < doors.length - 1; k++) bx(chrome, 0.03, 0.03, 0.14, sx * (W / 2 + 0.01), belt - 0.1, doors[k + 1] + 0.18);
+  }
+  if (T.rover) {
+    // A spare wheel on the tailgate, a roof rack, a bull bar, chunky
+    // wheel-arch flares and a snorkel.
+    const spare = new THREE.CylinderGeometry(0.42, 0.42, 0.26, 18);
+    spare.rotateX(Math.PI / 2);
+    spare.translate(0, belt + 0.05, -L / 2 - 0.16);
+    spare.deleteAttribute("uv");
+    trim.push(spare);
+    bx(chrome, 0.3, 0.3, 0.04, 0, belt + 0.05, -L / 2 - 0.3);
+    for (const sx of [-1, 1]) bx(trim, 0.05, 0.06, cabL * 0.95, sx * (gw * 0.45), top + 0.16, (zf + zr) / 2);
+    for (let k = 0; k < 4; k++) bx(trim, gw * 0.9, 0.04, 0.05, 0, top + 0.18, zr + 0.2 + k * (cabL - 0.4) / 3);
+    for (const sx of [-1, 1]) for (const yy of [0.08, 0.2]) bx(trim, 0.06, 0.06, 0.06, sx * (gw * 0.45), top + yy - 0.05, zf - ws + 0.2);
+    bx(trim, W * 0.9, 0.08, 0.08, 0, cl + 0.42, L / 2 + 0.2);
+    bx(trim, W * 0.9, 0.08, 0.08, 0, cl + 0.7, L / 2 + 0.2);
+    for (const sx of [-0.3, 0.3]) bx(trim, 0.08, 0.5, 0.08, sx * W, cl + 0.5, L / 2 + 0.2);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) bx(trim, 0.12, 0.1, ra * 2.1, sx * (W / 2 + 0.03), yw + ra * 0.72, sz * wb / 2);
+    bx(trim, 0.1, 1.0, 0.1, W / 2 + 0.04, belt + 0.3, zf - 0.05);
   }
   bx(plate, 0.52, 0.12, 0.02, 0, cl + 0.22, L / 2 + 0.07);
   bx(plate, 0.52, 0.12, 0.02, 0, cl + 0.3, -L / 2 - 0.07);

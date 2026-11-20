@@ -8,6 +8,9 @@ const TYPES = {
   sedan: { L: 4.7, W: 1.84, H: 1.48, bodyH: 0.6, cabL: 0.46, cabZ: -0.04, wb: 2.75, aMax: 5.2, pw: 140, top: 52, grip: 10.5, mass: 1.4 },
   hatch: { L: 3.9, W: 1.74, H: 1.52, bodyH: 0.62, cabL: 0.55, cabZ: -0.1, wb: 2.45, aMax: 5.5, pw: 120, top: 48, grip: 11, mass: 1.1 },
   pickup: { L: 5.3, W: 2.0, H: 1.9, bodyH: 0.78, cabL: 0.3, cabZ: 0.1, wb: 3.2, aMax: 5, pw: 140, top: 47, grip: 9, mass: 1.9, bed: true },
+  // The off-roader: high, boxy, big tyres, slower on tarmac but as sure on
+  // grass and dirt as on the road.
+  rover: { L: 4.5, W: 2.02, H: 2.12, bodyH: 0.78, cabL: 0.56, cabZ: -0.1, wb: 2.75, aMax: 6.2, pw: 160, top: 47, grip: 10.5, mass: 1.9, rover: true, tire: 0.5, clear: 0.58, offGrip: 1.0, offDrag: 0.04, offPower: 1.0 },
   van: { L: 5.0, W: 1.96, H: 2.2, bodyH: 0.9, cabL: 0.8, cabZ: -0.06, wb: 3.0, aMax: 4.2, pw: 110, top: 42, grip: 8.5, mass: 2.0, van: true },
 };
 // Air drag set so each car tops out at its top speed.
@@ -30,7 +33,7 @@ function carGeo(type, paint) {
   if (geoCache.has(key)) return geoCache.get(key);
   const T = TYPES[type];
   const { L, W, H, bodyH } = T;
-  const cl = 0.3; // ground clearance
+  const cl = T.clear ?? 0.3; // ground clearance
   const parts = [];
   const add = (w, h, d, col, x, y, z) => parts.push(colored(new THREE.BoxGeometry(w, h, d).translate(x, y, z), col));
   add(W, bodyH, L, paint, 0, cl + bodyH / 2, 0);
@@ -83,6 +86,21 @@ function makeCar(type, paint, x, z, h) {
   cars.push(c);
   return c;
 }
+// Turn a car into another kind, where it stands (keeping its speed).
+function setCarType(c, type, paint = c.paint) {
+  scene.remove(c.mesh);
+  scene.remove(c.detail.grp);
+  c.type = type;
+  c.T = TYPES[type];
+  c.paint = paint;
+  c.mesh = new THREE.Mesh(carGeo(type, paint), carMat);
+  c.mesh.castShadow = true;
+  c.mesh.receiveShadow = true;
+  c.mesh.rotation.order = "YXZ";
+  scene.add(c.mesh);
+  c.detail = buildDetail(type, paint);
+  c.gear = Math.min(c.gear, 5);
+}
 function placeCar(c, x, z, h) {
   Object.assign(c, { x, z, h, vx: 0, vz: 0, vy: 0, vl: 0, steer: 0, pitch: 0, roll: 0, prevVl: 0, gear: 1, drowned: false, y: groundAt(x, z) });
 }
@@ -124,7 +142,7 @@ function stepCar(c, dt) {
     if (I.thr > 0) {
       if (vl > -0.5) {
         const a = Math.min(T.aMax, T.pw / (Math.max(0, vl) + 6));
-        if (!c.shift) vl += I.thr * a * (onRoad ? 1 : 0.75) * dt;
+        if (!c.shift) vl += I.thr * a * (onRoad ? 1 : T.offPower ?? 0.75) * dt;
       } else vl += I.thr * 12 * dt;
     }
     if (I.brk > 0) {
@@ -133,7 +151,7 @@ function stepCar(c, dt) {
     }
     if (I.hb) vl -= Math.sign(vl) * Math.min(Math.abs(vl), 4.5 * dt);
     // Air, rolling, and the extra drag of grass.
-    vl -= (T.drag * vl * Math.abs(vl) + vl * (I.thr ? 0.02 : 0.09) + (onRoad ? 0 : vl * 0.25)) * dt;
+    vl -= (T.drag * vl * Math.abs(vl) + vl * (I.thr ? 0.02 : 0.09) + (onRoad ? 0 : vl * (T.offDrag ?? 0.25))) * dt;
     if (!I.thr && !I.brk && Math.abs(vl) < 0.3) vl *= 0.85;
     // Gravity along the slope.
     vl -= 9.8 * ((gF - gB) / T.wb) * 0.85 * dt;
@@ -301,6 +319,7 @@ function skid(c) {
 }
 
 const _wm = new THREE.Matrix4();
+const tmpS = new THREE.Vector3();
 const _wq = new THREE.Quaternion();
 const _we = new THREE.Euler(0, 0, 0, "YXZ");
 function drawCars(camX, camZ) {
@@ -325,7 +344,8 @@ function drawCars(camX, camZ) {
     const T = c.T;
     for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
       _we.set(c.spin, sz > 0 ? -c.steer : 0, 0);
-      tmpM.compose(tmpV.set(sx * (T.W / 2 - 0.16), TIRE_R, sz * T.wb / 2), _wq.setFromEuler(_we), ONE);
+      const tr = T.tire ?? TIRE_R;
+      tmpM.compose(tmpV.set(sx * (T.W / 2 - 0.16), tr, sz * T.wb / 2), _wq.setFromEuler(_we), tmpS.setScalar(tr / TIRE_R));
       _wm.multiplyMatrices(c.mesh.matrix, tmpM);
       tires.setMatrixAt(w, _wm);
       // The rim's face points outward on both sides.

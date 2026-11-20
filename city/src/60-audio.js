@@ -34,33 +34,44 @@ function audioStart() {
     s.start();
     return { f: fl, g };
   };
-  // The engine: a sawtooth and a sub an octave down, through a filter that
-  // opens with the throttle, and a little rasp on top.
+  // The engine: a rounded tone at the firing rate (its overtones falling
+  // away gently), a soft rumble an octave down, and a breath of intake noise,
+  // all through a warm low-pass that opens with the throttle. Kept well
+  // under the rest of the mix.
   const eng = ctx.createGain();
   eng.gain.value = 0;
   const lp = ctx.createBiquadFilter();
   lp.type = "lowpass";
-  lp.Q.value = 3;
-  const shaper = ctx.createWaveShaper();
-  const curve = new Float32Array(256);
-  for (let i = 0; i < 256; i++) { const x = (i / 128) - 1; curve[i] = Math.tanh(x * 2.2); }
-  shaper.curve = curve;
+  lp.Q.value = 0.8;
+  const body = ctx.createBiquadFilter();
+  body.type = "peaking";
+  body.frequency.value = 110;
+  body.gain.value = 5;
+  body.Q.value = 0.9;
+  const real = new Float32Array(24);
+  const imag = new Float32Array(24);
+  for (let n = 1; n < 24; n++) imag[n] = (n % 2 ? 1 : 0.55) / Math.pow(n, 1.35);
+  const wave = ctx.createPeriodicWave(real, imag);
   const o1 = ctx.createOscillator();
-  o1.type = "sawtooth";
+  o1.setPeriodicWave(wave);
   const o2 = ctx.createOscillator();
-  o2.type = "square";
+  o2.type = "sine";
   const o3 = ctx.createOscillator();
-  o3.type = "sawtooth";
+  o3.setPeriodicWave(wave);
+  o3.detune.value = 9;
+  const g1 = ctx.createGain();
+  g1.gain.value = 0.55;
   const g2 = ctx.createGain();
   g2.gain.value = 0.6;
   const g3 = ctx.createGain();
-  g3.gain.value = 0.35;
-  o1.connect(shaper);
-  o2.connect(g2).connect(shaper);
-  o3.connect(g3).connect(shaper);
-  shaper.connect(lp).connect(eng).connect(AU.out);
+  g3.gain.value = 0.3;
+  o1.connect(g1).connect(lp);
+  o2.connect(g2).connect(lp);
+  o3.connect(g3).connect(lp);
+  lp.connect(body).connect(eng).connect(AU.out);
   for (const o of [o1, o2, o3]) o.start();
   AU.engine = { o1, o2, o3, lp, eng };
+  AU.intake = loop("bandpass", 900, 1.2, 0);
   AU.tyre = loop("bandpass", 1400, 4);
   AU.wind = loop("lowpass", 700, 0.5);
   AU.gravel = loop("lowpass", 260, 0.8);
@@ -165,12 +176,14 @@ function updateAudio(dt, car, honking) {
   if (car) {
     const rpm = car.rpm;
     const f = (rpm / 60) * 2;
-    ease(e.o1.frequency, f, 0.03);
-    ease(e.o2.frequency, f / 2, 0.03);
-    ease(e.o3.frequency, f * 1.503, 0.03);
+    ease(e.o1.frequency, f, 0.04);
+    ease(e.o2.frequency, f / 2, 0.04);
+    ease(e.o3.frequency, f, 0.04);
     const thr = car.in.thr;
-    ease(e.lp.frequency, 260 + thr * 1500 + rpm * 0.18, 0.05);
-    ease(e.eng.gain, (0.09 + thr * 0.12) * (car.shift ? 0.4 : 1), 0.05);
+    ease(e.lp.frequency, 220 + thr * 700 + rpm * 0.09, 0.08);
+    ease(e.eng.gain, (0.04 + thr * 0.045) * (car.shift ? 0.45 : 1), 0.06);
+    ease(AU.intake.g.gain, thr * 0.012 * (rpm / 6700), 0.08);
+    ease(AU.intake.f.frequency, 500 + rpm * 0.25, 0.08);
     const sp = Math.hypot(car.vx, car.vz);
     ease(AU.tyre.g.gain, car.grounded && car.slip > 2.5 && sp > 4 ? clamp((car.slip - 2.5) * 0.04, 0, 0.22) : 0, 0.05);
     ease(AU.tyre.f.frequency, 1100 + car.slip * 30, 0.1);
@@ -178,6 +191,7 @@ function updateAudio(dt, car, honking) {
     ease(AU.gravel.g.gain, car.offroad && car.grounded ? clamp(sp * 0.012, 0, 0.35) : 0, 0.1);
   } else {
     ease(e.eng.gain, 0, 0.2);
+    ease(AU.intake.g.gain, 0, 0.2);
     ease(AU.tyre.g.gain, 0, 0.1);
     ease(AU.wind.g.gain, 0, 0.3);
     ease(AU.gravel.g.gain, 0, 0.1);

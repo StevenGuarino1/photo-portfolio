@@ -110,13 +110,13 @@ function spawnTraffic(px, pz) {
     traffic.push(c);
   }
   // Cars left at the places worth visiting.
-  for (const [x, z, h] of poiParked) makeCar(pick(["sedan", "hatch", "coupe", "pickup", "van"]), pick(PAINTS), x, z, h).parked = true;
+  for (const [x, z, h] of poiParked) makeCar(pick(["sedan", "hatch", "coupe", "pickup", "van", "rover", "rover"]), pick(PAINTS), x, z, h).parked = true;
   for (let k = 0; k < PARKED; k++) {
     const spot = randomSpot(0, 0, 0, 1e9, true);
     if (!spot) continue;
     const { n, dx, dz, along } = spot;
     const [rx, rz] = rightOf(dx, dz);
-    const c = makeCar(pick(["sedan", "hatch", "hatch", "coupe", "pickup", "van", "sedan"]), pick(PAINTS), n.x + dx * along + rx * (RW - 1.25), n.z + dz * along + rz * (RW - 1.25), Math.atan2(dx, dz));
+    const c = makeCar(pick(["sedan", "hatch", "hatch", "coupe", "pickup", "van", "sedan", "rover"]), pick(PAINTS), n.x + dx * along + rx * (RW - 1.25), n.z + dz * along + rz * (RW - 1.25), Math.atan2(dx, dz));
     c.parked = true;
   }
 }

@@ -72,14 +72,14 @@
     <h1>Verdant <span>Bay</span></h1>
     <p>A sunny island city, more trees than people. Any car on the street is yours if you want it.</p>
     <button id="go" type="button">Drive</button>
-    <small>W A S D drive · Space handbrake · F get in / out · H horn · C camera · mouse to look</small>
+    <small>W A S D drive · Space handbrake · F get in / out · H horn · C camera · V off-roader · mouse to look</small>
   </div>
 </div>
 <div class="hud panel" id="speed"><b>0</b><small><span class="gear">1</span>km/h</small></div>
 <div class="hud panel" id="map"><canvas width="380" height="380"></canvas></div>
 <div class="hud panel" id="street"></div>
 <div class="hud panel" id="hint"></div>
-<div class="hud panel" id="keys"><b>W S</b> gas, brake · <b>A D</b> steer<br><b>Space</b> handbrake · <b>F</b> in / out<br><b>H</b> horn · <b>C</b> camera</div>
+<div class="hud panel" id="keys"><b>W S</b> gas, brake · <b>A D</b> steer<br><b>Space</b> handbrake · <b>F</b> in / out<br><b>H</b> horn · <b>C</b> camera<br><b>V</b> off-roader / road car</div>
 <div class="hud" id="fps" hidden></div>
 
 <script type="module">
@@ -119,46 +119,122 @@ document.body.prepend(canvas);
 const scene = new THREE.Scene();
 const HAZE = new THREE.Color(0xcfe3f5);
 scene.background = HAZE.clone();
-scene.fog = new THREE.Fog(HAZE, 220, 760);
+scene.fog = new THREE.FogExp2(HAZE, 0.00024);
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.25, 40000);
 camera.rotation.order = "YXZ";
 
 // ---------- Sun and sky ----------
-const SUN_DIR = new THREE.Vector3(0.42, 0.78, 0.46).normalize();
-const sun = new THREE.DirectionalLight(0xfff0d8, 3.0);
+// An afternoon sun, low enough to throw long shadows and pick out the land.
+const SUN_DIR = new THREE.Vector3(0.55, 0.5, 0.55).normalize();
+const sun = new THREE.DirectionalLight(0xffe6c4, 3.5);
 sun.castShadow = true;
-sun.shadow.mapSize.set(TOUCH ? 1024 : 2048, TOUCH ? 1024 : 2048);
-Object.assign(sun.shadow.camera, { left: -75, right: 75, top: 75, bottom: -75, near: 1, far: 400 });
+const SHADOW_R = TOUCH ? 75 : 130;
+sun.shadow.mapSize.set(TOUCH ? 1024 : 4096, TOUCH ? 1024 : 4096);
+Object.assign(sun.shadow.camera, { left: -SHADOW_R, right: SHADOW_R, top: SHADOW_R, bottom: -SHADOW_R, near: 1, far: 500 });
 sun.shadow.bias = -0.0005;
 sun.shadow.normalBias = 0.04;
 scene.add(sun, sun.target);
-const hemi = new THREE.HemisphereLight(0xcfe6ff, 0x7d7058, 1.15);
+const hemi = new THREE.HemisphereLight(0xbcd8ff, 0x6a5e48, 0.95);
 scene.add(hemi);
 // Keep the sun's shadows centred on you, snapped to its texels so they
 // don't crawl as you move.
 const _sv = new THREE.Vector3();
 function aimSun(x, z) {
-  const texel = 150 / sun.shadow.mapSize.x;
+  const texel = (2 * SHADOW_R) / sun.shadow.mapSize.x;
   const sx = Math.round(x / texel) * texel;
   const sz = Math.round(z / texel) * texel;
   sun.target.position.set(sx, 0, sz);
   sun.position.copy(_sv.copy(SUN_DIR).multiplyScalar(200)).add(sun.target.position);
 }
 
+// ---------- The sky ----------
+// A deep blue overhead fading to a pale hazy horizon, a sun with a soft
+// glow, and two layers of cloud: a deck of fair-weather cumulus about a
+// kilometre up (fixed to the world, so you drive under it and it drifts on
+// the wind) and thin high cirrus above. The clouds are lit from the sun's
+// side and grey underneath, and they throw their shadows on the land.
+const CLOUD_H = 1100;
+const skyU = { uTime: { value: 0 }, uSun: { value: SUN_DIR }, uHaze: { value: HAZE }, uCam: { value: new THREE.Vector3() } };
+const CLOUD_GLSL = `
+  uniform float uTime;
+  uniform vec3 uSun;
+  float c_h21(vec2 p) { p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
+  float c_vn(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(c_h21(i), c_h21(i + vec2(1, 0)), f.x), mix(c_h21(i + vec2(0, 1)), c_h21(i + vec2(1, 1)), f.x), f.y);
+  }
+  float c_fbm(vec2 p) {
+    float s = 0.0, a = 0.5;
+    mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+    for (int i = 0; i < 5; i++) { s += a * c_vn(p); p = m * p; a *= 0.5; }
+    return s;
+  }
+  // How cloudy it is above the world point xz: 0 clear, 1 thick.
+  float cloudCover(vec2 xz) {
+    vec2 w = vec2(9.0, 3.5) * uTime;
+    vec2 p = (xz + w) / 950.0;
+    float warp = c_fbm(p * 0.6 + 3.1);
+    float base = c_fbm(p + warp * 0.7);
+    float det = c_fbm(p * 3.4 - w / 500.0);
+    return smoothstep(0.53, 0.8, base * 0.74 + det * 0.32);
+  }
+  // The shadow of the clouds on a point: follow the sun up to the deck.
+  float cloudShade(vec3 wp) {
+    vec2 at = wp.xz + uSun.xz / max(uSun.y, 0.2) * (${CLOUD_H.toFixed(1)} - wp.y);
+    return cloudCover(at);
+  }
+`;
 const skyGroup = new THREE.Group();
 scene.add(skyGroup);
 {
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uSun: { value: SUN_DIR } },
-    vertexShader: `varying vec3 vDir; void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-    fragmentShader: `
-      uniform vec3 uSun;
+    uniforms: skyU,
+    vertexShader: `varying vec3 vDir; void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: CLOUD_GLSL + `
+      uniform vec3 uHaze;
+      uniform vec3 uCam;
       varying vec3 vDir;
       void main() {
-        float y = max(vDir.y, 0.0);
-        vec3 c = mix(vec3(0.81, 0.89, 0.96), vec3(0.24, 0.55, 0.92), pow(y, 0.55));
-        float s = max(dot(normalize(vDir), uSun), 0.0);
-        c += vec3(1.0, 0.9, 0.7) * (pow(s, 600.0) * 4.0 + pow(s, 12.0) * 0.18);
+        vec3 d = normalize(vDir);
+        float y = d.y;
+        float h = max(y, 0.0);
+        float sd = max(dot(d, uSun), 0.0);
+        vec3 zen = vec3(0.075, 0.24, 0.66);
+        vec3 c = mix(uHaze, zen, pow(h, 0.42));
+        // Warmer and brighter toward the sun, a little deeper blue away from it.
+        c += vec3(1.0, 0.82, 0.6) * pow(sd, 5.0) * 0.22 * (1.0 - h);
+        c += vec3(1.0, 0.95, 0.85) * pow(sd, 48.0) * 0.45;
+        c *= 1.0 - 0.14 * h * (1.0 - sd);
+        // A brighter band of haze right at the horizon.
+        c = mix(c, uHaze * 1.06, exp(-abs(y) * 26.0) * 0.6);
+        if (y < 0.0) c = uHaze;
+        float cov = 0.0;
+        if (y > 0.0) {
+          // The cumulus deck.
+          float t = (${CLOUD_H.toFixed(1)} - uCam.y) / max(y, 0.004);
+          vec2 P = uCam.xz + d.xz * t;
+          cov = cloudCover(P);
+          vec2 toSun = normalize(uSun.xz + 1e-5);
+          float cov2 = cloudCover(P + toSun * 140.0);
+          float lit = clamp(0.78 + (cov - cov2) * 1.8, 0.3, 1.2);
+          vec3 body = mix(vec3(0.5, 0.56, 0.66), vec3(1.0, 0.985, 0.96), lit);
+          body = mix(body, vec3(1.0), (1.0 - cov) * 0.35);
+          body += vec3(1.0, 0.85, 0.6) * pow(sd, 8.0) * (1.0 - cov) * 1.1;
+          float far = 1.0 - exp(-t / 12000.0);
+          body = mix(body, uHaze * 1.04, far * 0.9);
+          float fade = smoothstep(0.004, 0.09, y);
+          cov *= fade;
+          // High cirrus, thin and streaked along the wind.
+          float t2 = (7500.0 - uCam.y) / max(y, 0.004);
+          vec2 Q = uCam.xz + d.xz * t2 + vec2(25.0, 6.0) * uTime;
+          float ci = smoothstep(0.5, 0.85, c_fbm(vec2(Q.x / 2600.0, Q.y / 9000.0) + c_fbm(Q / 7000.0))) * 0.5 * smoothstep(0.03, 0.3, y);
+          c = mix(c, vec3(1.0, 0.99, 0.97), ci);
+          c = mix(c, body, cov * 0.97);
+        }
+        // The sun itself, hidden behind cloud when it's there.
+        c += vec3(1.0, 0.97, 0.9) * smoothstep(0.99962, 0.99985, sd) * 9.0 * (1.0 - cov);
+        c += vec3(1.0, 0.9, 0.7) * pow(sd, 900.0) * 1.5 * (1.0 - cov * 0.7);
         gl_FragColor = vec4(c, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -167,36 +243,39 @@ scene.add(skyGroup);
     depthWrite: false,
     fog: false,
   });
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(2000, 32, 16), mat);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(2000, 64, 32), mat);
   dome.renderOrder = -2;
+  dome.frustumCulled = false;
   skyGroup.add(dome);
-  // Fair-weather clouds.
-  const cv = document.createElement("canvas");
-  cv.width = 256;
-  cv.height = 128;
-  const g = cv.getContext("2d");
-  const r = rng(9);
-  for (let i = 0; i < 26; i++) {
-    const x = 40 + r() * 176;
-    const y = 50 + r() * 40 - Math.abs(x - 128) * 0.15;
-    const rad = 18 + r() * 26;
-    const grad = g.createRadialGradient(x, y, 0, x, y, rad);
-    grad.addColorStop(0, "rgba(255,255,255,0.9)");
-    grad.addColorStop(1, "rgba(255,255,255,0)");
-    g.fillStyle = grad;
-    g.fillRect(0, 0, 256, 128);
-  }
-  const tex = new THREE.CanvasTexture(cv);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  for (let i = 0; i < 22; i++) {
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, fog: false, depthWrite: false, opacity: 0.85, transparent: true }));
-    const a = r() * Math.PI * 2;
-    const d = 700 + r() * 900;
-    s.position.set(Math.cos(a) * d, 260 + r() * 260, Math.sin(a) * d);
-    s.scale.set(400 + r() * 300, 160 + r() * 90, 1);
-    s.renderOrder = -1;
-    skyGroup.add(s);
-  }
+}
+// Cloud shadows on a material: darken where a cloud stands between it and
+// the sun.
+const _shadowed = new Set();
+function cloudShadows(mat, strength = 0.3) {
+  if (_shadowed.has(mat)) return mat;
+  _shadowed.add(mat);
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    if (prev) prev(sh, r);
+    sh.uniforms.uTime = skyU.uTime;
+    sh.uniforms.uSun = skyU.uSun;
+    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec3 vCWorld;").replace(
+      "#include <project_vertex>",
+      `#include <project_vertex>
+      vec4 cw = vec4(transformed, 1.0);
+      #ifdef USE_INSTANCING
+        cw = instanceMatrix * cw;
+      #endif
+      vCWorld = (modelMatrix * cw).xyz;`,
+    );
+    sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying vec3 vCWorld;\n" + CLOUD_GLSL).replace(
+      "#include <opaque_fragment>",
+      `outgoingLight *= 1.0 - ${strength.toFixed(2)} * cloudShade(vCWorld);
+      #include <opaque_fragment>`,
+    );
+  };
+  mat.customProgramCacheKey = () => "cloudy" + mat.uuid;
+  return mat;
 }
 
 // ---------- Helpers ----------
@@ -537,6 +616,7 @@ atlasTex.colorSpace = THREE.SRGBColorSpace;
 atlasTex.anisotropy = Math.min(8, maxAniso);
 // The wall material: repeat one tile of the atlas across each wall.
 const wallMat = new THREE.MeshLambertMaterial({ map: atlasTex });
+wallMat.userData.atlas = true;
 wallMat.onBeforeCompile = (sh) => {
   sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute vec4 tile;\nvarying vec4 vTile;").replace("#include <uv_vertex>", "#include <uv_vertex>\nvTile = tile;");
   sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying vec4 vTile;").replace(
@@ -564,6 +644,8 @@ function tiledPlane(w, h, tw, th, u0, v0, tile) {
   g.setAttribute("tile", new THREE.BufferAttribute(a, 4));
   return g;
 }
+cloudShadows(wallMat);
+for (const k of ["asphalt", "sidewalk", "grass", "plaza", "roof", "hedge", "path"]) cloudShadows(M[k]);
 
 // ---------- The island ----------
 // About 4.5 km across: rolling hills and woods inland, beaches round the
@@ -950,9 +1032,6 @@ const CV = CH / GSTEP; // cells along a tile
 const TERRAIN_R = TOUCH ? 1000 : 1500; // detailed ground this far; the whole island beyond, simpler
 const FINE_R = TOUCH ? 500 : 750; // full detail within this
 const TREE_R = TOUCH ? 520 : 760;
-// A light haze: the whole island stays in sight from anywhere on it.
-scene.fog.near = 700;
-scene.fog.far = 5200;
 
 // The sea.
 {
@@ -972,7 +1051,51 @@ const grain = canvasTex(128, 128, (g) => {
   }
   for (let i = 0; i < 700; i++) { g.fillStyle = r() < 0.5 ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.15)"; g.fillRect(r() * 128, r() * 128, 1, 2 + r() * 2); }
 });
-const groundMat = new THREE.MeshLambertMaterial({ map: grain, vertexColors: true });
+// Fine relief for the ground: a tiling bumpy surface the low sun picks out.
+const groundNormal = (() => {
+  const N = 256;
+  const hgt = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    // Tileable: noise sampled on a torus.
+    let s = 0;
+    let a = 0.5;
+    let f = 4;
+    for (let k = 0; k < 5; k++) {
+      const u = (x / N) * f;
+      const v = (y / N) * f;
+      const wrap = (q) => q % f;
+      const i0 = Math.floor(u), j0 = Math.floor(v);
+      const fu = u - i0, fv = v - j0;
+      const sm = (t) => t * t * (3 - 2 * t);
+      const h = (i, j) => hash2(wrap(i) + k * 97, wrap(j) + k * 31);
+      s += a * (h(i0, j0) * (1 - sm(fu)) * (1 - sm(fv)) + h(i0 + 1, j0) * sm(fu) * (1 - sm(fv)) + h(i0, j0 + 1) * (1 - sm(fu)) * sm(fv) + h(i0 + 1, j0 + 1) * sm(fu) * sm(fv));
+      a *= 0.55;
+      f *= 2;
+    }
+    hgt[y * N + x] = s;
+  }
+  const c = document.createElement("canvas");
+  c.width = c.height = N;
+  const g = c.getContext("2d");
+  const img = g.createImageData(N, N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const H = (i, j) => hgt[((j + N) % N) * N + ((i + N) % N)];
+    const dx = (H(x + 1, y) - H(x - 1, y)) * 6;
+    const dy = (H(x, y + 1) - H(x, y - 1)) * 6;
+    const l = Math.hypot(dx, dy, 1);
+    const k = (y * N + x) * 4;
+    img.data[k] = ((-dx / l) * 0.5 + 0.5) * 255;
+    img.data[k + 1] = ((-dy / l) * 0.5 + 0.5) * 255;
+    img.data[k + 2] = ((1 / l) * 0.5 + 0.5) * 255;
+    img.data[k + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = Math.min(8, maxAniso);
+  return t;
+})();
+const groundMat = cloudShadows(new THREE.MeshLambertMaterial({ map: grain, vertexColors: true, normalMap: groundNormal, normalScale: new THREE.Vector2(0.9, 0.9) }));
 const COL = {
   sand: new THREE.Color(0xe3d3a4), grass: new THREE.Color(0x6aa548), meadow: new THREE.Color(0x8db752), dark: new THREE.Color(0x4c8a3c),
   rock: new THREE.Color(0x8c8a80), gravel: new THREE.Color(0xa59e8c), wet: new THREE.Color(0xb7a77c),
@@ -1042,6 +1165,10 @@ function buildTile(cx, cz, lod = 1) {
     uv.push((i * GSTEP) / 9, (j * GSTEP) / 9);
     const slope = Math.hypot(gridH(i + st, j) - gridH(i - st, j), gridH(i, j + st) - gridH(i, j - st)) / (2 * GSTEP * st);
     const c = groundColour(i * GSTEP, j * GSTEP, h, slope);
+    // Hollows a shade darker, crests a shade lighter: the land reads in depth.
+    const R3 = 4;
+    const lap = (gridH(i + R3, j) + gridH(i - R3, j) + gridH(i, j + R3) + gridH(i, j - R3)) / 4 - h;
+    c.multiplyScalar(clamp(1 - lap * 0.05, 0.74, 1.12));
     col.push(c.r, c.g, c.b);
   }
   if (maxH < -2) return { cx, cz, mesh: null, maxH, lod };
@@ -1100,7 +1227,7 @@ const TREE = {
   })(),
   bark: new THREE.MeshLambertMaterial({ color: 0x6b4a32 }),
   palmBark: new THREE.MeshLambertMaterial({ color: 0x9a7a52 }),
-  leaf: new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }),
+  leaf: cloudShadows(new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true })),
   greens: [0x4f9a3a, 0x5aa646, 0x3f8a36, 0x6cb04a, 0x478f3e, 0x7aaa3a].map((c) => new THREE.Color(c)),
   pine: [0x2f6a3a, 0x356f3c, 0x2a5f36].map((c) => new THREE.Color(c)),
   deep: [0x234f30, 0x2a5a34, 0x1f4a2c, 0x2e5f3a].map((c) => new THREE.Color(c)),
@@ -1179,14 +1306,15 @@ function buildTrees(cx, cz) {
   const blobs = [];
   // Rocks and bushes scattered through the fields and under the trees.
   const r2 = rng(cx * 31 + cz * 977 + 5);
-  for (let k = 0; k < 70; k++) {
+  const highTile = regionW(REG.high, (cx + 0.5) * CH, (cz + 0.5) * CH);
+  for (let k = 0; k < 70 + highTile * 220; k++) {
     const x = cx * CH + r2() * CH;
     const z = cz * CH + r2() * CH;
     if (townAt(x, z, 10) || roadAt(x, z, ROAD_HW + 2)) continue;
     const h = terrainH(x, z);
     if (h < 1) continue;
-    const rock = r2() < 0.35 || h > 70;
-    const s = rock ? 0.4 + Math.pow(r2(), 3) * 2.2 : 0.5 + r2() * 0.8;
+    const rock = r2() < 0.35 || h > 70 || regionW(REG.high, x, z) > 0.3;
+    const s = rock ? 0.4 + Math.pow(r2(), 3) * (2.2 + regionW(REG.high, x, z) * 4) : 0.5 + r2() * 0.8;
     blobs.push({ x, y: h + (rock ? s * 0.15 : s * 0.4), z, s, sy: s * (rock ? 0.55 : 0.75), c: rock ? TREE.rocks[Math.floor(r2() * 3)] : TREE.greens[Math.floor(r2() * 6)] });
   }
   for (const t of round) {
@@ -1245,7 +1373,7 @@ function buildTrees(cx, cz) {
   g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
   g.setIndex(idx);
   g.computeVertexNormals();
-  const far = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  const far = new THREE.Mesh(g, cloudShadows(new THREE.MeshLambertMaterial({ vertexColors: true })));
   scene.add(far);
 }
 
@@ -1364,7 +1492,7 @@ function streamLand(px, pz, budget = 2, limit = TERRAIN_R) {
     g.fillRect(30, 0, 1, 256);
     g.fillRect(33, 0, 1, 256);
   });
-  const mat = new THREE.MeshLambertMaterial({ map: tex, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const mat = cloudShadows(new THREE.MeshLambertMaterial({ map: tex, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
   for (const road of roads) {
     const S = road.S;
     const N = S.length;
@@ -2862,17 +2990,17 @@ function detailGeo(type) {
   if (detailCache.has(type)) return detailCache.get(type);
   const T = TYPES[type];
   const { L, W, H, wb } = T;
-  const cl = 0.3;
+  const cl = T.clear ?? 0.3;
   const belt = cl + T.bodyH;
   const cabL = T.cabL * L;
   const zf = T.cabZ * L + cabL / 2; // where the windscreen meets the hood
   const zr = T.cabZ * L - cabL / 2; // where the back window meets the body
   const top = H;
   const rise = top - belt;
-  const ws = T.van ? rise * 0.4 : rise * 1.3; // how far the windscreen leans back
-  const rw = T.van ? 0.05 : type === "hatch" ? rise * 0.35 : type === "coupe" ? rise * 1.5 : T.bed ? 0.08 : rise * 0.95;
-  const ra = TIRE_R + 0.08; // wheel arch radius
-  const yw = TIRE_R;
+  const ws = T.van ? rise * 0.4 : T.rover ? rise * 0.32 : rise * 1.3; // how far the windscreen leans back
+  const rw = T.van || T.rover ? 0.05 : type === "hatch" ? rise * 0.35 : type === "coupe" ? rise * 1.5 : T.bed ? 0.08 : rise * 0.95;
+  const ra = (T.tire ?? TIRE_R) + 0.08; // wheel arch radius
+  const yw = T.tire ?? TIRE_R;
   const paint = [];
   const trim = [];
   const chrome = [];
@@ -2902,7 +3030,7 @@ function detailGeo(type) {
       s.lineTo(zr - 0.02, belt + 0.34);
       s.lineTo(rearZ + 0.03, belt + 0.34);
       s.lineTo(rearZ, belt - 0.1);
-    } else if (type === "hatch" || T.van) {
+    } else if (type === "hatch" || T.van || T.rover) {
       s.lineTo(zr + 0.02, belt + 0.02);
       s.quadraticCurveTo(rearZ + 0.02, belt + 0.02, rearZ, belt - 0.12);
     } else {
@@ -2979,6 +3107,24 @@ function detailGeo(type) {
     const doors = T.van ? [zf - 0.05, zf - 0.95] : type === "coupe" || T.bed ? [zf - 0.05, zr + 0.05] : [zf - 0.05, (zf + zr) / 2 + 0.1, zr + 0.15];
     for (const z of doors) bx(trim, 0.012, T.bodyH - 0.12, 0.014, sx * (W / 2 + 0.003), cl + 0.06 + (T.bodyH - 0.12) / 2, z);
     for (let k = 0; k < doors.length - 1; k++) bx(chrome, 0.03, 0.03, 0.14, sx * (W / 2 + 0.01), belt - 0.1, doors[k + 1] + 0.18);
+  }
+  if (T.rover) {
+    // A spare wheel on the tailgate, a roof rack, a bull bar, chunky
+    // wheel-arch flares and a snorkel.
+    const spare = new THREE.CylinderGeometry(0.42, 0.42, 0.26, 18);
+    spare.rotateX(Math.PI / 2);
+    spare.translate(0, belt + 0.05, -L / 2 - 0.16);
+    spare.deleteAttribute("uv");
+    trim.push(spare);
+    bx(chrome, 0.3, 0.3, 0.04, 0, belt + 0.05, -L / 2 - 0.3);
+    for (const sx of [-1, 1]) bx(trim, 0.05, 0.06, cabL * 0.95, sx * (gw * 0.45), top + 0.16, (zf + zr) / 2);
+    for (let k = 0; k < 4; k++) bx(trim, gw * 0.9, 0.04, 0.05, 0, top + 0.18, zr + 0.2 + k * (cabL - 0.4) / 3);
+    for (const sx of [-1, 1]) for (const yy of [0.08, 0.2]) bx(trim, 0.06, 0.06, 0.06, sx * (gw * 0.45), top + yy - 0.05, zf - ws + 0.2);
+    bx(trim, W * 0.9, 0.08, 0.08, 0, cl + 0.42, L / 2 + 0.2);
+    bx(trim, W * 0.9, 0.08, 0.08, 0, cl + 0.7, L / 2 + 0.2);
+    for (const sx of [-0.3, 0.3]) bx(trim, 0.08, 0.5, 0.08, sx * W, cl + 0.5, L / 2 + 0.2);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) bx(trim, 0.12, 0.1, ra * 2.1, sx * (W / 2 + 0.03), yw + ra * 0.72, sz * wb / 2);
+    bx(trim, 0.1, 1.0, 0.1, W / 2 + 0.04, belt + 0.3, zf - 0.05);
   }
   bx(plate, 0.52, 0.12, 0.02, 0, cl + 0.22, L / 2 + 0.07);
   bx(plate, 0.52, 0.12, 0.02, 0, cl + 0.3, -L / 2 - 0.07);
@@ -3066,6 +3212,9 @@ const TYPES = {
   sedan: { L: 4.7, W: 1.84, H: 1.48, bodyH: 0.6, cabL: 0.46, cabZ: -0.04, wb: 2.75, aMax: 5.2, pw: 140, top: 52, grip: 10.5, mass: 1.4 },
   hatch: { L: 3.9, W: 1.74, H: 1.52, bodyH: 0.62, cabL: 0.55, cabZ: -0.1, wb: 2.45, aMax: 5.5, pw: 120, top: 48, grip: 11, mass: 1.1 },
   pickup: { L: 5.3, W: 2.0, H: 1.9, bodyH: 0.78, cabL: 0.3, cabZ: 0.1, wb: 3.2, aMax: 5, pw: 140, top: 47, grip: 9, mass: 1.9, bed: true },
+  // The off-roader: high, boxy, big tyres, slower on tarmac but as sure on
+  // grass and dirt as on the road.
+  rover: { L: 4.5, W: 2.02, H: 2.12, bodyH: 0.78, cabL: 0.56, cabZ: -0.1, wb: 2.75, aMax: 6.2, pw: 160, top: 47, grip: 10.5, mass: 1.9, rover: true, tire: 0.5, clear: 0.58, offGrip: 1.0, offDrag: 0.04, offPower: 1.0 },
   van: { L: 5.0, W: 1.96, H: 2.2, bodyH: 0.9, cabL: 0.8, cabZ: -0.06, wb: 3.0, aMax: 4.2, pw: 110, top: 42, grip: 8.5, mass: 2.0, van: true },
 };
 // Air drag set so each car tops out at its top speed.
@@ -3088,7 +3237,7 @@ function carGeo(type, paint) {
   if (geoCache.has(key)) return geoCache.get(key);
   const T = TYPES[type];
   const { L, W, H, bodyH } = T;
-  const cl = 0.3; // ground clearance
+  const cl = T.clear ?? 0.3; // ground clearance
   const parts = [];
   const add = (w, h, d, col, x, y, z) => parts.push(colored(new THREE.BoxGeometry(w, h, d).translate(x, y, z), col));
   add(W, bodyH, L, paint, 0, cl + bodyH / 2, 0);
@@ -3141,6 +3290,21 @@ function makeCar(type, paint, x, z, h) {
   cars.push(c);
   return c;
 }
+// Turn a car into another kind, where it stands (keeping its speed).
+function setCarType(c, type, paint = c.paint) {
+  scene.remove(c.mesh);
+  scene.remove(c.detail.grp);
+  c.type = type;
+  c.T = TYPES[type];
+  c.paint = paint;
+  c.mesh = new THREE.Mesh(carGeo(type, paint), carMat);
+  c.mesh.castShadow = true;
+  c.mesh.receiveShadow = true;
+  c.mesh.rotation.order = "YXZ";
+  scene.add(c.mesh);
+  c.detail = buildDetail(type, paint);
+  c.gear = Math.min(c.gear, 5);
+}
 function placeCar(c, x, z, h) {
   Object.assign(c, { x, z, h, vx: 0, vz: 0, vy: 0, vl: 0, steer: 0, pitch: 0, roll: 0, prevVl: 0, gear: 1, drowned: false, y: groundAt(x, z) });
 }
@@ -3182,7 +3346,7 @@ function stepCar(c, dt) {
     if (I.thr > 0) {
       if (vl > -0.5) {
         const a = Math.min(T.aMax, T.pw / (Math.max(0, vl) + 6));
-        if (!c.shift) vl += I.thr * a * (onRoad ? 1 : 0.75) * dt;
+        if (!c.shift) vl += I.thr * a * (onRoad ? 1 : T.offPower ?? 0.75) * dt;
       } else vl += I.thr * 12 * dt;
     }
     if (I.brk > 0) {
@@ -3191,7 +3355,7 @@ function stepCar(c, dt) {
     }
     if (I.hb) vl -= Math.sign(vl) * Math.min(Math.abs(vl), 4.5 * dt);
     // Air, rolling, and the extra drag of grass.
-    vl -= (T.drag * vl * Math.abs(vl) + vl * (I.thr ? 0.02 : 0.09) + (onRoad ? 0 : vl * 0.25)) * dt;
+    vl -= (T.drag * vl * Math.abs(vl) + vl * (I.thr ? 0.02 : 0.09) + (onRoad ? 0 : vl * (T.offDrag ?? 0.25))) * dt;
     if (!I.thr && !I.brk && Math.abs(vl) < 0.3) vl *= 0.85;
     // Gravity along the slope.
     vl -= 9.8 * ((gF - gB) / T.wb) * 0.85 * dt;
@@ -3359,6 +3523,7 @@ function skid(c) {
 }
 
 const _wm = new THREE.Matrix4();
+const tmpS = new THREE.Vector3();
 const _wq = new THREE.Quaternion();
 const _we = new THREE.Euler(0, 0, 0, "YXZ");
 function drawCars(camX, camZ) {
@@ -3383,7 +3548,8 @@ function drawCars(camX, camZ) {
     const T = c.T;
     for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
       _we.set(c.spin, sz > 0 ? -c.steer : 0, 0);
-      tmpM.compose(tmpV.set(sx * (T.W / 2 - 0.16), TIRE_R, sz * T.wb / 2), _wq.setFromEuler(_we), ONE);
+      const tr = T.tire ?? TIRE_R;
+      tmpM.compose(tmpV.set(sx * (T.W / 2 - 0.16), tr, sz * T.wb / 2), _wq.setFromEuler(_we), tmpS.setScalar(tr / TIRE_R));
       _wm.multiplyMatrices(c.mesh.matrix, tmpM);
       tires.setMatrixAt(w, _wm);
       // The rim's face points outward on both sides.
@@ -3508,13 +3674,13 @@ function spawnTraffic(px, pz) {
     traffic.push(c);
   }
   // Cars left at the places worth visiting.
-  for (const [x, z, h] of poiParked) makeCar(pick(["sedan", "hatch", "coupe", "pickup", "van"]), pick(PAINTS), x, z, h).parked = true;
+  for (const [x, z, h] of poiParked) makeCar(pick(["sedan", "hatch", "coupe", "pickup", "van", "rover", "rover"]), pick(PAINTS), x, z, h).parked = true;
   for (let k = 0; k < PARKED; k++) {
     const spot = randomSpot(0, 0, 0, 1e9, true);
     if (!spot) continue;
     const { n, dx, dz, along } = spot;
     const [rx, rz] = rightOf(dx, dz);
-    const c = makeCar(pick(["sedan", "hatch", "hatch", "coupe", "pickup", "van", "sedan"]), pick(PAINTS), n.x + dx * along + rx * (RW - 1.25), n.z + dz * along + rz * (RW - 1.25), Math.atan2(dx, dz));
+    const c = makeCar(pick(["sedan", "hatch", "hatch", "coupe", "pickup", "van", "sedan", "rover"]), pick(PAINTS), n.x + dx * along + rx * (RW - 1.25), n.z + dz * along + rz * (RW - 1.25), Math.atan2(dx, dz));
     c.parked = true;
   }
 }
@@ -3942,33 +4108,44 @@ function audioStart() {
     s.start();
     return { f: fl, g };
   };
-  // The engine: a sawtooth and a sub an octave down, through a filter that
-  // opens with the throttle, and a little rasp on top.
+  // The engine: a rounded tone at the firing rate (its overtones falling
+  // away gently), a soft rumble an octave down, and a breath of intake noise,
+  // all through a warm low-pass that opens with the throttle. Kept well
+  // under the rest of the mix.
   const eng = ctx.createGain();
   eng.gain.value = 0;
   const lp = ctx.createBiquadFilter();
   lp.type = "lowpass";
-  lp.Q.value = 3;
-  const shaper = ctx.createWaveShaper();
-  const curve = new Float32Array(256);
-  for (let i = 0; i < 256; i++) { const x = (i / 128) - 1; curve[i] = Math.tanh(x * 2.2); }
-  shaper.curve = curve;
+  lp.Q.value = 0.8;
+  const body = ctx.createBiquadFilter();
+  body.type = "peaking";
+  body.frequency.value = 110;
+  body.gain.value = 5;
+  body.Q.value = 0.9;
+  const real = new Float32Array(24);
+  const imag = new Float32Array(24);
+  for (let n = 1; n < 24; n++) imag[n] = (n % 2 ? 1 : 0.55) / Math.pow(n, 1.35);
+  const wave = ctx.createPeriodicWave(real, imag);
   const o1 = ctx.createOscillator();
-  o1.type = "sawtooth";
+  o1.setPeriodicWave(wave);
   const o2 = ctx.createOscillator();
-  o2.type = "square";
+  o2.type = "sine";
   const o3 = ctx.createOscillator();
-  o3.type = "sawtooth";
+  o3.setPeriodicWave(wave);
+  o3.detune.value = 9;
+  const g1 = ctx.createGain();
+  g1.gain.value = 0.55;
   const g2 = ctx.createGain();
   g2.gain.value = 0.6;
   const g3 = ctx.createGain();
-  g3.gain.value = 0.35;
-  o1.connect(shaper);
-  o2.connect(g2).connect(shaper);
-  o3.connect(g3).connect(shaper);
-  shaper.connect(lp).connect(eng).connect(AU.out);
+  g3.gain.value = 0.3;
+  o1.connect(g1).connect(lp);
+  o2.connect(g2).connect(lp);
+  o3.connect(g3).connect(lp);
+  lp.connect(body).connect(eng).connect(AU.out);
   for (const o of [o1, o2, o3]) o.start();
   AU.engine = { o1, o2, o3, lp, eng };
+  AU.intake = loop("bandpass", 900, 1.2, 0);
   AU.tyre = loop("bandpass", 1400, 4);
   AU.wind = loop("lowpass", 700, 0.5);
   AU.gravel = loop("lowpass", 260, 0.8);
@@ -4073,12 +4250,14 @@ function updateAudio(dt, car, honking) {
   if (car) {
     const rpm = car.rpm;
     const f = (rpm / 60) * 2;
-    ease(e.o1.frequency, f, 0.03);
-    ease(e.o2.frequency, f / 2, 0.03);
-    ease(e.o3.frequency, f * 1.503, 0.03);
+    ease(e.o1.frequency, f, 0.04);
+    ease(e.o2.frequency, f / 2, 0.04);
+    ease(e.o3.frequency, f, 0.04);
     const thr = car.in.thr;
-    ease(e.lp.frequency, 260 + thr * 1500 + rpm * 0.18, 0.05);
-    ease(e.eng.gain, (0.09 + thr * 0.12) * (car.shift ? 0.4 : 1), 0.05);
+    ease(e.lp.frequency, 220 + thr * 700 + rpm * 0.09, 0.08);
+    ease(e.eng.gain, (0.04 + thr * 0.045) * (car.shift ? 0.45 : 1), 0.06);
+    ease(AU.intake.g.gain, thr * 0.012 * (rpm / 6700), 0.08);
+    ease(AU.intake.f.frequency, 500 + rpm * 0.25, 0.08);
     const sp = Math.hypot(car.vx, car.vz);
     ease(AU.tyre.g.gain, car.grounded && car.slip > 2.5 && sp > 4 ? clamp((car.slip - 2.5) * 0.04, 0, 0.22) : 0, 0.05);
     ease(AU.tyre.f.frequency, 1100 + car.slip * 30, 0.1);
@@ -4086,6 +4265,7 @@ function updateAudio(dt, car, honking) {
     ease(AU.gravel.g.gain, car.offroad && car.grounded ? clamp(sp * 0.012, 0, 0.35) : 0, 0.1);
   } else {
     ease(e.eng.gain, 0, 0.2);
+    ease(AU.intake.g.gain, 0, 0.2);
     ease(AU.tyre.g.gain, 0, 0.1);
     ease(AU.wind.g.gain, 0, 0.3);
     ease(AU.gravel.g.gain, 0, 0.1);
@@ -4298,6 +4478,13 @@ addEventListener("keydown", (e) => {
   keys.add(e.code);
   if (e.code === "KeyF" || e.code === "Enter") toggleCar();
   if (e.code === "KeyC") state.camMode = (state.camMode + 1) % 3;
+  if (e.code === "KeyV" && state.mode === "drive") {
+    // Swap to the off-roader and back, right where you are.
+    const c = state.car;
+    if (c.type === "rover") setCarType(c, c.roadType || "coupe", c.roadPaint || c.paint);
+    else { c.roadType = c.type; c.roadPaint = c.paint; setCarType(c, "rover", 0x6b7a4a); }
+    sfx.door();
+  }
   if (e.code === "KeyP") $("fps").hidden = !$("fps").hidden;
   if (e.code.startsWith("Arrow") || e.code === "Space") e.preventDefault();
 });
@@ -4411,7 +4598,7 @@ function step(dt) {
   if (state.mode === "foot") {
     const c = nearestCar(me.x, me.z);
     hint(c ? `<kbd>F</kbd> ${c.ai ? "Take this car" : "Get in"}` : "");
-  } else hint(sp < 14 ? "<kbd>F</kbd> Get out" : "");
+  } else hint(sp < 14 ? `<kbd>F</kbd> Get out · <kbd>V</kbd> ${car.type === "rover" ? "Road car" : "Off-roader"}` : "");
   mapT -= dt;
   if (mapT <= 0) { mapT = 0.05; drawMap(px, pz, state.mode === "drive" ? car.h : camYaw); }
   updateAudio(dt, state.mode === "drive" ? car : null, keys.has("KeyH"));
@@ -4474,6 +4661,8 @@ function placeCamera(dt) {
   _look.set(tx + (Math.random() - 0.5) * s, ty + (Math.random() - 0.5) * s, tz);
   camera.lookAt(_look);
   skyGroup.position.copy(camera.position);
+  skyU.uCam.value.copy(camera.position);
+  skyU.uTime.value = state.time;
 }
 const clock = new THREE.Clock();
 function frame() {

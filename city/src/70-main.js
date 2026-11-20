@@ -199,6 +199,13 @@ addEventListener("keydown", (e) => {
   keys.add(e.code);
   if (e.code === "KeyF" || e.code === "Enter") toggleCar();
   if (e.code === "KeyC") state.camMode = (state.camMode + 1) % 3;
+  if (e.code === "KeyV" && state.mode === "drive") {
+    // Swap to the off-roader and back, right where you are.
+    const c = state.car;
+    if (c.type === "rover") setCarType(c, c.roadType || "coupe", c.roadPaint || c.paint);
+    else { c.roadType = c.type; c.roadPaint = c.paint; setCarType(c, "rover", 0x6b7a4a); }
+    sfx.door();
+  }
   if (e.code === "KeyP") $("fps").hidden = !$("fps").hidden;
   if (e.code.startsWith("Arrow") || e.code === "Space") e.preventDefault();
 });
@@ -312,7 +319,7 @@ function step(dt) {
   if (state.mode === "foot") {
     const c = nearestCar(me.x, me.z);
     hint(c ? `<kbd>F</kbd> ${c.ai ? "Take this car" : "Get in"}` : "");
-  } else hint(sp < 14 ? "<kbd>F</kbd> Get out" : "");
+  } else hint(sp < 14 ? `<kbd>F</kbd> Get out · <kbd>V</kbd> ${car.type === "rover" ? "Road car" : "Off-roader"}` : "");
   mapT -= dt;
   if (mapT <= 0) { mapT = 0.05; drawMap(px, pz, state.mode === "drive" ? car.h : camYaw); }
   updateAudio(dt, state.mode === "drive" ? car : null, keys.has("KeyH"));
@@ -375,6 +382,8 @@ function placeCamera(dt) {
   _look.set(tx + (Math.random() - 0.5) * s, ty + (Math.random() - 0.5) * s, tz);
   camera.lookAt(_look);
   skyGroup.position.copy(camera.position);
+  skyU.uCam.value.copy(camera.position);
+  skyU.uTime.value = state.time;
 }
 const clock = new THREE.Clock();
 function frame() {

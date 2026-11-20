@@ -31,46 +31,122 @@ document.body.prepend(canvas);
 const scene = new THREE.Scene();
 const HAZE = new THREE.Color(0xcfe3f5);
 scene.background = HAZE.clone();
-scene.fog = new THREE.Fog(HAZE, 220, 760);
+scene.fog = new THREE.FogExp2(HAZE, 0.00024);
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.25, 40000);
 camera.rotation.order = "YXZ";
 
 // ---------- Sun and sky ----------
-const SUN_DIR = new THREE.Vector3(0.42, 0.78, 0.46).normalize();
-const sun = new THREE.DirectionalLight(0xfff0d8, 3.0);
+// An afternoon sun, low enough to throw long shadows and pick out the land.
+const SUN_DIR = new THREE.Vector3(0.55, 0.5, 0.55).normalize();
+const sun = new THREE.DirectionalLight(0xffe6c4, 3.5);
 sun.castShadow = true;
-sun.shadow.mapSize.set(TOUCH ? 1024 : 2048, TOUCH ? 1024 : 2048);
-Object.assign(sun.shadow.camera, { left: -75, right: 75, top: 75, bottom: -75, near: 1, far: 400 });
+const SHADOW_R = TOUCH ? 75 : 130;
+sun.shadow.mapSize.set(TOUCH ? 1024 : 4096, TOUCH ? 1024 : 4096);
+Object.assign(sun.shadow.camera, { left: -SHADOW_R, right: SHADOW_R, top: SHADOW_R, bottom: -SHADOW_R, near: 1, far: 500 });
 sun.shadow.bias = -0.0005;
 sun.shadow.normalBias = 0.04;
 scene.add(sun, sun.target);
-const hemi = new THREE.HemisphereLight(0xcfe6ff, 0x7d7058, 1.15);
+const hemi = new THREE.HemisphereLight(0xbcd8ff, 0x6a5e48, 0.95);
 scene.add(hemi);
 // Keep the sun's shadows centred on you, snapped to its texels so they
 // don't crawl as you move.
 const _sv = new THREE.Vector3();
 function aimSun(x, z) {
-  const texel = 150 / sun.shadow.mapSize.x;
+  const texel = (2 * SHADOW_R) / sun.shadow.mapSize.x;
   const sx = Math.round(x / texel) * texel;
   const sz = Math.round(z / texel) * texel;
   sun.target.position.set(sx, 0, sz);
   sun.position.copy(_sv.copy(SUN_DIR).multiplyScalar(200)).add(sun.target.position);
 }
 
+// ---------- The sky ----------
+// A deep blue overhead fading to a pale hazy horizon, a sun with a soft
+// glow, and two layers of cloud: a deck of fair-weather cumulus about a
+// kilometre up (fixed to the world, so you drive under it and it drifts on
+// the wind) and thin high cirrus above. The clouds are lit from the sun's
+// side and grey underneath, and they throw their shadows on the land.
+const CLOUD_H = 1100;
+const skyU = { uTime: { value: 0 }, uSun: { value: SUN_DIR }, uHaze: { value: HAZE }, uCam: { value: new THREE.Vector3() } };
+const CLOUD_GLSL = `
+  uniform float uTime;
+  uniform vec3 uSun;
+  float c_h21(vec2 p) { p = fract(p * vec2(233.34, 851.73)); p += dot(p, p + 23.45); return fract(p.x * p.y); }
+  float c_vn(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(c_h21(i), c_h21(i + vec2(1, 0)), f.x), mix(c_h21(i + vec2(0, 1)), c_h21(i + vec2(1, 1)), f.x), f.y);
+  }
+  float c_fbm(vec2 p) {
+    float s = 0.0, a = 0.5;
+    mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+    for (int i = 0; i < 5; i++) { s += a * c_vn(p); p = m * p; a *= 0.5; }
+    return s;
+  }
+  // How cloudy it is above the world point xz: 0 clear, 1 thick.
+  float cloudCover(vec2 xz) {
+    vec2 w = vec2(9.0, 3.5) * uTime;
+    vec2 p = (xz + w) / 950.0;
+    float warp = c_fbm(p * 0.6 + 3.1);
+    float base = c_fbm(p + warp * 0.7);
+    float det = c_fbm(p * 3.4 - w / 500.0);
+    return smoothstep(0.53, 0.8, base * 0.74 + det * 0.32);
+  }
+  // The shadow of the clouds on a point: follow the sun up to the deck.
+  float cloudShade(vec3 wp) {
+    vec2 at = wp.xz + uSun.xz / max(uSun.y, 0.2) * (${CLOUD_H.toFixed(1)} - wp.y);
+    return cloudCover(at);
+  }
+`;
 const skyGroup = new THREE.Group();
 scene.add(skyGroup);
 {
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uSun: { value: SUN_DIR } },
-    vertexShader: `varying vec3 vDir; void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-    fragmentShader: `
-      uniform vec3 uSun;
+    uniforms: skyU,
+    vertexShader: `varying vec3 vDir; void main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: CLOUD_GLSL + `
+      uniform vec3 uHaze;
+      uniform vec3 uCam;
       varying vec3 vDir;
       void main() {
-        float y = max(vDir.y, 0.0);
-        vec3 c = mix(vec3(0.81, 0.89, 0.96), vec3(0.24, 0.55, 0.92), pow(y, 0.55));
-        float s = max(dot(normalize(vDir), uSun), 0.0);
-        c += vec3(1.0, 0.9, 0.7) * (pow(s, 600.0) * 4.0 + pow(s, 12.0) * 0.18);
+        vec3 d = normalize(vDir);
+        float y = d.y;
+        float h = max(y, 0.0);
+        float sd = max(dot(d, uSun), 0.0);
+        vec3 zen = vec3(0.075, 0.24, 0.66);
+        vec3 c = mix(uHaze, zen, pow(h, 0.42));
+        // Warmer and brighter toward the sun, a little deeper blue away from it.
+        c += vec3(1.0, 0.82, 0.6) * pow(sd, 5.0) * 0.22 * (1.0 - h);
+        c += vec3(1.0, 0.95, 0.85) * pow(sd, 48.0) * 0.45;
+        c *= 1.0 - 0.14 * h * (1.0 - sd);
+        // A brighter band of haze right at the horizon.
+        c = mix(c, uHaze * 1.06, exp(-abs(y) * 26.0) * 0.6);
+        if (y < 0.0) c = uHaze;
+        float cov = 0.0;
+        if (y > 0.0) {
+          // The cumulus deck.
+          float t = (${CLOUD_H.toFixed(1)} - uCam.y) / max(y, 0.004);
+          vec2 P = uCam.xz + d.xz * t;
+          cov = cloudCover(P);
+          vec2 toSun = normalize(uSun.xz + 1e-5);
+          float cov2 = cloudCover(P + toSun * 140.0);
+          float lit = clamp(0.78 + (cov - cov2) * 1.8, 0.3, 1.2);
+          vec3 body = mix(vec3(0.5, 0.56, 0.66), vec3(1.0, 0.985, 0.96), lit);
+          body = mix(body, vec3(1.0), (1.0 - cov) * 0.35);
+          body += vec3(1.0, 0.85, 0.6) * pow(sd, 8.0) * (1.0 - cov) * 1.1;
+          float far = 1.0 - exp(-t / 12000.0);
+          body = mix(body, uHaze * 1.04, far * 0.9);
+          float fade = smoothstep(0.004, 0.09, y);
+          cov *= fade;
+          // High cirrus, thin and streaked along the wind.
+          float t2 = (7500.0 - uCam.y) / max(y, 0.004);
+          vec2 Q = uCam.xz + d.xz * t2 + vec2(25.0, 6.0) * uTime;
+          float ci = smoothstep(0.5, 0.85, c_fbm(vec2(Q.x / 2600.0, Q.y / 9000.0) + c_fbm(Q / 7000.0))) * 0.5 * smoothstep(0.03, 0.3, y);
+          c = mix(c, vec3(1.0, 0.99, 0.97), ci);
+          c = mix(c, body, cov * 0.97);
+        }
+        // The sun itself, hidden behind cloud when it's there.
+        c += vec3(1.0, 0.97, 0.9) * smoothstep(0.99962, 0.99985, sd) * 9.0 * (1.0 - cov);
+        c += vec3(1.0, 0.9, 0.7) * pow(sd, 900.0) * 1.5 * (1.0 - cov * 0.7);
         gl_FragColor = vec4(c, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -79,36 +155,39 @@ scene.add(skyGroup);
     depthWrite: false,
     fog: false,
   });
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(2000, 32, 16), mat);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(2000, 64, 32), mat);
   dome.renderOrder = -2;
+  dome.frustumCulled = false;
   skyGroup.add(dome);
-  // Fair-weather clouds.
-  const cv = document.createElement("canvas");
-  cv.width = 256;
-  cv.height = 128;
-  const g = cv.getContext("2d");
-  const r = rng(9);
-  for (let i = 0; i < 26; i++) {
-    const x = 40 + r() * 176;
-    const y = 50 + r() * 40 - Math.abs(x - 128) * 0.15;
-    const rad = 18 + r() * 26;
-    const grad = g.createRadialGradient(x, y, 0, x, y, rad);
-    grad.addColorStop(0, "rgba(255,255,255,0.9)");
-    grad.addColorStop(1, "rgba(255,255,255,0)");
-    g.fillStyle = grad;
-    g.fillRect(0, 0, 256, 128);
-  }
-  const tex = new THREE.CanvasTexture(cv);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  for (let i = 0; i < 22; i++) {
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, fog: false, depthWrite: false, opacity: 0.85, transparent: true }));
-    const a = r() * Math.PI * 2;
-    const d = 700 + r() * 900;
-    s.position.set(Math.cos(a) * d, 260 + r() * 260, Math.sin(a) * d);
-    s.scale.set(400 + r() * 300, 160 + r() * 90, 1);
-    s.renderOrder = -1;
-    skyGroup.add(s);
-  }
+}
+// Cloud shadows on a material: darken where a cloud stands between it and
+// the sun.
+const _shadowed = new Set();
+function cloudShadows(mat, strength = 0.3) {
+  if (_shadowed.has(mat)) return mat;
+  _shadowed.add(mat);
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    if (prev) prev(sh, r);
+    sh.uniforms.uTime = skyU.uTime;
+    sh.uniforms.uSun = skyU.uSun;
+    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec3 vCWorld;").replace(
+      "#include <project_vertex>",
+      `#include <project_vertex>
+      vec4 cw = vec4(transformed, 1.0);
+      #ifdef USE_INSTANCING
+        cw = instanceMatrix * cw;
+      #endif
+      vCWorld = (modelMatrix * cw).xyz;`,
+    );
+    sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying vec3 vCWorld;\n" + CLOUD_GLSL).replace(
+      "#include <opaque_fragment>",
+      `outgoingLight *= 1.0 - ${strength.toFixed(2)} * cloudShade(vCWorld);
+      #include <opaque_fragment>`,
+    );
+  };
+  mat.customProgramCacheKey = () => "cloudy" + mat.uuid;
+  return mat;
 }
 
 // ---------- Helpers ----------

@@ -4,9 +4,6 @@ const CV = CH / GSTEP; // cells along a tile
 const TERRAIN_R = TOUCH ? 1000 : 1500; // detailed ground this far; the whole island beyond, simpler
 const FINE_R = TOUCH ? 500 : 750; // full detail within this
 const TREE_R = TOUCH ? 520 : 760;
-// A light haze: the whole island stays in sight from anywhere on it.
-scene.fog.near = 700;
-scene.fog.far = 5200;
 
 // The sea.
 {
@@ -26,7 +23,51 @@ const grain = canvasTex(128, 128, (g) => {
   }
   for (let i = 0; i < 700; i++) { g.fillStyle = r() < 0.5 ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.15)"; g.fillRect(r() * 128, r() * 128, 1, 2 + r() * 2); }
 });
-const groundMat = new THREE.MeshLambertMaterial({ map: grain, vertexColors: true });
+// Fine relief for the ground: a tiling bumpy surface the low sun picks out.
+const groundNormal = (() => {
+  const N = 256;
+  const hgt = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    // Tileable: noise sampled on a torus.
+    let s = 0;
+    let a = 0.5;
+    let f = 4;
+    for (let k = 0; k < 5; k++) {
+      const u = (x / N) * f;
+      const v = (y / N) * f;
+      const wrap = (q) => q % f;
+      const i0 = Math.floor(u), j0 = Math.floor(v);
+      const fu = u - i0, fv = v - j0;
+      const sm = (t) => t * t * (3 - 2 * t);
+      const h = (i, j) => hash2(wrap(i) + k * 97, wrap(j) + k * 31);
+      s += a * (h(i0, j0) * (1 - sm(fu)) * (1 - sm(fv)) + h(i0 + 1, j0) * sm(fu) * (1 - sm(fv)) + h(i0, j0 + 1) * (1 - sm(fu)) * sm(fv) + h(i0 + 1, j0 + 1) * sm(fu) * sm(fv));
+      a *= 0.55;
+      f *= 2;
+    }
+    hgt[y * N + x] = s;
+  }
+  const c = document.createElement("canvas");
+  c.width = c.height = N;
+  const g = c.getContext("2d");
+  const img = g.createImageData(N, N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const H = (i, j) => hgt[((j + N) % N) * N + ((i + N) % N)];
+    const dx = (H(x + 1, y) - H(x - 1, y)) * 6;
+    const dy = (H(x, y + 1) - H(x, y - 1)) * 6;
+    const l = Math.hypot(dx, dy, 1);
+    const k = (y * N + x) * 4;
+    img.data[k] = ((-dx / l) * 0.5 + 0.5) * 255;
+    img.data[k + 1] = ((-dy / l) * 0.5 + 0.5) * 255;
+    img.data[k + 2] = ((1 / l) * 0.5 + 0.5) * 255;
+    img.data[k + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = Math.min(8, maxAniso);
+  return t;
+})();
+const groundMat = cloudShadows(new THREE.MeshLambertMaterial({ map: grain, vertexColors: true, normalMap: groundNormal, normalScale: new THREE.Vector2(0.9, 0.9) }));
 const COL = {
   sand: new THREE.Color(0xe3d3a4), grass: new THREE.Color(0x6aa548), meadow: new THREE.Color(0x8db752), dark: new THREE.Color(0x4c8a3c),
   rock: new THREE.Color(0x8c8a80), gravel: new THREE.Color(0xa59e8c), wet: new THREE.Color(0xb7a77c),
@@ -96,6 +137,10 @@ function buildTile(cx, cz, lod = 1) {
     uv.push((i * GSTEP) / 9, (j * GSTEP) / 9);
     const slope = Math.hypot(gridH(i + st, j) - gridH(i - st, j), gridH(i, j + st) - gridH(i, j - st)) / (2 * GSTEP * st);
     const c = groundColour(i * GSTEP, j * GSTEP, h, slope);
+    // Hollows a shade darker, crests a shade lighter: the land reads in depth.
+    const R3 = 4;
+    const lap = (gridH(i + R3, j) + gridH(i - R3, j) + gridH(i, j + R3) + gridH(i, j - R3)) / 4 - h;
+    c.multiplyScalar(clamp(1 - lap * 0.05, 0.74, 1.12));
     col.push(c.r, c.g, c.b);
   }
   if (maxH < -2) return { cx, cz, mesh: null, maxH, lod };
@@ -154,7 +199,7 @@ const TREE = {
   })(),
   bark: new THREE.MeshLambertMaterial({ color: 0x6b4a32 }),
   palmBark: new THREE.MeshLambertMaterial({ color: 0x9a7a52 }),
-  leaf: new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }),
+  leaf: cloudShadows(new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true })),
   greens: [0x4f9a3a, 0x5aa646, 0x3f8a36, 0x6cb04a, 0x478f3e, 0x7aaa3a].map((c) => new THREE.Color(c)),
   pine: [0x2f6a3a, 0x356f3c, 0x2a5f36].map((c) => new THREE.Color(c)),
   deep: [0x234f30, 0x2a5a34, 0x1f4a2c, 0x2e5f3a].map((c) => new THREE.Color(c)),
@@ -233,14 +278,15 @@ function buildTrees(cx, cz) {
   const blobs = [];
   // Rocks and bushes scattered through the fields and under the trees.
   const r2 = rng(cx * 31 + cz * 977 + 5);
-  for (let k = 0; k < 70; k++) {
+  const highTile = regionW(REG.high, (cx + 0.5) * CH, (cz + 0.5) * CH);
+  for (let k = 0; k < 70 + highTile * 220; k++) {
     const x = cx * CH + r2() * CH;
     const z = cz * CH + r2() * CH;
     if (townAt(x, z, 10) || roadAt(x, z, ROAD_HW + 2)) continue;
     const h = terrainH(x, z);
     if (h < 1) continue;
-    const rock = r2() < 0.35 || h > 70;
-    const s = rock ? 0.4 + Math.pow(r2(), 3) * 2.2 : 0.5 + r2() * 0.8;
+    const rock = r2() < 0.35 || h > 70 || regionW(REG.high, x, z) > 0.3;
+    const s = rock ? 0.4 + Math.pow(r2(), 3) * (2.2 + regionW(REG.high, x, z) * 4) : 0.5 + r2() * 0.8;
     blobs.push({ x, y: h + (rock ? s * 0.15 : s * 0.4), z, s, sy: s * (rock ? 0.55 : 0.75), c: rock ? TREE.rocks[Math.floor(r2() * 3)] : TREE.greens[Math.floor(r2() * 6)] });
   }
   for (const t of round) {
@@ -299,7 +345,7 @@ function buildTrees(cx, cz) {
   g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
   g.setIndex(idx);
   g.computeVertexNormals();
-  const far = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  const far = new THREE.Mesh(g, cloudShadows(new THREE.MeshLambertMaterial({ vertexColors: true })));
   scene.add(far);
 }
 
@@ -418,7 +464,7 @@ function streamLand(px, pz, budget = 2, limit = TERRAIN_R) {
     g.fillRect(30, 0, 1, 256);
     g.fillRect(33, 0, 1, 256);
   });
-  const mat = new THREE.MeshLambertMaterial({ map: tex, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const mat = cloudShadows(new THREE.MeshLambertMaterial({ map: tex, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
   for (const road of roads) {
     const S = road.S;
     const N = S.length;

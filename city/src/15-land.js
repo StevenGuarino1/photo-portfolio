@@ -114,7 +114,7 @@ function baseH(x, z) {
 const TOWNS = [
   { name: "Verdant Bay", ox: 0, oz: 0, n: 10, y: 3, style: "city", downtown: [6.5, 6.5], parks: ["3,3", "3,4", "4,3", "4,4", "8,1", "1,7"], landmarks: { "6,6": "spire", "5,3": "civic", "2,5": "church", "8,8": "stadium", "6,2": "clock", "3,7": "museum" } },
   { name: "Saltmarsh", ox: -460, oz: -2215, n: 4, y: 4, style: "harbor", downtown: [2, 2], parks: ["0,3"], landmarks: { "1,0": "market" } },
-  { name: "Larkhill", ox: -2160, oz: 420, n: 3, y: 46, style: "village", downtown: [1.5, 1.5], parks: ["1,1"], landmarks: { "1,2": "chapel" } },
+  { name: "Larkhill", ox: -2160, oz: 200, n: 4, y: 46, style: "village", downtown: [1.5, 1.5], parks: ["1,1"], landmarks: { "1,2": "chapel" } },
 ];
 for (const t of TOWNS) { t.size = t.n * P; t.x0 = t.ox - EDGE - 6; t.z0 = t.oz - EDGE - 6; t.x1 = t.ox + t.size + EDGE + 6; t.z1 = t.oz + t.size + EDGE + 6; }
 function townAt(x, z, margin = 0) {
@@ -129,91 +129,139 @@ function gate(t, side, k) {
 }
 
 // ---------- The roads between towns ----------
-const ROAD_HW = 9; // half the width of a country road: two lanes each way
+const ROAD_HW = 9; // half the width of the highway out of town: two lanes each way
 const roads = [];
-function makeRoad(name, a, b, via, seed) {
-  const r = rng(seed);
-  const pts = [];
-  pts.push([a.x + a.dx * RW, a.z + a.dz * RW], [a.x + a.dx * 70, a.z + a.dz * 70], [a.x + a.dx * 150, a.z + a.dz * 150]);
-  const mids = [[a.x + a.dx * 150, a.z + a.dz * 150], ...via, [b.x + b.dx * 150, b.z + b.dz * 150]];
-  for (let k = 1; k < mids.length; k++) {
-    const [x0, z0] = mids[k - 1];
-    const [x1, z1] = mids[k];
-    const len = Math.hypot(x1 - x0, z1 - z0);
-    const nx = -(z1 - z0) / len;
-    const nz = (x1 - x0) / len;
-    // One long bend between each pair of waypoints.
-    const off = (r() < 0.5 ? -1 : 1) * (0.1 + r() * 0.12) * len;
-    pts.push([x0 + (x1 - x0) * 0.5 + nx * off, z0 + (z1 - z0) * 0.5 + nz * off]);
-    pts.push([x1, z1]);
+const [CITY, HARBOR, VILLAGE] = TOWNS;
+// How far (x, z) is outside the nearest town's paved edge (0 inside).
+function townDist(x, z) {
+  let best = 1e9;
+  for (const t of TOWNS) best = Math.min(best, Math.hypot(Math.max(t.x0 - x, 0, x - t.x1), Math.max(t.z0 - z, 0, z - t.z1)));
+  return best;
+}
+// The island's one great road: a loop that runs straight down the middle
+// of each town (east-west through the city and the harbour, south-north
+// through Larkhill) and sweeps between them in long fast bends, past
+// almost everything worth seeing. Inside a town it's that town's main
+// street, kept clear of junctions and lights so you never have to stop.
+// Points round a quarter circle (a bend leaving a town), from heading
+// one way to heading the other.
+function arc(cx, cz, r, from, to) {
+  const out = [];
+  for (let k = 1; k <= 6; k++) {
+    const t = ((k / 6) * Math.PI) / 2;
+    // from 0: leaving east, turning south; from 1: leaving north, turning east.
+    if (from === 0) out.push([cx + r * Math.sin(t), cz + r * Math.cos(t)]);
+    else out.push([cx - r * Math.cos(t), cz + r * Math.sin(t)]);
   }
-  pts.push([b.x + b.dx * 70, b.z + b.dz * 70], [b.x + b.dx * RW, b.z + b.dz * RW]);
-  const curve = new THREE.CatmullRomCurve3(pts.map(([x, z]) => new THREE.Vector3(x, 0, z)), false, "centripetal");
+  void to;
+  return out;
+}
+// Evenly spaced points straight down a town's main street.
+function line(x, z, dx, dz, n) {
+  const out = [];
+  for (let k = 0; k <= n; k++) out.push([x + dx * k * P, z + dz * k * P]);
+  return out;
+}
+function makeLoop() {
+  const hz = HARBOR.oz + 2 * P;
+  const vx = VILLAGE.ox + 2 * P;
+  const cz = CITY.oz + 5 * P;
+  const pts = [
+    // Through the city, west to east.
+    [-130, cz], ...line(CITY.ox, cz, 1, 0, CITY.n),
+    // Round the east coast in a long bend and down to the harbour.
+    ...arc(CITY.x1, cz - 210, 210, 0, 1),
+    [960, -60], [880, -420], [640, -790], [320, -1060], [20, -1320], [-60, -1640], [110, -1930], [HARBOR.ox + HARBOR.size + 220, hz],
+    // Through Saltmarsh, east to west.
+    [HARBOR.ox + HARBOR.size + 110, hz], ...line(HARBOR.ox + HARBOR.size, hz, -1, 0, HARBOR.n), [HARBOR.ox - 120, hz],
+    // Past the lake and up through the great forest to Larkhill.
+    [-780, -2050], [-1100, -1900], [-1450, -1690], [-1760, -1300], [-1960, -800], [-2040, -300], [vx, VILLAGE.oz - 160],
+    // Through Larkhill, south to north.
+    [vx, VILLAGE.oz - 60], ...line(vx, VILLAGE.oz, 0, 1, VILLAGE.n),
+    // Along the clifftops and the northern downs, back to the city.
+    ...arc(vx + 210, VILLAGE.z1, 210, 1, 0), [-1500, 790], [-1050, 720], [-650, 560], [-330, 400],
+  ];
+  const curve = new THREE.CatmullRomCurve3(pts.map(([x, z]) => new THREE.Vector3(x, 0, z)), true, "centripetal");
   const total = curve.getLength();
   const n = Math.round(total / 4);
-  const S = curve.getSpacedPoints(n).map((v, i) => ({ x: v.x, z: v.z, y: 0, s: 0 }));
-  // Ease every bend out into a long sweep you can take at speed, leaving
-  // the straight runs out of town as they are.
-  const K = 38;
+  const S = curve.getSpacedPoints(n).slice(0, n).map((v) => ({ x: v.x, z: v.z, y: 0, s: 0 }));
+  const N = S.length;
+  const W = (i) => ((i % N) + N) % N;
+  // Ease the bends into long sweeps, leaving the runs through town straight.
+  const free = S.map((p) => smooth(25, 150, townDist(p.x, p.z)));
   for (let it = 0; it < 2500; it++) {
     const xs = S.map((p) => p.x);
     const zs = S.map((p) => p.z);
-    for (let i = 1; i < S.length - 1; i++) {
-      // Full strength in the middle, fading to nothing at the town gates.
-      const w = smooth(0, K, Math.min(i, S.length - 1 - i));
-      S[i].x += w * ((xs[i - 1] + 2 * xs[i] + xs[i + 1]) / 4 - xs[i]);
-      S[i].z += w * ((zs[i - 1] + 2 * zs[i] + zs[i + 1]) / 4 - zs[i]);
+    for (let i = 0; i < N; i++) {
+      const w = free[i];
+      if (!w) continue;
+      S[i].x += w * ((xs[W(i - 1)] + 2 * xs[i] + xs[W(i + 1)]) / 4 - xs[i]);
+      S[i].z += w * ((zs[W(i - 1)] + 2 * zs[i] + zs[W(i + 1)]) / 4 - zs[i]);
     }
   }
-  for (let i = 1; i < S.length; i++) S[i].s = S[i - 1].s + Math.hypot(S[i].x - S[i - 1].x, S[i].z - S[i - 1].z);
-  // Heights: follow the land, smoothed, no steeper than about 1 in 12, and
-  // level with the towns at either end.
-  const ends = (i) => (i < 40 ? a.t.y : i > S.length - 41 ? b.t.y : null);
-  let ys = S.map((p, i) => ends(i) ?? Math.max(2, natH(p.x, p.z)));
+  for (let i = 1; i < N; i++) S[i].s = S[i - 1].s + Math.hypot(S[i].x - S[i - 1].x, S[i].z - S[i - 1].z);
+  // Heights: level through the towns, following the land between them,
+  // smoothed and no steeper than about 1 in 12.
+  const fixed = S.map((p) => { const t = townAt(p.x, p.z, 30); return t ? t.y : null; });
+  let ys = S.map((p, i) => fixed[i] ?? Math.max(2, natH(p.x, p.z)));
   for (let pass = 0; pass < 3; pass++) {
     const out = ys.slice();
-    for (let i = 0; i < S.length; i++) {
-      if (ends(i) !== null) continue;
-      let s = 0;
-      let c = 0;
-      for (let k = -30; k <= 30; k++) { const q = ys[clamp(i + k, 0, S.length - 1)]; s += q; c++; }
-      out[i] = s / c;
+    for (let i = 0; i < N; i++) {
+      if (fixed[i] !== null) continue;
+      let sum = 0;
+      for (let k = -30; k <= 30; k++) sum += ys[W(i + k)];
+      out[i] = sum / 61;
     }
     ys = out;
   }
-  for (let i = 1; i < S.length; i++) ys[i] = clamp(ys[i], ys[i - 1] - 0.32, ys[i - 1] + 0.32);
-  for (let i = S.length - 2; i >= 0; i--) ys[i] = clamp(ys[i], ys[i + 1] - 0.32, ys[i + 1] + 0.32);
-  S.forEach((p, i) => (p.y = Math.max(1.6, ys[i])));
-  for (let i = 0; i < S.length; i++) {
-    const p = S[Math.max(0, i - 1)];
-    const q = S[Math.min(S.length - 1, i + 1)];
-    const l = Math.hypot(q.x - p.x, q.z - p.z) || 1;
-    S[i].dx = (q.x - p.x) / l;
-    S[i].dz = (q.z - p.z) / l;
+  for (let round = 0; round < 2; round++) {
+    for (let i = 0; i < N; i++) if (fixed[i] === null) ys[i] = clamp(ys[i], ys[W(i - 1)] - 0.32, ys[W(i - 1)] + 0.32);
+    for (let i = N - 1; i >= 0; i--) if (fixed[i] === null) ys[i] = clamp(ys[i], ys[W(i + 1)] - 0.32, ys[W(i + 1)] + 0.32);
   }
-  // The tightest bend, as a radius (for checking).
+  const names = [["Bay Road", CITY], ["Coast Highway", HARBOR], ["Forest Road", VILLAGE], ["Downs Road", CITY]];
+  S.forEach((p, i) => {
+    p.y = Math.max(1.6, ys[i]);
+    const q = S[W(i + 1)];
+    const o = S[W(i - 1)];
+    const l = Math.hypot(q.x - o.x, q.z - o.z) || 1;
+    p.dx = (q.x - o.x) / l;
+    p.dz = (q.z - o.z) / l;
+    const td = townDist(p.x, p.z);
+    p.hw = 7 + 2 * smooth(0, 60, td);
+    p.town = townAt(p.x, p.z, 0);
+  });
+  // Name each stretch by where it's heading.
+  let next = null;
+  for (let k = 0; k < 2; k++) for (let i = N - 1; i >= 0; i--) {
+    if (S[i].town) next = S[i].town;
+    S[i].name = next === HARBOR ? "Coast Highway" : next === VILLAGE ? "Forest Road" : next === CITY ? "Downs Road" : "Loop";
+  }
+  void names;
   let minR = 1e9;
-  for (let i = 30; i < S.length - 30; i++) {
-    const t = Math.acos(clamp(S[i - 5].dx * S[i + 5].dx + S[i - 5].dz * S[i + 5].dz, -1, 1));
-    if (t > 1e-4) minR = Math.min(minR, (S[i + 5].s - S[i - 5].s) / t);
+  for (let i = 0; i < N; i++) {
+    const a = S[W(i - 5)];
+    const b = S[W(i + 5)];
+    const t = Math.acos(clamp(a.dx * b.dx + a.dz * b.dz, -1, 1));
+    if (t > 1e-4) minR = Math.min(minR, 40 / t);
   }
-  const road = { name, S, a, b, length: S[S.length - 1].s, minR };
+  const road = { name: "The Loop", S, closed: true, length: S[N - 1].s, minR };
   roads.push(road);
   return road;
 }
-const [CITY, HARBOR, VILLAGE] = TOWNS;
-makeRoad("Coast Highway", gate(CITY, "s", 3), gate(HARBOR, "n", 2), [[350, -550], [80, -1050], [-280, -1450], [-120, -1950], [-420, -2320]].map(([x, z]) => [x * WS, z * WS]), 11);
-makeRoad("Ridge Road", gate(CITY, "w", 5), gate(VILLAGE, "e", 1), [[-480, 520], [-900, 280], [-1380, 640], [-1880, 420], [-2330, 760]].map(([x, z]) => [x * WS, z * WS]), 23);
-makeRoad("Old Mill Road", gate(HARBOR, "w", 2), gate(VILLAGE, "s", 1), [[-1150, -2700], [-1750, -2860], [-2320, -2480], [-2880, -1880], [-3000, -1180], [-2830, -520], [-2900, 0]].map(([x, z]) => [x * WS, z * WS]), 37);
+// Each town's main street, which the loop runs along.
+CITY.hw = { axis: "x", k: 5 };
+HARBOR.hw = { axis: "x", k: 2 };
+VILLAGE.hw = { axis: "z", k: 2 };
+const LOOP = makeLoop();
 
 // Where the roads are, for quick lookups: each 4 m piece filed in 40 m cells.
 const RCELL = 40;
 const roadGrid = new Map();
 for (const road of roads) {
   const S = road.S;
-  for (let i = 0; i < S.length - 1; i++) {
+  for (let i = 0; i < S.length - (road.closed ? 0 : 1); i++) {
     const p = S[i];
-    const q = S[i + 1];
+    const q = S[(i + 1) % S.length];
     for (let cx = Math.floor(Math.min(p.x, q.x) / RCELL); cx <= Math.floor(Math.max(p.x, q.x) / RCELL); cx++) for (let cz = Math.floor(Math.min(p.z, q.z) / RCELL); cz <= Math.floor(Math.max(p.z, q.z) / RCELL); cz++) {
       const k = cx * 65536 + cz;
       if (!roadGrid.has(k)) roadGrid.set(k, []);
@@ -234,7 +282,7 @@ function roadAt(x, z, maxD = 40) {
     if (!list) continue;
     for (const [road, i] of list) {
       const p = road.S[i];
-      const q = road.S[i + 1];
+      const q = road.S[(i + 1) % road.S.length];
       const ex = q.x - p.x;
       const ez = q.z - p.z;
       const l2 = ex * ex + ez * ez;
@@ -273,7 +321,7 @@ function natH(x, z) {
 function landH(x, z) {
   let h = natH(x, z);
   const r = roadAt(x, z, 42);
-  if (r) h += (r.y - 0.2 - h) * smooth(42, ROAD_HW + 3, r.d);
+  if (r) h += (r.y - 0.2 - h) * smooth(42, r.road.S[r.i].hw + 3, r.d);
   return h;
 }
 // The ground as drawn: the tiles are 5 m grids, so heights in between are
@@ -317,7 +365,7 @@ function groundAt(x, z) {
   const t = townAt(x, z);
   if (t) { surface = "road"; return t.y + (onBlock(t, x, z) ? CURB : 0); }
   const r = roadAt(x, z, ROAD_HW + 0.6);
-  if (r) { surface = "road"; return r.y + 0.03; }
+  if (r && r.d < r.road.S[r.i].hw + 0.6) { surface = "road"; return r.y + 0.03; }
   surface = "grass";
   return terrainH(x, z);
 }

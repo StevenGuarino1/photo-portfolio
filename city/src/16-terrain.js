@@ -51,7 +51,7 @@ function fieldAt(x, z) {
 const _c = new THREE.Color();
 function groundColour(x, z, h, slope) {
   const r = roadAt(x, z, ROAD_HW + 3);
-  if (r && r.d > ROAD_HW - 0.5) return _c.copy(COL.gravel);
+  if (r && r.d > r.road.S[r.i].hw - 0.5 && r.d < r.road.S[r.i].hw + 3) return _c.copy(COL.gravel);
   // Sand only on the real shore, not on ground levelled down for a town.
   const shore = Math.min(h, baseH(x, z));
   if (shore < 1.2) return _c.copy(COL.wet);
@@ -421,16 +421,23 @@ function streamLand(px, pz, budget = 2, limit = TERRAIN_R) {
   const mat = new THREE.MeshLambertMaterial({ map: tex, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   for (const road of roads) {
     const S = road.S;
+    const N = S.length;
+    // The ribbon of road between towns (in town it's the main street).
     const pos = [];
     const uv = [];
     const idx = [];
-    S.forEach((p, i) => {
+    let prev = -1;
+    for (let k = 0; k <= N; k++) {
+      const p = S[k % N];
+      if (p.town) { prev = -1; continue; }
       const rx = -p.dz;
       const rz = p.dx;
-      pos.push(p.x - rx * ROAD_HW, p.y + 0.03, p.z - rz * ROAD_HW, p.x + rx * ROAD_HW, p.y + 0.03, p.z + rz * ROAD_HW);
-      uv.push(0, p.s / 24, 1, p.s / 24);
-      if (i) { const a = (i - 1) * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
-    });
+      const v = pos.length / 3;
+      pos.push(p.x - rx * p.hw, p.y + 0.03, p.z - rz * p.hw, p.x + rx * p.hw, p.y + 0.03, p.z + rz * p.hw);
+      uv.push(0, (k * 4) / 24, 1, (k * 4) / 24);
+      if (prev >= 0) idx.push(prev, prev + 1, v, prev + 1, v + 1, v);
+      prev = v;
+    }
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
@@ -439,35 +446,37 @@ function streamLand(px, pz, budget = 2, limit = TERRAIN_R) {
     const mesh = new THREE.Mesh(g, mat);
     mesh.receiveShadow = true;
     scene.add(mesh);
-    // Marker posts along the verges, every 50 m.
+    // Marker posts along the verges, every 48 m.
     const postGeo = [];
-    for (let i = 6; i < S.length - 6; i += 12) for (const s of [-1, 1]) {
+    for (let i = 0; i < N; i += 12) for (const s of [-1, 1]) {
       const p = S[i];
-      postGeo.push(colored(new THREE.BoxGeometry(0.14, 1.0, 0.14).translate(p.x - p.dz * s * (ROAD_HW + 1.2), p.y + 0.5, p.z + p.dx * s * (ROAD_HW + 1.2)), 0xf4f4f0));
-      postGeo.push(colored(new THREE.BoxGeometry(0.15, 0.12, 0.15).translate(p.x - p.dz * s * (ROAD_HW + 1.2), p.y + 0.85, p.z + p.dx * s * (ROAD_HW + 1.2)), s > 0 ? 0xe03a2a : 0xf0a020));
+      if (townDist(p.x, p.z) < 40) continue;
+      const o = p.hw + 1.2;
+      postGeo.push(colored(new THREE.BoxGeometry(0.14, 1.0, 0.14).translate(p.x - p.dz * s * o, p.y + 0.5, p.z + p.dx * s * o), 0xf4f4f0));
+      postGeo.push(colored(new THREE.BoxGeometry(0.15, 0.12, 0.15).translate(p.x - p.dz * s * o, p.y + 0.85, p.z + p.dx * s * o), s > 0 ? 0xe03a2a : 0xf0a020));
     }
     // Post-and-rail fences along stretches of verge, where the fields are.
     const fence = [];
     for (const side of [-1, 1]) {
-      let prev = null;
-      for (let i = 50; i < S.length - 50; i++) {
+      let prevF = null;
+      for (let i = 0; i < N; i++) {
         const p = S[i];
-        const on = fbm(p.s * 0.004 + side * 7, 3.3, 2) > 0.52;
-        if (!on || i % 1) { prev = null; continue; }
-        const x = p.x - p.dz * side * (ROAD_HW + 3.2);
-        const z = p.z + p.dx * side * (ROAD_HW + 3.2);
+        const on = fbm(p.s * 0.004 + side * 7, 3.3, 2) > 0.52 && townDist(p.x, p.z) > 80 && regionW(REG.forest, p.x, p.z) < 0.3;
+        if (!on) { prevF = null; continue; }
+        const x = p.x - p.dz * side * (p.hw + 3.2);
+        const z = p.z + p.dx * side * (p.hw + 3.2);
         const y = terrainH(x, z);
-        if (i % 1 === 0 && (p.s % 3.2) < 4) fence.push(colored(new THREE.BoxGeometry(0.12, 1.15, 0.12).translate(x, y + 0.5, z), 0x8a6a48));
-        if (prev) {
-          const len = Math.hypot(x - prev[0], z - prev[1]);
+        fence.push(colored(new THREE.BoxGeometry(0.12, 1.15, 0.12).translate(x, y + 0.5, z), 0x8a6a48));
+        if (prevF) {
+          const len = Math.hypot(x - prevF[0], z - prevF[1]);
           for (const ry of [0.55, 0.95]) {
-            const g = new THREE.BoxGeometry(0.05, 0.1, len);
-            g.rotateY(Math.atan2(x - prev[0], z - prev[1]));
-            g.translate((x + prev[0]) / 2, (y + prev[2]) / 2 + ry, (z + prev[1]) / 2);
-            fence.push(colored(g, 0x9a7a55));
+            const fg = new THREE.BoxGeometry(0.05, 0.1, len);
+            fg.rotateY(Math.atan2(x - prevF[0], z - prevF[1]));
+            fg.translate((x + prevF[0]) / 2, (y + prevF[2]) / 2 + ry, (z + prevF[1]) / 2);
+            fence.push(colored(fg, 0x9a7a55));
           }
         }
-        prev = [x, z, y];
+        prevF = [x, z, y];
       }
     }
     if (fence.length) {

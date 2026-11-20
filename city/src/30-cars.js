@@ -141,7 +141,9 @@ function stepCar(c, dt) {
     // what the tyres can hold, so too fast into a bend means a slide.
     const maxA = 0.58 / (1 + Math.abs(vl) / 11);
     c.steer += (I.steer * maxA - c.steer) * Math.min(1, dt * 6);
-    const gripA = T.grip * (onRoad ? 1 : 0.62) * (I.hb ? 0.3 : 1);
+    // Grip, with a little arcade downforce: the faster you go on tarmac, the
+    // harder the tyres hold, so the long bends can be taken flat out.
+    const gripA = T.grip * (onRoad ? 1 + Math.min(1, Math.abs(vl) / 55) * 0.9 : T.offGrip ?? 0.62) * (I.hb ? 0.3 : 1);
     let yaw = (vl / T.wb) * Math.tan(c.steer);
     const yawMax = (gripA * (I.hb ? 2.6 : 1.25)) / Math.max(3, Math.abs(vl));
     yaw = clamp(yaw, -yawMax, yawMax);

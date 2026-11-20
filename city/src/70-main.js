@@ -169,10 +169,10 @@ function toggleCar() {
 function rescue(c) {
   let best = null;
   let bd = 1e9;
-  for (const road of roads) for (let i = 40; i < road.S.length - 40; i += 5) {
+  for (const road of roads) for (let i = 0; i < road.S.length; i += 5) {
     const p = road.S[i];
     const d = Math.hypot(p.x - c.x, p.z - c.z);
-    if (d < bd) { bd = d; best = { x: p.x - p.dz * HW_LANE, z: p.z + p.dx * HW_LANE, h: Math.atan2(p.dx, p.dz) }; }
+    if (d < bd) { bd = d; best = { x: p.x - p.dz * p.hw * 0.75, z: p.z + p.dx * p.hw * 0.75, h: Math.atan2(p.dx, p.dz) }; }
   }
   for (const n of nodes) {
     const d = Math.hypot(n.x - c.x, n.z - c.z);
@@ -408,4 +408,4 @@ function frame() {
   });
 }
 renderer.setAnimationLoop(frame);
-window.__city = { AIR, QUARRY, POIS, LAKE, REG, landH, render: () => renderer.render(scene, camera), state, cars, traffic, peds, me, keys, step, camera, renderer, streamLand, roads, TOWNS, toggleCar, rescue, get camYaw() { return camYaw; } };
+window.__city = { near: (x, z, r) => nearStatics(x, z, r).map((o) => ({ ...o, seen: undefined })), AIR, QUARRY, POIS, LAKE, REG, landH, render: () => renderer.render(scene, camera), state, cars, traffic, peds, me, keys, step, camera, renderer, streamLand, roads, TOWNS, toggleCar, rescue, get camYaw() { return camYaw; } };

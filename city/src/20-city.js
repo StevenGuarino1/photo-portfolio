@@ -491,7 +491,7 @@ function buildTown(t) {
 
   // Crossings, markings, traffic lights, lamps.
   for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) {
-    const nd = { t, i, j, x: t.ox + i * P, z: t.oz + j * P, phase: R() * 20 };
+    const nd = { t, i, j, x: t.ox + i * P, z: t.oz + j * P, phase: R() * 20, hw: !!t.hw && (t.hw.axis === "x" ? j === t.hw.k : i === t.hw.k) };
     t.nodes.push(nd);
     nodes.push(nd);
   }
@@ -507,10 +507,13 @@ function buildTown(t) {
       const mid = (a0 + a1) / 2;
       const len = a1 - a0;
       for (const o of [-0.16, 0.16]) { mark(yellows, k * P + o, mid, 0.11, len); mark(yellows, mid, k * P + o, len, 0.11); }
-      mark(whites, k * P - LO, a0 - 0.2, 2 * LO - 0.4, 0.4);
-      mark(whites, k * P + LO, a1 + 0.2, 2 * LO - 0.4, 0.4);
-      mark(whites, a0 - 0.2, k * P + LO, 0.4, 2 * LO - 0.4);
-      mark(whites, a1 + 0.2, k * P - LO, 0.4, 2 * LO - 0.4);
+      // The main street (the loop): two lanes each way, no stop lines.
+      const mainNS = t.hw && t.hw.axis === "z" && k === t.hw.k;
+      const mainEW = t.hw && t.hw.axis === "x" && k === t.hw.k;
+      if (!mainNS) { mark(whites, k * P - LO, a0 - 0.2, 2 * LO - 0.4, 0.4); mark(whites, k * P + LO, a1 + 0.2, 2 * LO - 0.4, 0.4); }
+      else for (let q = a0; q < a1 - 3; q += 8) for (const o of [-3.5, 3.5]) mark(whites, k * P + o, q + 1.5, 0.14, 3);
+      if (!mainEW) { mark(whites, a0 - 0.2, k * P + LO, 0.4, 2 * LO - 0.4); mark(whites, a1 + 0.2, k * P - LO, 0.4, 2 * LO - 0.4); }
+      else for (let q = a0; q < a1 - 3; q += 8) for (const o of [-3.5, 3.5]) mark(whites, q + 1.5, k * P + o, 3, 0.14);
     }
     for (const nd of t.nodes) for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       if (!t.nodeAt(nd.i + dx, nd.j + dz)) continue;
@@ -529,7 +532,7 @@ function buildTown(t) {
     }
   }
   for (const nd of t.nodes) for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-    if (!t.nodeAt(nd.i - dx, nd.j - dz)) continue;
+    if (!t.nodeAt(nd.i - dx, nd.j - dz) || nd.hw) continue;
     const rx = -dz;
     const rz = dx;
     const x = nd.i * P - dx * (RW + 3.6) + rx * (RW + 0.9);
@@ -607,6 +610,6 @@ function placeName(x, z) {
     return `${t.name} · ${dx < dz ? av : st}`;
   }
   const r = roadAt(x, z, 30);
-  if (r) return r.road.name;
+  if (r) return r.road.S[r.i].name;
   return "Countryside";
 }

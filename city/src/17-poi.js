@@ -39,14 +39,36 @@ function summit(x, z, radius, away = 60) {
   }
   return best;
 }
-// A spot near (x, z) a set distance off the nearest road, facing it.
-function roadside(road, frac, side, off) {
-  const S = road.S;
-  const i = Math.round(S.length * frac);
-  const p = S[i];
-  const rx = -p.dz * side;
-  const rz = p.dx * side;
-  return { x: p.x + rx * off, z: p.z + rz * off, face: Math.atan2(-rx, -rz), along: Math.atan2(p.dx, p.dz), p };
+// A spot beside the loop, near (tx, tz), a set distance off it, with room
+// round it (radius rr) that the road doesn't cut through, on dry land.
+function roadside(tx, tz, side, off, rr = 15) {
+  const S = LOOP.S;
+  const N = S.length;
+  let i0 = 0;
+  let bd = 1e9;
+  S.forEach((q, k) => { const d = Math.hypot(q.x - tx, q.z - tz); if (d < bd && !q.town) { bd = d; i0 = k; } });
+  for (const shift of [0, 12, -12, 25, -25, 40, -40, 60, -60, 90, -90]) for (const sd of [side, -side]) {
+    const p = S[(((i0 + shift) % N) + N) % N];
+    if (p.town) continue;
+    const o = typeof off === "function" ? off(p) : off;
+    const rx = -p.dz * sd;
+    const rz = p.dx * sd;
+    const x = p.x + rx * o;
+    const z = p.z + rz * o;
+    let ok = natH(x, z) > 3 && !nearPOI(x, z);
+    for (let k = 0; k < 8 && ok; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      const cx = x + Math.cos(a) * rr;
+      const cz = z + Math.sin(a) * rr;
+      const r = roadAt(cx, cz, 30);
+      if (r && r.d < r.road.S[r.i].hw + 3) ok = false;
+      if (natH(cx, cz) < 2.5) ok = false;
+    }
+    if (ok) return { x, z, face: Math.atan2(-rx, -rz), along: Math.atan2(p.dx, p.dz), p };
+  }
+  const p = S[i0];
+  const o = typeof off === "function" ? off(p) : off;
+  return { x: p.x - p.dz * side * o, z: p.z + p.dx * side * o, face: 0, along: Math.atan2(p.dx, p.dz), p };
 }
 const STONE = 0x9a958a;
 const WHITE = 0xf2f0ea;
@@ -109,7 +131,7 @@ const WHITE = 0xf2f0ea;
 }
 // A windmill among the fields, sails turning.
 {
-  const { x, z } = roadside(roads[0], 0.62, 1, 120);
+  const { x, z } = roadside(REG.farm.x + 60, REG.farm.z - 120, 1, 110, 8);
   const y = footY(x, z, 4);
   POIS.push({ x, z, r: 14 });
   pp(CYL(2.6, 4.2, 14, 16), WHITE, x, y + 7, z);
@@ -133,7 +155,7 @@ const WHITE = 0xf2f0ea;
 }
 // A farm off the coast road: house, red barn, silos and a paddock.
 {
-  const { x, z, along } = roadside(roads[0], 0.7, -1, 70);
+  const { x, z, along } = roadside(-30, -1480, -1, 70, 34);
   const y = footY(x, z, 22);
   POIS.push({ x, z, r: 42 });
   const ry = along;
@@ -321,7 +343,7 @@ const WHITE = 0xf2f0ea;
 }
 // A petrol station on the Coast Highway.
 {
-  const { x, z, face, along } = roadside(roads[0], 0.3, 1, ROAD_HW + 16);
+  const { x, z, face, along } = roadside(700, -700, 1, (q) => q.hw + 22, 20);
   const y = landH(x, z);
   POIS.push({ x, z, r: 28 });
   const L = (dx, dz) => [x + Math.cos(along) * dx + Math.sin(along) * dz, z - Math.sin(along) * dx + Math.cos(along) * dz];
@@ -343,7 +365,7 @@ const WHITE = 0xf2f0ea;
 }
 // A roadside diner on the Old Mill Road.
 {
-  const { x, z, along } = roadside(roads[2], 0.42, 1, ROAD_HW + 20);
+  const { x, z, along } = roadside(-1990, -650, 1, (q) => q.hw + 24, 22);
   const y = landH(x, z);
   POIS.push({ x, z, r: 30 });
   const L = (dx, dz) => [x + Math.cos(along) * dx + Math.sin(along) * dz, z - Math.sin(along) * dx + Math.cos(along) * dz];
@@ -362,13 +384,13 @@ const WHITE = 0xf2f0ea;
 // A lookout on the Ridge Road: a lay-by, a rail, benches and a telescope.
 {
   let best = null;
-  const S = roads[1].S;
-  for (let i = 100; i < S.length - 100; i += 5) if (!best || S[i].y > best.y) best = S[i];
+  const S = LOOP.S;
+  for (let i = 0; i < S.length; i += 5) if (townDist(S[i].x, S[i].z) > 200 && (!best || S[i].y > best.y)) best = S[i];
   const side = 1;
   const rx = -best.dz * side;
   const rz = best.dx * side;
-  const x = best.x + rx * (ROAD_HW + 9);
-  const z = best.z + rz * (ROAD_HW + 9);
+  const x = best.x + rx * (best.hw + 9);
+  const z = best.z + rz * (best.hw + 9);
   const y = best.y;
   const along = Math.atan2(best.dx, best.dz);
   POIS.push({ x, z, r: 22 });

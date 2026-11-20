@@ -8,11 +8,19 @@ const TRAFFIC = TOUCH ? 24 : 36;
 const PARKED = 80;
 const HW_LANE = 6.75; // the slow (outer) lane's middle, from the road's middle; the inner lane is for passing
 const rightOf = (dx, dz) => [-dz, dx];
+// Is the street from node n along (dx, dz) the town's main street?
+function onMain(n, dx, dz) {
+  const hw = n.t.hw;
+  if (!hw) return false;
+  const along = hw.axis === "x" ? dx !== 0 : dz !== 0;
+  return along && n.hw;
+}
 
 // ---------- Town driving ----------
 function planTurn(ai, to, dx, dz) {
   const opts = [];
-  for (const [ex, ez, w] of [[dx, dz, 2.2], [-dz, dx, 1], [dz, -dx, 1]]) if (to.t.nodeAt(to.i + ex, to.j + ez)) opts.push([ex, ez, w]);
+  // The main street is the loop's: town traffic doesn't join it or cross it.
+  if (!to.hw) for (const [ex, ez, w] of [[dx, dz, 2.2], [-dz, dx, 1], [dz, -dx, 1]]) if (to.t.nodeAt(to.i + ex, to.j + ez) && !onMain(to, ex, ez)) opts.push([ex, ez, w]);
   let ch = opts[0] || [-dx, -dz, 1];
   let r = Math.random() * opts.reduce((s, o) => s + o[2], 0);
   for (const o of opts) if ((r -= o[2]) <= 0) { ch = o; break; }
@@ -54,7 +62,8 @@ function startRoad(c, road, i, dir) {
   const tx = p.dx * dir;
   const tz = p.dz * dir;
   const [rx, rz] = rightOf(tx, tz);
-  placeCar(c, p.x + rx * HW_LANE, p.z + rz * HW_LANE, Math.atan2(tx, tz));
+  const lane = p.hw * 0.75;
+  placeCar(c, p.x + rx * lane, p.z + rz * lane, Math.atan2(tx, tz));
   c.y = p.y;
   const speed = 23 + Math.random() * 7;
   c.vx = tx * speed;
@@ -66,8 +75,8 @@ function startRoad(c, road, i, dir) {
 function randomSpot(px, pz, minD, maxD, townOnly = false) {
   for (let tries = 0; tries < 60; tries++) {
     if (!townOnly && Math.random() < 0.5) {
-      const road = roads[Math.floor(Math.random() * roads.length)];
-      const i = 45 + Math.floor(Math.random() * (road.S.length - 90));
+      const road = LOOP;
+      const i = Math.floor(Math.random() * road.S.length);
       const p = road.S[i];
       const d = Math.hypot(p.x - px, p.z - pz);
       if (d < minD || d > maxD) continue;
@@ -75,7 +84,8 @@ function randomSpot(px, pz, minD, maxD, townOnly = false) {
       return { road, i, dir: Math.random() < 0.5 ? 1 : -1 };
     }
     const n = nodes[Math.floor(Math.random() * nodes.length)];
-    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dz]) => n.t.nodeAt(n.i + dx, n.j + dz));
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dz]) => n.t.nodeAt(n.i + dx, n.j + dz) && !(onMain(n, dx, dz) && n.t.nodeAt(n.i + dx, n.j + dz).hw));
+    if (!dirs.length) continue;
     const [dx, dz] = dirs[Math.floor(Math.random() * dirs.length)];
     const along = RW + 6 + Math.random() * (P - 2 * RW - 24);
     const x = n.x + dx * along;
@@ -178,36 +188,49 @@ function driveTown(c, dt, t) {
   if (!ai.entry) setEntry(ai);
   const dToStop = (ai.entry[0] - c.x) * fx + (ai.entry[1] - c.z) * fz;
   const s = lightFor(ai.stopAt.n, ai.stopAt.axis, t);
-  const hasLight = ai.stopAt.n.t.nodeAt(ai.stopAt.n.i - ai.dx, ai.stopAt.n.j - ai.dz);
+  const hasLight = !ai.stopAt.n.hw && ai.stopAt.n.t.nodeAt(ai.stopAt.n.i - ai.dx, ai.stopAt.n.j - ai.dz);
   if (hasLight && dToStop > -0.5 && dToStop < 34 && (s === 2 || (s === 1 && dToStop > 6))) want = Math.min(want, Math.max(0, (dToStop - 1.2) * 0.8));
   speedTo(c, want, dt);
 }
 function driveRoad(c, dt) {
   const ai = c.ai;
   const S = ai.road.S;
+  const N = S.length;
+  const at = (k) => S[((k % N) + N) % N];
   const fx = Math.sin(c.h);
   const fz = Math.cos(c.h);
-  while (S[ai.i + ai.dir] && (S[ai.i + ai.dir].x - c.x) * fx + (S[ai.i + ai.dir].z - c.z) * fz < 2) ai.i += ai.dir;
-  if (ai.i < 30 || ai.i > S.length - 31) { ai.done = true; return; }
+  for (let g = 0; g < 50 && (at(ai.i + ai.dir).x - c.x) * fx + (at(ai.i + ai.dir).z - c.z) * fz < 2; g++) ai.i = ((ai.i + ai.dir) % N + N) % N;
   const ahead = Math.round(clamp(Math.abs(c.vl) * 0.55, 6, 16) / 4);
-  const q = S[clamp(ai.i + ai.dir * ahead, 0, S.length - 1)];
+  const q = at(ai.i + ai.dir * ahead);
   const [rx, rz] = rightOf(q.dx * ai.dir, q.dz * ai.dir);
-  steerAt(c, q.x + rx * HW_LANE, q.z + rz * HW_LANE);
-  // Slow for bends: how far the road turns in the next 60 m.
-  const p = S[ai.i];
-  const f = S[clamp(ai.i + ai.dir * 15, 0, S.length - 1)];
-  const turn = Math.acos(clamp(p.dx * f.dx + p.dz * f.dz, -1, 1));
-  // No faster than the tyres can hold round the bend ahead.
-  const radius = 60 / Math.max(turn, 1e-3);
-  speedTo(c, Math.min(ai.cruise, Math.sqrt(c.T.grip * 0.7 * radius)), dt);
+  const lane = q.hw * 0.75;
+  steerAt(c, q.x + rx * lane, q.z + rz * lane);
+  // No faster than the tyres can hold round the bend ahead, and steadier
+  // through town.
+  // Look well ahead: for each bend coming, the speed it allows, plus what
+  // can be braked away before reaching it.
+  const p = at(ai.i);
+  let want = ai.cruise;
+  for (let k = 0; k <= 45; k += 5) {
+    const a = at(ai.i + ai.dir * k);
+    const b = at(ai.i + ai.dir * (k + 10));
+    const turn = Math.acos(clamp(a.dx * b.dx + a.dz * b.dz, -1, 1));
+    const radius = 40 / Math.max(turn, 1e-3);
+    const vBend = Math.sqrt(c.T.grip * 1.3 * radius);
+    want = Math.min(want, Math.sqrt(vBend * vBend + 2 * 7 * k * 4));
+  }
+  if (p.town || at(ai.i + ai.dir * 20).town) want = Math.min(want, 17);
+  speedTo(c, want, dt);
 }
 // After a knock: back to the nearest lane and carry on.
 function rejoin(c) {
   const r = roadAt(c.x, c.z, 25);
-  if (r) {
+  if (r && !(townAt(c.x, c.z) && !r.road.S[r.i].town)) {
+    if (!r.road.S[r.i].town || r.d < 7) {
     const fwd = Math.sin(c.h) * r.road.S[r.i].dx + Math.cos(c.h) * r.road.S[r.i].dz;
     c.ai = { kind: "road", road: r.road, i: r.i, dir: fwd >= 0 ? 1 : -1, cruise: c.ai.cruise, stunned: 0, solo: c.ai.solo };
     return;
+    }
   }
   let best = null;
   for (const n of nodes) {
@@ -230,7 +253,7 @@ function updateTraffic(dt, t, px, pz) {
   for (const c of traffic) {
     if (!c.ai) continue;
     const far = Math.hypot(c.x - px, c.z - pz);
-    if (far > 380 || c.ai.done || c.drowned) {
+    if (far > 380 || c.drowned) {
       const spot = randomSpot(px, pz, 170, 320);
       if (spot) start(c, spot);
       continue;

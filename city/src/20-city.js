@@ -1,0 +1,388 @@
+// ---------- Towns ----------
+// Each town is a grid of blocks; each block is one of: towers (downtown),
+// mid-rise streets of shops and flats, houses with gardens, or park. Trees
+// line every sidewalk. Built in the town's own coordinates inside a group
+// sitting at the town's corner and height.
+const statics = []; // boxes in the way: {x0, z0, x1, z1, h}
+const posts = []; // round things in the way: {x, z, r}
+const nodes = []; // every crossing in every town
+
+const CELL = 24;
+const grid = new Map();
+const cellKey = (cx, cz) => cx * 8192 + cz;
+function addToGrid(obj, x0, z0, x1, z1) {
+  for (let cx = Math.floor(x0 / CELL); cx <= Math.floor(x1 / CELL); cx++) for (let cz = Math.floor(z0 / CELL); cz <= Math.floor(z1 / CELL); cz++) {
+    const k = cellKey(cx, cz);
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(obj);
+  }
+}
+function addBox(x0, z0, x1, z1, h) {
+  const b = { box: true, x0, z0, x1, z1, h };
+  statics.push(b);
+  addToGrid(b, x0, z0, x1, z1);
+  return b;
+}
+function addPost(x, z, r) {
+  const p = { box: false, x, z, r };
+  posts.push(p);
+  addToGrid(p, x - r, z - r, x + r, z + r);
+}
+const _near = [];
+let _stamp = 0;
+function nearStatics(x, z, r) {
+  _near.length = 0;
+  _stamp++;
+  for (let cx = Math.floor((x - r) / CELL); cx <= Math.floor((x + r) / CELL); cx++) for (let cz = Math.floor((z - r) / CELL); cz <= Math.floor((z + r) / CELL); cz++) {
+    const list = grid.get(cellKey(cx, cz));
+    if (list) for (const o of list) if (o.seen !== _stamp) { o.seen = _stamp; _near.push(o); }
+  }
+  return _near;
+}
+
+const LIGHT_COLS = [new THREE.Color(0x30ff6a), new THREE.Color(0xffc21a), new THREE.Color(0xff3020)];
+function lightFor(n, axis, t) {
+  const ph = (t + n.phase) % 20;
+  if (axis === "z") return ph < 8 ? 0 : ph < 10 ? 1 : 2;
+  return ph >= 10 && ph < 18 ? 0 : ph >= 18 ? 1 : 2;
+}
+
+function buildTown(t) {
+  const n = t.n;
+  const size = t.size;
+  const g = new THREE.Group();
+  g.position.set(t.ox, t.y, t.oz);
+  scene.add(g);
+  t.group = g;
+  t.blocks = [];
+  t.nodes = [];
+  t.heads = [];
+  const trees = [];
+  const bushes = [];
+  const R = rng(t.ox * 13 + t.oz * 7 + 99);
+  const pick = (a) => a[Math.floor(R() * a.length)];
+  const parks = new Set(t.parks);
+  // In town coordinates; colliders go in at world coordinates.
+  const box_ = (x0, z0, x1, z1, h) => addBox(t.ox + x0, t.oz + z0, t.ox + x1, t.oz + z1, h);
+  const post_ = (x, z, r) => addPost(t.ox + x, t.oz + z, r);
+
+  // The road surface under the whole town, a little past its edge.
+  const A0 = -EDGE - 6;
+  const A1 = size + EDGE + 6;
+  put(plane(A1 - A0, A1 - A0, 8, 8), M.asphalt, { x: (A0 + A1) / 2, y: 0, z: (A0 + A1) / 2, rx: -Math.PI / 2, cast: false });
+
+  function hedge(x0, z0, x1, z1, h = 1.1) {
+    const w = Math.max(0.6, x1 - x0);
+    const d = Math.max(0.6, z1 - z0);
+    put(box(w, h, d, 1.5, 1.5), M.hedge, { x: (x0 + x1) / 2, y: CURB + h / 2, z: (z0 + z1) / 2 });
+    box_(x0, z0, x0 + w, z0 + d, h);
+  }
+  function walls(x0, z0, x1, z1, y0, y1, mat, th = 3.5) {
+    const w = x1 - x0;
+    const d = z1 - z0;
+    const h = y1 - y0;
+    const cy = (y0 + y1) / 2;
+    const twW = w / Math.max(1, Math.round(w / 4));
+    const twD = d / Math.max(1, Math.round(d / 4));
+    put(plane(w, h, twW, th, 0, y0 - CURB), mat, { x: (x0 + x1) / 2, y: cy, z: z1 });
+    put(plane(w, h, twW, th, 0, y0 - CURB), mat, { x: (x0 + x1) / 2, y: cy, z: z0, ry: Math.PI });
+    put(plane(d, h, twD, th, 0, y0 - CURB), mat, { x: x1, y: cy, z: (z0 + z1) / 2, ry: Math.PI / 2 });
+    put(plane(d, h, twD, th, 0, y0 - CURB), mat, { x: x0, y: cy, z: (z0 + z1) / 2, ry: -Math.PI / 2 });
+  }
+  function flatRoof(x0, z0, x1, z1, y) {
+    const w = x1 - x0;
+    const d = z1 - z0;
+    put(plane(w, d, 4, 4), M.roof, { x: (x0 + x1) / 2, y, z: (z0 + z1) / 2, rx: -Math.PI / 2 });
+    for (const [x, z, ww, dd] of [[(x0 + x1) / 2, z0 + 0.15, w, 0.3], [(x0 + x1) / 2, z1 - 0.15, w, 0.3], [x0 + 0.15, (z0 + z1) / 2, 0.3, d], [x1 - 0.15, (z0 + z1) / 2, 0.3, d]]) put(box(ww, 0.7, dd, 2, 1), M.wall, { x, y: y + 0.35, z });
+    const r = R();
+    if (w > 8 && d > 8) {
+      for (let k = 0; k < 2 + Math.floor(r * 3); k++) put(box(1.4, 1, 1.2), M.metal, { x: x0 + 2 + R() * (w - 4), y: y + 0.5, z: z0 + 2 + R() * (d - 4) });
+      if (r < 0.35) {
+        const tx = x0 + 2.5 + R() * (w - 5);
+        const tz = z0 + 2.5 + R() * (d - 5);
+        put(new THREE.CylinderGeometry(1.1, 1.1, 2.4, 10), M.wood, { x: tx, y: y + 2.4, z: tz });
+        put(new THREE.ConeGeometry(1.2, 0.8, 10), M.darkMetal, { x: tx, y: y + 4.0, z: tz });
+        for (const [dx, dz] of [[-0.7, -0.7], [0.7, -0.7], [-0.7, 0.7], [0.7, 0.7]]) put(box(0.12, 1.2, 0.12), M.darkMetal, { x: tx + dx, y: y + 0.6, z: tz + dz });
+      } else if (r < 0.6) {
+        for (let k = 0; k < 6 + Math.floor(R() * 8); k++) bushes.push({ x: x0 + 1.5 + R() * (w - 3), y: y + 0.2, z: z0 + 1.5 + R() * (d - 3), s: 0.7 + R() * 0.7 });
+      }
+    }
+  }
+  function building(x0, z0, x1, z1, kind, faces) {
+    const w = x1 - x0;
+    const d = z1 - z0;
+    let h;
+    let mat;
+    if (kind === "tower") {
+      const near = Math.hypot((x0 + x1) / 2 / P - t.downtown[0], (z0 + z1) / 2 / P - t.downtown[1]);
+      h = Math.round((30 + R() * 70 * Math.max(0.3, 1.4 - near * 0.45)) / 3.5) * 3.5;
+      mat = R() < 0.65 ? pick(facadeMats.glass) : pick(facadeMats.concrete);
+    } else if (kind === "mid") {
+      h = (3 + Math.floor(R() * (t.style === "city" ? 6 : 3))) * 3.5;
+      mat = pick([...facadeMats.brick, ...facadeMats.stucco, ...facadeMats.stucco, ...facadeMats.concrete]);
+    } else {
+      h = (1 + Math.floor(R() * 2)) * 3.5;
+      mat = pick([...facadeMats.house, ...facadeMats.stucco]);
+    }
+    const top = CURB + h;
+    if (kind !== "house" && R() < 0.8) {
+      walls(x0, z0, x1, z1, CURB, CURB + 4, pick(shopMats), 4);
+      walls(x0, z0, x1, z1, CURB + 4, top, mat);
+      const am = new THREE.MeshLambertMaterial({ color: pick([0xc8553d, 0x2f7d6d, 0xe0a030, 0x2d5f9a, 0xf2efe6]) });
+      for (const f of faces) {
+        if (R() < 0.4) continue;
+        const len = (f === "n" || f === "s" ? w : d) * 0.8;
+        if (f === "s") put(box(len, 0.08, 1.4), am, { x: (x0 + x1) / 2, y: CURB + 3.4, z: z0 - 0.7, rx: -0.25 });
+        if (f === "n") put(box(len, 0.08, 1.4), am, { x: (x0 + x1) / 2, y: CURB + 3.4, z: z1 + 0.7, rx: 0.25 });
+        if (f === "w") put(box(1.4, 0.08, len), am, { x: x0 - 0.7, y: CURB + 3.4, z: (z0 + z1) / 2, rz: 0.25 });
+        if (f === "e") put(box(1.4, 0.08, len), am, { x: x1 + 0.7, y: CURB + 3.4, z: (z0 + z1) / 2, rz: -0.25 });
+      }
+    } else walls(x0, z0, x1, z1, CURB, top, mat);
+    if (kind === "house") {
+      const roof = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1);
+      roof.rotateY(Math.PI / 4);
+      put(roof, R() < 0.6 ? M.terracotta : M.slate, { x: (x0 + x1) / 2, y: top + 1.2, z: (z0 + z1) / 2, sx: w + 0.8, sy: 2.4, sz: d + 0.8 });
+    } else if (kind === "tower" && h > 50 && w > 14 && d > 14 && R() < 0.6) {
+      const i = 2.5;
+      const h2 = Math.round((10 + R() * 30) / 3.5) * 3.5;
+      flatRoof(x0, z0, x1, z1, top);
+      walls(x0 + i, z0 + i, x1 - i, z1 - i, top, top + h2, mat);
+      flatRoof(x0 + i, z0 + i, x1 - i, z1 - i, top + h2);
+      h += h2;
+    } else flatRoof(x0, z0, x1, z1, top);
+    box_(x0, z0, x1, z1, h + CURB);
+  }
+  function parcels(x0, z0, x1, z1, min, out) {
+    const w = x1 - x0;
+    const d = z1 - z0;
+    if ((w < min * 2 && d < min * 2) || (out.length > 6 && R() < 0.5)) { out.push([x0, z0, x1, z1]); return out; }
+    if (w >= d) { const cut = x0 + w * (0.35 + R() * 0.3); parcels(x0, z0, cut, z1, min, out); parcels(cut, z0, x1, z1, min, out); }
+    else { const cut = z0 + d * (0.35 + R() * 0.3); parcels(x0, z0, x1, cut, min, out); parcels(x0, cut, x1, z1, min, out); }
+    return out;
+  }
+
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    const bx0 = i * P + RW;
+    const bz0 = j * P + RW;
+    const bx1 = (i + 1) * P - RW;
+    const bz1 = (j + 1) * P - RW;
+    const lx0 = bx0 + SW;
+    const lz0 = bz0 + SW;
+    const lx1 = bx1 - SW;
+    const lz1 = bz1 - SW;
+    const dd = Math.hypot(i + 0.5 - t.downtown[0], j + 0.5 - t.downtown[1]);
+    let kind;
+    if (parks.has(`${i},${j}`)) kind = "park";
+    else if (t.style === "city") kind = dd < 2.0 ? "tower" : dd < 4.2 ? "mid" : "house";
+    else if (t.style === "harbor") kind = dd < 1.6 ? "mid" : "house";
+    else kind = "house";
+    if (kind === "mid" && R() < 0.08) kind = "park";
+    t.blocks.push({ kind, x0: t.ox + lx0, z0: t.oz + lz0, x1: t.ox + lx1, z1: t.oz + lz1, i, j });
+    put(box(bx1 - bx0, CURB, bz1 - bz0, 2, 2), M.sidewalk, { x: (bx0 + bx1) / 2, y: CURB / 2, z: (bz0 + bz1) / 2, cast: false });
+    const green = kind === "park" || kind === "house";
+    put(plane(lx1 - lx0, lz1 - lz0, green ? 6 : 3, green ? 6 : 3), green ? M.grass : M.plaza, { x: (lx0 + lx1) / 2, y: CURB + 0.01, z: (lz0 + lz1) / 2, rx: -Math.PI / 2, cast: false });
+    for (const side of ["s", "n", "w", "e"]) {
+      const along = side === "s" || side === "n";
+      const fixed = side === "s" ? bz0 + 1.3 : side === "n" ? bz1 - 1.3 : side === "w" ? bx0 + 1.3 : bx1 - 1.3;
+      const a0 = (along ? bx0 : bz0) + 6;
+      const a1 = (along ? bx1 : bz1) - 6;
+      for (let a = a0; a <= a1; a += kind === "tower" ? 11 : 9) {
+        if (R() < 0.12) continue;
+        trees.push({ x: along ? a : fixed, z: along ? fixed : a, s: 0.8 + R() * 0.45, kind: kind === "house" && R() < 0.25 ? "cypress" : "round" });
+      }
+    }
+    if (kind === "park") {
+      const cx = (lx0 + lx1) / 2;
+      const cz = (lz0 + lz1) / 2;
+      put(plane(lx1 - lx0, 3, 3, 3), M.path, { x: cx, y: CURB + 0.02, z: cz, rx: -Math.PI / 2, cast: false });
+      put(plane(3, lz1 - lz0, 3, 3), M.path, { x: cx, y: CURB + 0.025, z: cz, rx: -Math.PI / 2, cast: false });
+      const pond = R() < 0.6;
+      const pr = 7 + R() * 3;
+      const px_ = cx + (R() < 0.5 ? -1 : 1) * 11;
+      const pz = cz + (R() < 0.5 ? -1 : 1) * 11;
+      if (pond) {
+        const pm = new THREE.Mesh(new THREE.CircleGeometry(pr, 28), new THREE.MeshPhongMaterial({ color: 0x3a9fbf, specular: 0xffffff, shininess: 90 }));
+        pm.rotation.x = -Math.PI / 2;
+        pm.position.set(px_, CURB + 0.04, pz);
+        pm.receiveShadow = true;
+        g.add(pm);
+        put(new THREE.TorusGeometry(pr, 0.25, 6, 28), M.wall, { x: px_, y: CURB + 0.05, z: pz, rx: Math.PI / 2 });
+        post_(px_, pz, pr - 0.5);
+      }
+      let placed = 0;
+      for (let k = 0; k < 140 && placed < 46; k++) {
+        const x = lx0 + 2 + R() * (lx1 - lx0 - 4);
+        const z = lz0 + 2 + R() * (lz1 - lz0 - 4);
+        if (Math.abs(x - cx) < 3 || Math.abs(z - cz) < 3) continue;
+        if (pond && Math.hypot(x - px_, z - pz) < pr + 2) continue;
+        trees.push({ x, z, s: 0.9 + R() * 0.8, kind: R() < 0.15 ? "cypress" : "round" });
+        placed++;
+      }
+      for (let k = 0; k < 40; k++) {
+        const x = lx0 + 1 + R() * (lx1 - lx0 - 2);
+        const z = lz0 + 1 + R() * (lz1 - lz0 - 2);
+        if (Math.abs(x - cx) < 2.5 || Math.abs(z - cz) < 2.5 || (pond && Math.hypot(x - px_, z - pz) < pr + 1)) continue;
+        bushes.push({ x, y: CURB, z, s: 0.6 + R() * 0.8 });
+      }
+      for (const [x, z, ry] of [[cx - 8, cz + 2.4, 0], [cx + 8, cz - 2.4, Math.PI], [cx + 2.4, cz + 8, Math.PI / 2], [cx - 2.4, cz - 8, -Math.PI / 2]]) {
+        put(box(1.8, 0.08, 0.5), M.wood, { x, y: CURB + 0.48, z, ry });
+        put(box(1.8, 0.45, 0.08), M.wood, { x: x + Math.sin(ry) * 0.25, y: CURB + 0.75, z: z + Math.cos(ry) * 0.25, ry });
+      }
+      continue;
+    }
+    const faces = (p) => [p[1] <= lz0 + 0.1 && "s", p[3] >= lz1 - 0.1 && "n", p[0] <= lx0 + 0.1 && "w", p[2] >= lx1 - 0.1 && "e"].filter(Boolean);
+    const list = parcels(lx0, lz0, lx1, lz1, kind === "tower" ? 16 : kind === "mid" ? 11 : 14, []);
+    for (const p of list) {
+      const inset = kind === "tower" ? 1 : kind === "mid" ? 0.4 : 3.5;
+      const [x0, z0, x1, z1] = [p[0] + inset, p[1] + inset, p[2] - inset, p[3] - inset];
+      if (x1 - x0 < 5 || z1 - z0 < 5) continue;
+      if (kind === "tower" && R() < 0.12) {
+        for (let k = 0; k < 4; k++) {
+          const x = x0 + 2 + R() * (x1 - x0 - 4);
+          const z = z0 + 2 + R() * (z1 - z0 - 4);
+          put(box(2.4, 0.6, 2.4), M.wall, { x, y: CURB + 0.3, z });
+          box_(x - 1.2, z - 1.2, x + 1.2, z + 1.2, 0.6);
+          trees.push({ x, z, s: 0.8, kind: "round", y: 0.6 });
+        }
+        continue;
+      }
+      building(x0, z0, x1, z1, kind, faces(p));
+      if (kind === "house") {
+        for (const f of faces(p)) {
+          if (f === "s") hedge(p[0] + 1, p[1] + 0.3, p[2] - 1, p[1] + 1.1);
+          if (f === "n") hedge(p[0] + 1, p[3] - 1.1, p[2] - 1, p[3] - 0.3);
+          if (f === "w") hedge(p[0] + 0.3, p[1] + 1, p[0] + 1.1, p[3] - 1);
+          if (f === "e") hedge(p[2] - 1.1, p[1] + 1, p[2] - 0.3, p[3] - 1);
+        }
+        for (let k = 0; k < 1 + Math.floor(R() * 3); k++) {
+          const c = [[p[0] + 1.8, p[1] + 1.8], [p[2] - 1.8, p[1] + 1.8], [p[0] + 1.8, p[3] - 1.8], [p[2] - 1.8, p[3] - 1.8]][Math.floor(R() * 4)];
+          trees.push({ x: c[0], z: c[1], s: 0.9 + R() * 0.5, kind: R() < 0.3 ? "cypress" : "round" });
+        }
+        for (let k = 0; k < 5; k++) bushes.push({ x: x0 - 1 + R() * (x1 - x0 + 2), y: CURB, z: R() < 0.5 ? z0 - 0.9 : z1 + 0.9, s: 0.5 + R() * 0.5 });
+      } else if (kind === "mid") {
+        for (let k = 0; k < 3; k++) bushes.push({ x: x0 + R() * (x1 - x0), y: CURB, z: R() < 0.5 ? z0 - 0.7 : z1 + 0.7, s: 0.45 + R() * 0.3 });
+      }
+    }
+  }
+
+  // Crossings, markings, traffic lights, lamps.
+  for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) {
+    const nd = { t, i, j, x: t.ox + i * P, z: t.oz + j * P, phase: R() * 20 };
+    t.nodes.push(nd);
+    nodes.push(nd);
+  }
+  t.nodeAt = (i, j) => (i < 0 || j < 0 || i > n || j > n ? null : t.nodes[i * (n + 1) + j]);
+  {
+    const quad = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+    const whites = [];
+    const yellows = [];
+    const mark = (list, x, z, w, d) => list.push(new THREE.Matrix4().compose(new THREE.Vector3(x, 0.02, z), new THREE.Quaternion(), new THREE.Vector3(w, 1, d)));
+    for (let k = 0; k <= n; k++) for (let s = 0; s < n; s++) {
+      const a0 = s * P + RW + 3.2;
+      const a1 = (s + 1) * P - RW - 3.2;
+      const mid = (a0 + a1) / 2;
+      const len = a1 - a0;
+      for (const o of [-0.16, 0.16]) { mark(yellows, k * P + o, mid, 0.11, len); mark(yellows, mid, k * P + o, len, 0.11); }
+      mark(whites, k * P - LO, a0 - 0.2, 2 * LO - 0.4, 0.4);
+      mark(whites, k * P + LO, a1 + 0.2, 2 * LO - 0.4, 0.4);
+      mark(whites, a0 - 0.2, k * P + LO, 0.4, 2 * LO - 0.4);
+      mark(whites, a1 + 0.2, k * P - LO, 0.4, 2 * LO - 0.4);
+    }
+    for (const nd of t.nodes) for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      if (!t.nodeAt(nd.i + dx, nd.j + dz)) continue;
+      const cx = nd.i * P + dx * (RW + 1.6);
+      const cz = nd.j * P + dz * (RW + 1.6);
+      for (let q = -RW + 0.8; q <= RW - 0.8; q += 1.1) {
+        if (dx) mark(whites, cx, nd.j * P + q, 2.4, 0.55);
+        else mark(whites, nd.i * P + q, cz, 0.55, 2.4);
+      }
+    }
+    for (const [list, mat] of [[whites, M.white], [yellows, M.yellow]]) {
+      const im = new THREE.InstancedMesh(quad, mat, list.length);
+      list.forEach((m, k) => im.setMatrixAt(k, m));
+      im.receiveShadow = true;
+      g.add(im);
+    }
+  }
+  for (const nd of t.nodes) for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    if (!t.nodeAt(nd.i - dx, nd.j - dz)) continue;
+    const rx = -dz;
+    const rz = dx;
+    const x = nd.i * P - dx * (RW + 3.6) + rx * (RW + 0.9);
+    const z = nd.j * P - dz * (RW + 3.6) + rz * (RW + 0.9);
+    put(new THREE.CylinderGeometry(0.09, 0.11, 4.2, 6), M.darkMetal, { x, y: CURB + 2.1, z });
+    const ry = Math.atan2(-dx, -dz);
+    put(box(0.42, 1.15, 0.32), M.darkMetal, { x, y: CURB + 4.3, z, ry });
+    post_(x, z, 0.2);
+    t.heads.push({ n: nd, axis: dx ? "x" : "z", x: x - dx * 0.17, z: z - dz * 0.17, ry, state: -1 });
+  }
+  t.lamps = new THREE.InstancedMesh(new THREE.CircleGeometry(0.13, 10), new THREE.MeshBasicMaterial({ toneMapped: false }), Math.max(1, t.heads.length));
+  g.add(t.lamps);
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    for (const [x, z, ry] of [[i * P + P / 2, j * P + RW + 0.5, 0], [i * P + RW + 0.5, j * P + P / 2, Math.PI / 2]]) {
+      put(new THREE.CylinderGeometry(0.08, 0.12, 6, 6), M.darkMetal, { x, y: CURB + 3, z });
+      put(box(0.1, 0.1, 1.6), M.darkMetal, { x: x + (ry ? -0.8 : 0), y: CURB + 6, z: z + (ry ? 0 : -0.8), ry });
+      put(box(0.5, 0.18, 0.3), M.metal, { x: x + (ry ? -1.5 : 0), y: CURB + 5.9, z: z + (ry ? 0 : -1.5), ry });
+      post_(x, z, 0.18);
+    }
+  }
+  flush(g);
+
+  // The town's trees and bushes, instanced.
+  const round = trees.filter((q) => q.kind === "round");
+  const cyp = trees.filter((q) => q.kind === "cypress");
+  const Y = (q) => CURB + (q.y || 0);
+  for (const q of trees) post_(q.x, q.z, 0.3 * q.s);
+  const blobs = [];
+  for (const q of round) {
+    const r = rng(Math.round(q.x * 31 + q.z * 7));
+    const c = TREE.greens[Math.floor(r() * TREE.greens.length)];
+    blobs.push({ x: q.x, y: Y(q) + 3.6 * q.s, z: q.z, s: 2.0 * q.s, sy: 1.7 * q.s, c });
+    blobs.push({ x: q.x + (r() - 0.5) * 1.6 * q.s, y: Y(q) + (4.6 + r() * 0.6) * q.s, z: q.z + (r() - 0.5) * 1.6 * q.s, s: 1.4 * q.s, sy: 1.3 * q.s, c });
+  }
+  for (const b of bushes) blobs.push({ x: b.x, y: b.y + b.s * 0.45, z: b.z, s: b.s, sy: b.s * 0.75, c: TREE.greens[Math.floor(Math.abs(b.x * 13 + b.z) % TREE.greens.length)] });
+  const add = (m) => m && g.add(m);
+  add(instanced(TREE.trunk, TREE.bark, [...round, ...cyp], (q, m) => m.compose(tmpV.set(q.x, Y(q), q.z), tmpQ.identity(), new THREE.Vector3(q.s, (q.kind === "cypress" ? 1.6 : 2.6) * q.s, q.s))));
+  add(instanced(TREE.blobFine, TREE.leaf, blobs, (b, m) => m.compose(tmpV.set(b.x, b.y, b.z), tmpQ.setFromEuler(tmpE.set(0, b.x, 0)), new THREE.Vector3(b.s, b.sy, b.s)), (b) => b.c));
+  add(instanced(TREE.cone, TREE.leaf, cyp, (q, m) => m.compose(tmpV.set(q.x, Y(q) + 1.2 * q.s, q.z), tmpQ.identity(), new THREE.Vector3(q.s, 7 * q.s, q.s)), () => TREE.pine[0]));
+}
+for (const t of TOWNS) buildTown(t);
+
+function updateLights(time) {
+  for (const t of TOWNS) {
+    let changed = false;
+    t.heads.forEach((h, k) => {
+      const s = lightFor(h.n, h.axis, time);
+      if (s === h.state) return;
+      h.state = s;
+      changed = true;
+      tmpM.compose(tmpV.set(h.x, CURB + 4.68 - s * 0.36, h.z), tmpQ.setFromEuler(tmpE.set(0, h.ry, 0)), ONE);
+      t.lamps.setMatrixAt(k, tmpM);
+      t.lamps.setColorAt(k, LIGHT_COLS[s]);
+    });
+    if (changed) {
+      t.lamps.instanceMatrix.needsUpdate = true;
+      if (t.lamps.instanceColor) t.lamps.instanceColor.needsUpdate = true;
+    }
+  }
+}
+
+// Street names: avenues run north-south, streets east-west.
+const AVENUES = ["Harbor", "Cedar", "Magnolia", "Laurel", "Bayview", "Juniper", "Oleander", "Willow", "Sycamore", "Palmetto", "Seawall"];
+const STREETS = ["Shore", "First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth", "North"];
+function placeName(x, z) {
+  const t = townAt(x, z);
+  if (t) {
+    const kx = clamp(Math.round((x - t.ox) / P), 0, t.n);
+    const kz = clamp(Math.round((z - t.oz) / P), 0, t.n);
+    const dx = Math.abs(x - t.ox - kx * P);
+    const dz = Math.abs(z - t.oz - kz * P);
+    const av = `${AVENUES[kx]} Ave`;
+    const st = `${STREETS[kz]} St`;
+    if (dx < RW + 2 && dz < RW + 2) return `${t.name} · ${av} & ${st}`;
+    return `${t.name} · ${dx < dz ? av : st}`;
+  }
+  const r = roadAt(x, z, 30);
+  if (r) return r.road.name;
+  return "Countryside";
+}

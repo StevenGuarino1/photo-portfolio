@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Verdant Bay</title>
+<meta name="description" content="A sunny island city full of trees. Take any car and drive.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* One look: a bright day. Glass panels over the scene, ink on frost. */
+  :root {
+    --sky: #bfe0ff;
+    --ink: #0f1d2b;
+    --soft: rgba(15, 29, 43, 0.62);
+    --glass: rgba(255, 255, 255, 0.72);
+    --edge: rgba(15, 29, 43, 0.12);
+    --leaf: #2f9e5b;
+    --sun: #ffb627;
+    --stop: #e4473a;
+    --display: "Archivo Black", "Arial Black", Impact, sans-serif;
+    --body: Inter, system-ui, sans-serif;
+    color-scheme: light;
+  }
+  html, body { margin: 0; height: 100%; background: var(--sky); color: var(--ink); overflow: hidden; font-family: var(--body); -webkit-font-smoothing: antialiased; user-select: none; -webkit-user-select: none; }
+  canvas#view { display: block; width: 100vw; height: 100vh; outline: none; touch-action: none; }
+  .hud { position: fixed; z-index: 10; pointer-events: none; }
+  .panel { background: var(--glass); border: 1px solid var(--edge); border-radius: 14px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 6px 24px rgba(15, 29, 43, 0.12); }
+
+  #speed { right: calc(20px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); padding: 12px 18px 12px; min-width: 120px; text-align: right; }
+  #speed b { display: block; font: 400 44px/1 var(--display); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  #speed small { display: block; margin-top: 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--soft); }
+  #speed .gear { display: inline-block; margin-right: 8px; padding: 1px 6px; border-radius: 4px; background: var(--ink); color: #fff; letter-spacing: 0.05em; }
+  #speed[hidden] { display: none; }
+  #map { left: calc(20px + env(safe-area-inset-left, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); width: 190px; height: 190px; border-radius: 50%; overflow: hidden; padding: 0; }
+  #map canvas { width: 100%; height: 100%; display: block; }
+  #street { left: 50%; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); padding: 8px 14px; font-size: 13px; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; }
+  #hint { left: 50%; top: calc(18px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); padding: 9px 14px; font-size: 13px; font-weight: 500; opacity: 0; transition: opacity 300ms ease; white-space: nowrap; }
+  #hint.on { opacity: 1; }
+  #hint kbd { display: inline-block; min-width: 18px; padding: 1px 6px; margin: 0 2px; border-radius: 5px; background: var(--ink); color: #fff; font: 600 12px/1.5 var(--body); text-align: center; }
+  #keys { right: calc(20px + env(safe-area-inset-right, 0px)); top: calc(18px + env(safe-area-inset-top, 0px)); padding: 10px 14px; font-size: 12px; line-height: 1.8; color: var(--soft); }
+  #keys b { color: var(--ink); font-weight: 600; }
+  #fps { left: calc(20px + env(safe-area-inset-left, 0px)); top: calc(18px + env(safe-area-inset-top, 0px)); font: 11px ui-monospace, monospace; color: var(--soft); }
+
+  #intro { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; text-align: center;
+    background: linear-gradient(180deg, rgba(191, 224, 255, 0.2), rgba(191, 224, 255, 0.75)); transition: opacity 500ms ease; }
+  #intro.gone { opacity: 0; pointer-events: none; }
+  #intro .card { padding: 34px 38px 30px; max-width: 30rem; }
+  #intro h1 { margin: 0; font: 400 clamp(44px, 8vw, 76px)/0.95 var(--display); letter-spacing: -0.02em; text-wrap: balance; }
+  #intro h1 span { color: var(--leaf); }
+  #intro p { margin: 14px 0 24px; font-size: 16px; line-height: 1.5; color: var(--soft); }
+  #intro button { font: 700 14px/1 var(--body); letter-spacing: 0.08em; text-transform: uppercase; color: #fff; background: var(--ink); border: 0; padding: 15px 30px; border-radius: 999px; cursor: pointer; }
+  #intro button:hover, #intro button:focus-visible { background: var(--leaf); outline: none; }
+  #intro small { display: block; margin-top: 20px; font-size: 12px; line-height: 1.8; color: var(--soft); }
+  @media (max-width: 640px) {
+    #map { width: 130px; height: 130px; }
+    #keys { display: none; }
+    #speed b { font-size: 34px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="intro">
+  <div class="card panel">
+    <h1>Verdant <span>Bay</span></h1>
+    <p>A sunny island city, more trees than people. Any car on the street is yours if you want it.</p>
+    <button id="go" type="button">Drive</button>
+    <small>W A S D drive · Space handbrake · F get in / out · H horn · C camera · mouse to look</small>
+  </div>
+</div>
+<div class="hud panel" id="speed"><b>0</b><small><span class="gear">1</span>km/h</small></div>
+<div class="hud panel" id="map"><canvas width="380" height="380"></canvas></div>
+<div class="hud panel" id="street"></div>
+<div class="hud panel" id="hint"></div>
+<div class="hud panel" id="keys"><b>W S</b> gas, brake · <b>A D</b> steer<br><b>Space</b> handbrake · <b>F</b> in / out<br><b>H</b> horn · <b>C</b> camera</div>
+<div class="hud" id="fps" hidden></div>
+
+<script type="module">
+import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";

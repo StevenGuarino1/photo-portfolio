@@ -598,7 +598,10 @@ function fbm(x, z, oct = 4) {
   return s / (1 - Math.pow(0.5, oct));
 }
 const smooth = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
-const ISLE = { cx: -1000, cz: -900, rx: 2380, rz: 2280 };
+// The whole island is laid out at this scale: smaller means every place is
+// in sight of the others.
+const WS = 0.75;
+const ISLE = { cx: -1000 * WS, cz: -900 * WS, rx: 2380 * WS, rz: 2280 * WS };
 function coastD(x, z) {
   const dx = (x - ISLE.cx) / ISLE.rx;
   const dz = (z - ISLE.cz) / ISLE.rz;
@@ -610,16 +613,25 @@ function coastD(x, z) {
 // the middle, an open meadow by the west coast, a wind farm on the northern
 // downs, sea cliffs under Larkhill, and a lake in the south-west.
 const REG = {
-  forest: { x: -2000, z: -1150, r: 950 },
+  forest: { x: -2350, z: -1250, r: 950 },
   farm: { x: -250, z: -1650, r: 760 },
   high: { x: -1250, z: -380, r: 680 },
   meadow: { x: -2550, z: -250, r: 460 },
   wind: { x: -560, z: 1000, r: 380 },
 };
 const LAKE = { x: -1650, z: -2030, r: 250, y: 16 };
+for (const r of Object.values(REG)) { r.x *= WS; r.z *= WS; r.r *= WS; }
+LAKE.x *= WS;
+LAKE.z *= WS;
+LAKE.r *= 0.85;
+const POIS_EARLY = [];
+const QUARRY = { x: REG.high.x + 330, z: REG.high.z - 230, r: 85 };
+// The airfield in the farmland: a strip laid level across the fields.
+const FIELD_A = 0.38; // the fields' grid is turned a little off true
+const AIR = { x: 260, z: -1360, a: FIELD_A, len: 560, w: 46, y: 0 };
 const regionW = (R, x, z) => smooth(R.r, R.r * 0.4, Math.hypot(x - R.x, z - R.z));
 function lakeR(a) { return LAKE.r * (1 + 0.36 * (vnoise(Math.cos(a) * 1.7 + 5, Math.sin(a) * 1.7 + 5) - 0.5)); }
-function cliffW(x, z) { return smooth(-2250, -2650, x) * smooth(-1000, -200, z); }
+function cliffW(x, z) { return smooth(-2250 * WS, -2650 * WS, x) * smooth(-1000 * WS, -200 * WS, z); }
 function baseH0(x, z) {
   const d = coastD(x, z);
   const cw = cliffW(x, z);
@@ -631,8 +643,14 @@ function baseH0(x, z) {
   const ridge = Math.pow(1 - Math.abs(fbm(x * 0.0005 + 11, z * 0.0005 - 5, 3) * 2 - 1), 3) * 45;
   // Craggy tops in the highlands.
   const crags = wHigh * Math.pow(1 - Math.abs(vnoise(x * 0.004, z * 0.004) * 2 - 1), 4) * 35;
-  return -16 + land * 20 + inland * (hills + ridge + crags) + cw * 34 * smooth(1.0, 0.97, d);
+  let h = -16 + land * 20 + inland * (hills + ridge + crags) + cw * 34 * smooth(1.0, 0.97, d);
+  // A quarry cut into the highlands in great steps.
+  const qd = Math.hypot(x - QUARRY.x, z - QUARRY.z);
+  if (qd < QUARRY.r) h -= Math.floor(((QUARRY.r - qd) / QUARRY.r) * 6) * 7;
+  return h;
 }
+AIR.y = baseH0(AIR.x, AIR.z);
+POIS_EARLY.push({ x: QUARRY.x, z: QUARRY.z, r: QUARRY.r + 20 }, { x: AIR.x, z: AIR.z, r: AIR.len / 2 + 30 });
 // The lake sits in the land as it is: its surface a little below the
 // lowest point of the ground round it, so it never spills.
 {
@@ -662,8 +680,8 @@ function baseH(x, z) {
 // ---------- Towns ----------
 const TOWNS = [
   { name: "Verdant Bay", ox: 0, oz: 0, n: 10, y: 3, style: "city", downtown: [6.5, 6.5], parks: ["3,3", "3,4", "4,3", "4,4", "8,1", "1,7"], landmarks: { "6,6": "spire", "5,3": "civic", "2,5": "church", "8,8": "stadium", "6,2": "clock", "3,7": "museum" } },
-  { name: "Saltmarsh", ox: -600, oz: -2950, n: 4, y: 4, style: "harbor", downtown: [2, 2], parks: ["0,3"], landmarks: { "1,0": "market" } },
-  { name: "Larkhill", ox: -2900, oz: 560, n: 3, y: 46, style: "village", downtown: [1.5, 1.5], parks: ["1,1"], landmarks: { "1,2": "chapel" } },
+  { name: "Saltmarsh", ox: -460, oz: -2215, n: 4, y: 4, style: "harbor", downtown: [2, 2], parks: ["0,3"], landmarks: { "1,0": "market" } },
+  { name: "Larkhill", ox: -2160, oz: 420, n: 3, y: 46, style: "village", downtown: [1.5, 1.5], parks: ["1,1"], landmarks: { "1,2": "chapel" } },
 ];
 for (const t of TOWNS) { t.size = t.n * P; t.x0 = t.ox - EDGE - 6; t.z0 = t.oz - EDGE - 6; t.x1 = t.ox + t.size + EDGE + 6; t.z1 = t.oz + t.size + EDGE + 6; }
 function townAt(x, z, margin = 0) {
@@ -751,9 +769,9 @@ function makeRoad(name, a, b, via, seed) {
   return road;
 }
 const [CITY, HARBOR, VILLAGE] = TOWNS;
-makeRoad("Coast Highway", gate(CITY, "s", 3), gate(HARBOR, "n", 2), [[350, -550], [80, -1050], [-280, -1450], [-120, -1950], [-420, -2320]], 11);
-makeRoad("Ridge Road", gate(CITY, "w", 5), gate(VILLAGE, "e", 1), [[-480, 520], [-900, 280], [-1380, 640], [-1880, 420], [-2330, 760]], 23);
-makeRoad("Old Mill Road", gate(HARBOR, "w", 2), gate(VILLAGE, "s", 1), [[-1150, -2700], [-1750, -2860], [-2320, -2480], [-2880, -1880], [-3000, -1180], [-2830, -520], [-2900, 0]], 37);
+makeRoad("Coast Highway", gate(CITY, "s", 3), gate(HARBOR, "n", 2), [[350, -550], [80, -1050], [-280, -1450], [-120, -1950], [-420, -2320]].map(([x, z]) => [x * WS, z * WS]), 11);
+makeRoad("Ridge Road", gate(CITY, "w", 5), gate(VILLAGE, "e", 1), [[-480, 520], [-900, 280], [-1380, 640], [-1880, 420], [-2330, 760]].map(([x, z]) => [x * WS, z * WS]), 23);
+makeRoad("Old Mill Road", gate(HARBOR, "w", 2), gate(VILLAGE, "s", 1), [[-1150, -2700], [-1750, -2860], [-2320, -2480], [-2880, -1880], [-3000, -1180], [-2830, -520], [-2900, 0]].map(([x, z]) => [x * WS, z * WS]), 37);
 
 // Where the roads are, for quick lookups: each 4 m piece filed in 40 m cells.
 const RCELL = 40;
@@ -800,8 +818,16 @@ function roadAt(x, z, maxD = 40) {
 // The land with the towns settled into it: hills ease down to a town's
 // level over most of a kilometre, so each sits in a broad hollow or on a
 // broad shelf rather than at the foot of a cliff.
+function airLocal(x, z) {
+  const dx = x - AIR.x;
+  const dz = z - AIR.z;
+  return [dx * Math.cos(AIR.a) + dz * Math.sin(AIR.a), -dx * Math.sin(AIR.a) + dz * Math.cos(AIR.a)];
+}
 function natH(x, z) {
   let h = baseH(x, z);
+  const [au, av] = airLocal(x, z);
+  const ad = Math.hypot(Math.max(0, Math.abs(au) - AIR.len / 2), Math.max(0, Math.abs(av) - AIR.w / 2));
+  if (ad < 120) h += (AIR.y - h) * smooth(120, 0, ad);
   for (const t of TOWNS) {
     const dx = Math.max(t.x0 - x, 0, x - t.x1);
     const dz = Math.max(t.z0 - z, 0, z - t.z1);
@@ -864,7 +890,7 @@ function groundAt(x, z) {
 }
 
 // Places of interest, so the woods leave room round them.
-const POIS = [];
+const POIS = POIS_EARLY;
 function nearPOI(x, z) {
   for (const p of POIS) if ((x - p.x) ** 2 + (z - p.z) ** 2 < p.r * p.r) return true;
   return false;
@@ -873,11 +899,12 @@ function nearPOI(x, z) {
 // ---------- Ground tiles, woods, sea ----------
 const CH = 200; // a tile's size
 const CV = CH / GSTEP; // cells along a tile
-const TERRAIN_R = TOUCH ? 1500 : 2600; // how far the ground is drawn
-const FINE_R = TOUCH ? 600 : 900; // full detail within this
+const TERRAIN_R = TOUCH ? 1000 : 1500; // detailed ground this far; the whole island beyond, simpler
+const FINE_R = TOUCH ? 500 : 750; // full detail within this
 const TREE_R = TOUCH ? 520 : 760;
-scene.fog.near = 450;
-scene.fog.far = TERRAIN_R + 150;
+// A light haze: the whole island stays in sight from anywhere on it.
+scene.fog.near = 700;
+scene.fog.far = 5200;
 
 // The sea.
 {
@@ -905,7 +932,6 @@ const COL = {
 };
 // The crops in the farmland's fields.
 const CROPS = [0xd8c06a, 0x7fb24a, 0x5c8f3a, 0x8a6a4a, 0xe8d23a, 0x9a86c8, 0x8ec45a, 0xc9a85a, 0x6f9e3e].map((c) => new THREE.Color(c));
-const FIELD_A = 0.38; // the fields' grid is turned a little off true
 // Which field a point is in, and how close it is to the field's edge.
 function fieldAt(x, z) {
   const u = x * Math.cos(FIELD_A) + z * Math.sin(FIELD_A);
@@ -1029,6 +1055,7 @@ const TREE = {
   leaf: new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }),
   greens: [0x4f9a3a, 0x5aa646, 0x3f8a36, 0x6cb04a, 0x478f3e, 0x7aaa3a].map((c) => new THREE.Color(c)),
   pine: [0x2f6a3a, 0x356f3c, 0x2a5f36].map((c) => new THREE.Color(c)),
+  deep: [0x234f30, 0x2a5a34, 0x1f4a2c, 0x2e5f3a].map((c) => new THREE.Color(c)),
   rocks: [0x8a8880, 0x9c978c, 0x76777a].map((c) => new THREE.Color(c)),
   autumn: [0xd9822b, 0xe0a52a, 0xc4552a, 0xd8b23a, 0xb8402e].map((c) => new THREE.Color(c)),
   birch: [0x9ccf5a, 0xb5d86a].map((c) => new THREE.Color(c)),
@@ -1046,61 +1073,61 @@ function instanced(geo, mat, list, f, color) {
   return im;
 }
 const postsDone = new Set();
+// What, if anything, grows at (x, z), given a roll of the dice r.
+function treeAt(x, z, r) {
+  const wForest = regionW(REG.forest, x, z);
+  const wFarm = regionW(REG.farm, x, z);
+  const wHigh = regionW(REG.high, x, z);
+  const wMeadow = regionW(REG.meadow, x, z);
+  const wWind = regionW(REG.wind, x, z);
+  const woods = fbm(x * 0.0028 + 40, z * 0.0028 - 12, 4);
+  // Ordinary country: woods in patches. The great forest: solid, and
+  // tall. The highlands: a few hardy pines. Meadow and downs: the odd
+  // big oak. Farmland: trees only along the hedgerows.
+  let p = smooth(0.5, 0.68, woods) * 0.8 + 0.02;
+  p = p * (1 - wForest) + 0.9 * wForest;
+  p *= 1 - 0.85 * wHigh;
+  p *= 1 - 0.95 * Math.max(wMeadow, wWind);
+  if (wFarm > 0.2) p = p * (1 - wFarm) + (fieldAt(x, z).edge < 2.5 ? 0.3 : 0) * wFarm;
+  if (r() > p) return null;
+  if (townAt(x, z, 14) || roadAt(x, z, ROAD_HW + 5)) return null;
+  const ld = Math.hypot(x - LAKE.x, z - LAKE.z);
+  if (ld < lakeR(Math.atan2(z - LAKE.z, x - LAKE.x)) + 4) return null;
+  if (nearPOI(x, z)) return null;
+  const h = terrainH(x, z);
+  if (h < 1.5) return null;
+  const autumn = fbm(x * 0.0016 - 30, z * 0.0016 + 8, 3) > 0.62;
+  let kind;
+  if (Math.min(h, baseH(x, z)) < 4.5) kind = r() < 0.5 ? "palm" : null;
+  else if (wForest > 0.35) kind = "tall";
+  else if (ld < LAKE.r * 1.8) kind = r() < 0.7 ? "birch" : "round";
+  else if (wHigh > 0.4 || h > 90) kind = "pine";
+  else if (wForest > 0.1) kind = r() < 0.55 ? "pine" : r() < 0.25 ? "birch" : "round";
+  else kind = r() < 0.25 ? "pine" : r() < 0.12 ? "birch" : "round";
+  if (!kind) return null;
+  const big = Math.max(wMeadow, wWind) > 0.3 ? 1.7 : 1;
+  const s = kind === "tall" ? 1.0 + r() * 0.55 : (0.8 + r() * 0.7) * big;
+  return { x, z, y: h - 0.2, s, kind, k: r(), autumn: autumn && kind === "round" };
+}
 function treesFor(cx, cz) {
   const list = [];
   const r = rng(cx * 7919 + cz * 104729 + 13);
   for (let b = 0; b < CH; b += 7) for (let a = 0; a < CH; a += 7) {
-    const x = cx * CH + a + r() * 6;
-    const z = cz * CH + b + r() * 6;
-    const wForest = regionW(REG.forest, x, z);
-    const wFarm = regionW(REG.farm, x, z);
-    const wHigh = regionW(REG.high, x, z);
-    const wMeadow = regionW(REG.meadow, x, z);
-    const wWind = regionW(REG.wind, x, z);
-    const woods = fbm(x * 0.0028 + 40, z * 0.0028 - 12, 4);
-    // Ordinary country: woods in patches. The forest: nearly solid. The
-    // highlands: a few hardy pines. Meadow and downs: the odd big oak.
-    let p = smooth(0.5, 0.68, woods) * 0.8 + 0.02;
-    p = p * (1 - wForest) + 0.82 * wForest;
-    p *= 1 - 0.85 * wHigh;
-    p *= 1 - 0.95 * Math.max(wMeadow, wWind);
-    let hedgerow = false;
-    if (wFarm > 0.2) {
-      const f = fieldAt(x, z);
-      hedgerow = f.edge < 2.5;
-      p = p * (1 - wFarm) + (hedgerow ? 0.3 : 0.0) * wFarm;
-    }
-    if (r() > p) continue;
-    if (townAt(x, z, 14)) continue;
-    if (roadAt(x, z, ROAD_HW + 5)) continue;
-    const ld = Math.hypot(x - LAKE.x, z - LAKE.z);
-    if (ld < lakeR(Math.atan2(z - LAKE.z, x - LAKE.x)) + 4) continue;
-    if (nearPOI(x, z)) continue;
-    const h = terrainH(x, z);
-    if (h < 1.5) continue;
-    const nearLake = ld < LAKE.r * 1.8;
-    const autumn = fbm(x * 0.0016 - 30, z * 0.0016 + 8, 3) > 0.62;
-    let kind;
-    if (Math.min(h, baseH(x, z)) < 4.5) kind = r() < 0.5 ? "palm" : null;
-    else if (nearLake) kind = r() < 0.7 ? "birch" : "round";
-    else if (wHigh > 0.4 || h > 70) kind = "pine";
-    else if (wForest > 0.3) kind = r() < 0.55 ? "pine" : r() < 0.25 ? "birch" : "round";
-    else kind = r() < 0.25 ? "pine" : r() < 0.12 ? "birch" : "round";
-    if (!kind) continue;
-    const big = Math.max(wMeadow, wWind) > 0.3 ? 1.7 : 1;
-    list.push({ x, z, y: h - 0.2, s: (0.8 + r() * 0.7) * big, kind, k: r(), autumn: autumn && kind === "round" });
+    const t = treeAt(cx * CH + a + r() * 6, cz * CH + b + r() * 6, r);
+    if (t) list.push(t);
   }
   return list;
 }
 function buildTrees(cx, cz) {
   const list = treesFor(cx, cz);
   const key = cx * 4096 + cz;
-  if (!postsDone.has(key)) { postsDone.add(key); for (const t of list) addPost(t.x, t.z, t.kind === "palm" ? 0.3 : 0.32 * t.s); }
+  if (!postsDone.has(key)) { postsDone.add(key); for (const t of list) addPost(t.x, t.z, t.kind === "palm" ? 0.3 : t.kind === "tall" ? 0.5 * t.s : 0.32 * t.s); }
   const grp = new THREE.Group();
   const round = list.filter((t) => t.kind === "round");
   const pines = list.filter((t) => t.kind === "pine");
   const palms = list.filter((t) => t.kind === "palm");
   const birches = list.filter((t) => t.kind === "birch");
+  const talls = list.filter((t) => t.kind === "tall");
   const blobs = [];
   // Rocks and bushes scattered through the fields and under the trees.
   const r2 = rng(cx * 31 + cz * 977 + 5);
@@ -1125,11 +1152,53 @@ function buildTrees(cx, cz) {
   const add = (m) => m && grp.add(m);
   add(instanced(TREE.trunk, TREE.barkTinted, [...round, ...pines, ...birches], (t, m) => m.compose(tmpV.set(t.x, t.y, t.z), tmpQ.identity(), new THREE.Vector3(t.kind === "birch" ? 0.7 * t.s : t.s, (t.kind === "pine" ? 2 : t.kind === "birch" ? 4.5 : 2.8) * t.s, t.kind === "birch" ? 0.7 * t.s : t.s)), (t) => (t.kind === "birch" ? TREE.birchBark : TREE.brownBark)));
   add(instanced(TREE.blob, TREE.leaf, blobs, (b, m) => m.compose(tmpV.set(b.x, b.y, b.z), tmpQ.setFromEuler(tmpE.set(0, b.x, 0)), new THREE.Vector3(b.s, b.sy, b.s)), (b) => b.c));
+  // The great forest's trees: thirty to forty metres, bare trunks under a
+  // high dark canopy.
+  add(instanced(TREE.trunk, TREE.barkTinted, talls, (t, m) => m.compose(tmpV.set(t.x, t.y, t.z), tmpQ.identity(), new THREE.Vector3(1.1 * t.s, 14 * t.s, 1.1 * t.s)), () => TREE.brownBark));
+  add(instanced(TREE.cone, TREE.leaf, talls, (t, m) => m.compose(tmpV.set(t.x, t.y + 7 * t.s, t.z), tmpQ.setFromEuler(tmpE.set(0, t.k * 6, 0)), new THREE.Vector3(3.6 * t.s, 22 * t.s, 3.6 * t.s)), (t) => TREE.deep[Math.floor(t.k * TREE.deep.length)]));
   add(instanced(TREE.cone, TREE.leaf, pines, (t, m) => m.compose(tmpV.set(t.x, t.y + 1.4 * t.s, t.z), tmpQ.setFromEuler(tmpE.set(0, t.k * 6, 0)), new THREE.Vector3(2.2 * t.s, 8 * t.s, 2.2 * t.s)), (t) => TREE.pine[Math.floor(t.k * 3)]));
   add(instanced(new THREE.CylinderGeometry(0.16, 0.24, 1, 6).translate(0, 0.5, 0), TREE.palmBark, palms, (t, m) => m.compose(tmpV.set(t.x, t.y, t.z), tmpQ.identity(), new THREE.Vector3(t.s, 8 * t.s, t.s))));
   add(instanced(TREE.fronds, TREE.leaf, palms, (t, m) => m.compose(tmpV.set(t.x, t.y + 8 * t.s, t.z), tmpQ.setFromEuler(tmpE.set(0, t.k * 6, 0)), new THREE.Vector3(t.s, t.s, t.s)), () => TREE.greens[0]));
   scene.add(grp);
   return grp;
+}
+
+// ---------- The whole island, simply ----------
+// Beyond the detailed ground, one coarse mesh of the entire island (and a
+// stand-in forest, built with the places of interest) keeps every hill,
+// wood and landmark on the skyline from anywhere. It sits a few metres low
+// so the detailed tiles always cover it close up.
+{
+  const step = 24;
+  const x0 = ISLE.cx - ISLE.rx * 1.08;
+  const z0 = ISLE.cz - ISLE.rz * 1.08;
+  const nx = Math.ceil((ISLE.rx * 2.16) / step);
+  const nz = Math.ceil((ISLE.rz * 2.16) / step);
+  const pos = [];
+  const col = [];
+  const idx = [];
+  for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
+    const x = x0 + i * step;
+    const z = z0 + j * step;
+    const h = landH(x, z);
+    pos.push(x, h - 4, z);
+    const c = groundColour(x, z, h, 0);
+    // Woods read as a darker green from afar.
+    const t = treeAt(x, z, () => 0.5);
+    if (t && t.kind !== "palm") c.lerp(t.kind === "tall" ? TREE.deep[0] : TREE.greens[2], 0.55);
+    col.push(c.r, c.g, c.b);
+  }
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    const p = j * (nx + 1) + i;
+    idx.push(p, p + nx + 1, p + 1, p + 1, p + nx + 1, p + nx + 2);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const far = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  scene.add(far);
 }
 
 // ---------- Grass and wildflowers close by ----------
@@ -1347,8 +1416,8 @@ const turbines = [];
     turbines.push({ rotor, speed: 0.6 + hash2(x | 0, z | 0) * 0.4 });
   }
   // A lighthouse on the point west of the harbour.
-  const lx = -1250;
-  const lz = -3060;
+  const lx = -960;
+  const lz = -2300;
   const ly = Math.max(1, landH(lx, lz));
   const stripes = canvasTex(8, 64, (g) => { for (let y = 0; y < 64; y += 16) { g.fillStyle = "#f4f2ec"; g.fillRect(0, y, 8, 8); g.fillStyle = "#c9372c"; g.fillRect(0, y + 8, 8, 8); } });
   const lh = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 3.2, 26, 16), new THREE.MeshLambertMaterial({ map: stripes }));
@@ -1371,7 +1440,6 @@ function updateLandmarks(dt) {
 // noise; snow lies on the high ground except where it's too steep to hold;
 // below it bare rock, then forest down to a beach. Drawn past the fog, with
 // the haze of distance painted into its colours instead.
-const MOUNT = { x: -5600, z: 7600, h: 2600, r: 6400 };
 function ridged(x, z, oct) {
   let s = 0;
   let a = 0.5;
@@ -1387,18 +1455,26 @@ function ridged(x, z, oct) {
   }
   return s;
 }
+const MOUNT = { x: -3900, z: 5200, h: 3100, r: 3900 };
+// A tall, classic peak: steep upper slopes, ridges and gullies running
+// down it from the summit, a lesser shoulder peak, and a skirt of foothills.
 function mountainH(x, z) {
   const dx = x - MOUNT.x;
   const dz = z - MOUNT.z;
   const d = Math.hypot(dx, dz) / MOUNT.r;
   if (d > 1.05) return -60;
-  const body = Math.pow(Math.max(0, 1 - d), 2.1);
-  const peaks = 0.35 * Math.exp(-((dx + 1700) ** 2 + (dz - 900) ** 2) / 1.3e6) + 0.28 * Math.exp(-((dx - 1500) ** 2 + (dz + 1300) ** 2) / 1.1e6);
-  const rough = ridged(x * 0.00055, z * 0.00055, 7);
-  return MOUNT.h * (body * (0.62 + 0.62 * rough) + peaks * (0.5 + rough)) - 60 + smooth(1.0, 0.8, d) * 8;
+  const a = Math.atan2(dz, dx);
+  // Ridges radiating from the top, wandering a little as they descend.
+  const wob = (vnoise(Math.cos(a) * 2 + d * 3, Math.sin(a) * 2) - 0.5) * 1.6;
+  const ribs = Math.pow(Math.abs(Math.sin(a * 6.5 + wob + d * 2.2)), 0.6);
+  const cone = Math.pow(Math.max(0, 1 - d), 1.55);
+  const shoulder = 0.32 * Math.exp(-((dx + 900) ** 2 + (dz - 700) ** 2) / 4.5e5);
+  const foot = 0.08 * smooth(1.0, 0.5, d) * fbm(x * 0.002, z * 0.002, 4);
+  const rough = ridged(x * 0.0011, z * 0.0011, 5) * 0.12 * smooth(0.05, 0.4, d);
+  return MOUNT.h * (cone * (0.86 + 0.14 * ribs) + shoulder + foot + rough * cone) - 50 + smooth(1.0, 0.85, d) * 6;
 }
 {
-  const N = 300;
+  const N = 320;
   const span = MOUNT.r * 2.15;
   const step = span / N;
   const x0 = MOUNT.x - span / 2;
@@ -1408,7 +1484,7 @@ function mountainH(x, z) {
   const H = (i, j) => hs[clamp(j, 0, N) * (N + 1) + clamp(i, 0, N)];
   const pos = new Float32Array((N + 1) * (N + 1) * 3);
   const col = new Float32Array((N + 1) * (N + 1) * 3);
-  const haze = new THREE.Color(0xc4d8ec);
+  const haze = HAZE.clone();
   const snow = new THREE.Color(0xf6f8fc);
   const rock = new THREE.Color(0x646a74);
   const darkRock = new THREE.Color(0x4a4f58);
@@ -1424,7 +1500,7 @@ function mountainH(x, z) {
     pos[k * 3 + 1] = h;
     pos[k * 3 + 2] = z;
     const slope = Math.hypot(H(i + 1, j) - H(i - 1, j), H(i, j + 1) - H(i, j - 1)) / (2 * step);
-    const snowLine = 1150 + (fbm(x * 0.002, z * 0.002, 3) - 0.5) * 500;
+    const snowLine = 1400 + (fbm(x * 0.002, z * 0.002, 3) - 0.5) * 600;
     if (h < 12) c.copy(sand);
     else if (h < 600) c.copy(forest).lerp(rock, smooth(380, 650, h) + smooth(0.6, 1.1, slope) * 0.6);
     else c.copy(rock).lerp(darkRock, smooth(0.5, 1.0, slope) * 0.7);
@@ -1432,7 +1508,7 @@ function mountainH(x, z) {
     const snowy = smooth(snowLine - 120, snowLine + 150, h) * (1 - smooth(0.75, 1.15, slope));
     c.lerp(snow, snowy);
     // Thicker haze low down, where you look through more air.
-    c.lerp(haze, 0.32 + 0.5 * (1 - smooth(0, 900, h)));
+    c.lerp(haze, 0.25 + 0.6 * (1 - smooth(0, 1200, h)));
     col[k * 3] = c.r;
     col[k * 3 + 1] = c.g;
     col[k * 3 + 2] = c.b;
@@ -1487,6 +1563,8 @@ function summit(x, z, radius, away = 60) {
     const px = x + Math.cos(a) * d;
     const pz = z + Math.sin(a) * d;
     if (roadAt(px, pz, away) || townAt(px, pz, 80) || nearPOI(px, pz)) continue;
+    // Keep the big landmarks apart from one another.
+    if (POIS.some((q) => q.r >= 20 && Math.hypot(q.x - px, q.z - pz) < q.r + 200)) continue;
     const h = natH(px, pz);
     if (!best || h > best[2]) best = [px, pz, h];
   }
@@ -1546,7 +1624,7 @@ const WHITE = 0xf2f0ea;
 }
 // A radio mast on a hill above the coast road, lit red at the top.
 {
-  const [x, z] = summit(-620, -680, 300, 50);
+  const [x, z] = summit(-470, -510, 260, 50);
   const y = footY(x, z, 4);
   POIS.push({ x, z, r: 16 });
   const H = 120;
@@ -1702,8 +1780,8 @@ const WHITE = 0xf2f0ea;
   };
   const text = "VERDANT BAY";
   const px_ = 2.6;
-  const x = -1150;
-  const z0 = 140;
+  const x = -870;
+  const z0 = 100;
   POIS.push({ x, z: z0 + 95, r: 110 });
   [...text].forEach((ch, ci) => {
     FONT[ch].forEach((row, ry) => [...row].forEach((on, cx) => {
@@ -1847,6 +1925,174 @@ const WHITE = 0xf2f0ea;
   pp(CYL(5, 5, 6, 20), 0x9ab8c8, x, y + 19, z);
   pp(new THREE.ConeGeometry(5.2, 2.4, 20), 0x7a98a8, x, y + 23.2, z);
   addPost(x, z, 4.5);
+}
+// The airfield: a strip, a hangar, a windsock and a light plane.
+{
+  const { x, z, a, len, w, y } = AIR;
+  const ry = Math.PI / 2 - a;
+  const L = (u, v) => [x + Math.cos(a) * u - Math.sin(a) * v, z + Math.sin(a) * u + Math.cos(a) * v];
+  pp(BOX(len, 0.12, 30), 0x55585d, x, y + 0.05, z, { ry: -a });
+  for (let u = -len / 2 + 30; u < len / 2 - 30; u += 30) { const [mx, mz] = L(u, 0); pp(BOX(14, 0.04, 0.8), WHITE, mx, y + 0.13, mz, { ry: -a }); }
+  for (const e of [-1, 1]) for (let v = -12; v <= 12; v += 3) { const [mx, mz] = L(e * (len / 2 - 8), v); pp(BOX(9, 0.04, 1.4), WHITE, mx, y + 0.13, mz, { ry: -a }); }
+  const [hx, hz] = L(60, 42);
+  const hangar = new THREE.CylinderGeometry(12, 12, 34, 20, 1, false, 0, Math.PI);
+  hangar.rotateZ(Math.PI / 2);
+  pp(hangar, 0xb8bec6, hx, y, hz, { ry: -a + Math.PI / 2 });
+  pp(BOX(0.4, 11, 22), 0x8a9098, ...[L(60 - 17, 42)].map(([p, q]) => [p, y + 5.5, q])[0], { ry: -a });
+  addBox(hx - 15, hz - 15, hx + 15, hz + 15, 12);
+  const [wx, wz] = L(-120, 30);
+  pp(BOX(0.25, 7, 0.25), 0xd8d8d8, wx, y + 3.5, wz);
+  pp(new THREE.ConeGeometry(0.7, 3.2, 10, 1, true), 0xef7f2d, wx + 1.6, y + 6.6, wz, { rz: Math.PI / 2 + 0.25 });
+  // A little high-wing plane, parked.
+  const [px2, pz2] = L(20, 30);
+  pp(CYL(0.7, 0.45, 7, 10), 0xf4f1ea, px2, y + 1.4, pz2, { rz: Math.PI / 2, ry: -a });
+  pp(BOX(1, 0.15, 10), 0xd8352a, px2, y + 2.2, pz2, { ry: -a });
+  pp(BOX(1, 1.4, 0.12), 0xd8352a, ...[L(23.2, 30)].map(([p, q]) => [p, y + 2, q])[0], { ry: -a });
+  pp(BOX(0.8, 0.12, 3), 0xd8352a, ...[L(23.2, 30)].map(([p, q]) => [p, y + 1.4, q])[0], { ry: -a });
+  addPost(px2, pz2, 3);
+  poiParked.push([...L(40, 46), -a]);
+}
+// A crane and stacked stone at the quarry's lip.
+{
+  const ang = 0.7;
+  const x = QUARRY.x + Math.cos(ang) * (QUARRY.r + 8);
+  const z = QUARRY.z + Math.sin(ang) * (QUARRY.r + 8);
+  const y = footY(x, z, 4);
+  pp(BOX(1, 26, 1), 0xf2c230, x, y + 13, z);
+  pp(BOX(1, 1, 30), 0xf2c230, x, y + 26, z - 10, { ry: ang });
+  pp(BOX(3, 3, 3), 0x3a3f46, x, y + 1.5, z);
+  for (let k = 0; k < 6; k++) pp(BOX(2.2, 1.6, 1.6), 0xb9b2a4, x + 6 + (k % 3) * 2.4, y + 0.8 + Math.floor(k / 3) * 1.6, z + 6);
+  addPost(x, z, 2);
+}
+// A giant old oak in the meadow, the biggest tree on the island.
+{
+  const x = REG.meadow.x + 140;
+  const z = REG.meadow.z - 60;
+  const y = footY(x, z, 3) - 0.5;
+  POIS.push({ x, z, r: 30 });
+  pp(CYL(2, 3, 16, 12), 0x5a3e2a, x, y + 8, z);
+  for (const [dx, dz, ry2] of [[0, 0, 0], [1, 0, 1.2], [-1, 1, 2.6]]) pp(CYL(0.9, 1.4, 12, 8), 0x5a3e2a, x + dx * 3, y + 17, z + dz * 3, { rz: 0.6, ry: ry2 });
+  addPost(x, z, 3);
+  const leaf = new THREE.MeshLambertMaterial({ color: 0x4f8f3a, flatShading: true });
+  for (const [dx, dy, dz, r] of [[0, 30, 0, 14], [9, 26, -4, 10], [-8, 27, 6, 10], [3, 36, 5, 9], [-4, 34, -7, 9], [10, 31, 8, 8]]) {
+    const m = new THREE.Mesh(TREE.blobFine, leaf);
+    m.position.set(x + dx, y + dy, z + dz);
+    m.scale.set(r, r * 0.75, r);
+    m.castShadow = true;
+    scene.add(m);
+  }
+}
+// Beach huts in a row on the shore east of the city.
+{
+  const cols = [0xe85d4a, 0x3a7bd5, 0xf2c230, 0x2a9d8f, 0xf4f1ea, 0xd94f7a, 0x8fbd5a, 0xef7f2d, 0x7a4f9a, 0x5bc0de];
+  let n = 0;
+  for (let z = 120; z < 700 && n < 10; z += 9) {
+    let x = 760;
+    while (x < 1300 && baseH(x, z) > 2.6) x += 4;
+    if (x >= 1300 || baseH(x, z) < 1.4) continue;
+    const y = landH(x, z);
+    pp(BOX(3, 3, 3), cols[n], x, y + 1.5, z);
+    pp(PRISM.clone(), 0xf4f1ea, x, y + 3, z, { ry: Math.PI / 2, sx: 3.6, sy: 1.4, sz: 3.6 });
+    pp(BOX(1.1, 2, 0.05), 0xf4f1ea, x + 1.52, y + 1, z, { ry: Math.PI / 2 });
+    addBox(x - 1.5, z - 1.5, x + 1.5, z + 1.5, 3);
+    POIS.push({ x, z, r: 6 });
+    n++;
+  }
+}
+// A radio telescope: a great white dish tipped up at the sky.
+{
+  const [x, z] = summit(REG.high.x + 60, REG.high.z + 380, 260, 50);
+  const y = footY(x, z, 12) - 0.5;
+  POIS.push({ x, z, r: 30 });
+  pp(CYL(4, 6, 10, 10), 0xe8e8e4, x, y + 5, z);
+  pp(BOX(12, 3, 4), 0xd8d8d4, x, y + 11.5, z);
+  const dish = new THREE.SphereGeometry(30, 32, 10, 0, Math.PI * 2, 0, 0.62);
+  dish.scale(1, 0.55, 1);
+  dish.translate(0, -16.5 * 0.55 * 0 - 30 * 0.55 * Math.cos(0.62) , 0);
+  const dm = new THREE.Mesh(dish, new THREE.MeshLambertMaterial({ color: 0xf2f2ee, side: THREE.DoubleSide }));
+  dm.position.set(x, y + 26, z);
+  dm.rotation.set(-0.7, 0.4, 0);
+  dm.rotation.x += Math.PI;
+  dm.castShadow = true;
+  scene.add(dm);
+  addPost(x, z, 6);
+}
+// Hot-air balloons drifting over the farmland, high enough to see from anywhere.
+const balloons = [];
+{
+  const cols = [[0xe85d4a, 0xf2c230], [0x3a7bd5, 0xf4f1ea], [0x2a9d8f, 0xef7f2d]];
+  cols.forEach(([c1, c2], k) => {
+    const g = new THREE.SphereGeometry(9, 24, 16);
+    g.scale(1, 1.18, 1);
+    const p = g.attributes.position;
+    const col = new Float32Array(p.count * 3);
+    const A = new THREE.Color(c1);
+    const B = new THREE.Color(c2);
+    for (let i = 0; i < p.count; i++) {
+      const a = Math.atan2(p.getZ(i), p.getX(i));
+      const c = Math.floor((a / Math.PI + 1) * 6) % 2 ? A : B;
+      col.set([c.r, c.g, c.b], i * 3);
+    }
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    const grp = new THREE.Group();
+    const env = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    env.castShadow = true;
+    const basket = new THREE.Mesh(new THREE.BoxGeometry(2, 1.6, 2), new THREE.MeshLambertMaterial({ color: 0x8a5e3c }));
+    basket.position.y = -14;
+    grp.add(env, basket);
+    scene.add(grp);
+    balloons.push({ grp, cx: REG.farm.x + (k - 1) * 300, cz: REG.farm.z + (k - 1) * 200, r: 200 + k * 90, h: 230 + k * 70, sp: 0.012 + k * 0.004, ph: k * 2.1 });
+  });
+}
+// Stand-ins for the woods beyond the detailed ground: simple shapes, one
+// draw each for the whole island, cleared away close to you where the real
+// trees take over.
+const farTrees = [];
+{
+  const r = rng(4242);
+  const cones = [];
+  const blobs = [];
+  const step = 15;
+  for (let z = ISLE.cz - ISLE.rz; z < ISLE.cz + ISLE.rz; z += step) for (let x = ISLE.cx - ISLE.rx; x < ISLE.cx + ISLE.rx; x += step) {
+    const t = treeAt(x + r() * step, z + r() * step, r);
+    if (!t || t.kind === "palm") continue;
+    if (t.kind === "tall") cones.push(new THREE.Matrix4().compose(new THREE.Vector3(t.x, t.y + 4 * t.s, t.z), new THREE.Quaternion(), new THREE.Vector3(3.8 * t.s, 26 * t.s, 3.8 * t.s)));
+    else if (t.kind === "pine") cones.push(new THREE.Matrix4().compose(new THREE.Vector3(t.x, t.y, t.z), new THREE.Quaternion(), new THREE.Vector3(2.4 * t.s, 10 * t.s, 2.4 * t.s)));
+    else blobs.push(new THREE.Matrix4().compose(new THREE.Vector3(t.x, t.y + 3.6 * t.s, t.z), new THREE.Quaternion(), new THREE.Vector3(2.6 * t.s, 2.6 * t.s, 2.6 * t.s)));
+  }
+  const mat = new THREE.MeshLambertMaterial({ color: 0x2f5f36, flatShading: true });
+  const mat2 = new THREE.MeshLambertMaterial({ color: 0x4f8a3e, flatShading: true });
+  for (const [geo, m, list] of [[new THREE.ConeGeometry(1, 1, 6).translate(0, 0.5, 0), mat, cones], [new THREE.IcosahedronGeometry(1, 0), mat2, blobs]]) {
+    const im = new THREE.InstancedMesh(geo, m, list.length);
+    list.forEach((mm, k) => im.setMatrixAt(k, mm));
+    im.computeBoundingSphere();
+    scene.add(im);
+    farTrees.push({ im, list, pos: list.map((mm) => new THREE.Vector3().setFromMatrixPosition(mm)) });
+  }
+}
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+let farT = 0;
+function updateFar(dt, px, pz) {
+  farT -= dt;
+  if (farT > 0) return;
+  farT = 0.5;
+  const near = (TREE_R - 120) ** 2;
+  for (const f of farTrees) {
+    for (let k = 0; k < f.list.length; k++) {
+      const p = f.pos[k];
+      const d = (p.x - px) ** 2 + (p.z - pz) ** 2;
+      f.im.setMatrixAt(k, d < near ? ZERO : f.list[k]);
+    }
+    f.im.instanceMatrix.needsUpdate = true;
+  }
+}
+function updateBalloons(t) {
+  for (const b of balloons) {
+    const a = t * b.sp + b.ph;
+    const x = b.cx + Math.cos(a) * b.r;
+    const z = b.cz + Math.sin(a) * b.r;
+    b.grp.position.set(x, b.h + Math.sin(t * 0.2 + b.ph) * 12, z);
+  }
 }
 {
   const m = new THREE.Mesh(mergeGeometries(poiParts), new THREE.MeshLambertMaterial({ vertexColors: true }));
@@ -4039,6 +4285,8 @@ function step(dt) {
   updateLights(state.time);
   updateLandmarks(dt);
   updateSpinners(dt);
+  updateBalloons(state.time);
+  updateFar(dt, px, pz);
   skidT -= dt;
   for (const c of cars) {
     if (c.grounded && (c.slip > 3.2 || (c.in.hb && Math.abs(c.vl) > 6) || (c.in.brk && c.vl > 12 && c === car)) && skidT <= 0 && Math.abs(c.x - px) < 120 && Math.abs(c.z - pz) < 120) skid(c);
@@ -4152,7 +4400,7 @@ function frame() {
   });
 }
 renderer.setAnimationLoop(frame);
-window.__city = { POIS, LAKE, REG, landH, render: () => renderer.render(scene, camera), state, cars, traffic, peds, me, keys, step, camera, renderer, streamLand, roads, TOWNS, toggleCar, rescue, get camYaw() { return camYaw; } };
+window.__city = { AIR, QUARRY, POIS, LAKE, REG, landH, render: () => renderer.render(scene, camera), state, cars, traffic, peds, me, keys, step, camera, renderer, streamLand, roads, TOWNS, toggleCar, rescue, get camYaw() { return camYaw; } };
 </script>
 </body>
 </html>

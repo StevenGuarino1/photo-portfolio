@@ -31,7 +31,10 @@ function fbm(x, z, oct = 4) {
   return s / (1 - Math.pow(0.5, oct));
 }
 const smooth = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
-const ISLE = { cx: -1000, cz: -900, rx: 2380, rz: 2280 };
+// The whole island is laid out at this scale: smaller means every place is
+// in sight of the others.
+const WS = 0.75;
+const ISLE = { cx: -1000 * WS, cz: -900 * WS, rx: 2380 * WS, rz: 2280 * WS };
 function coastD(x, z) {
   const dx = (x - ISLE.cx) / ISLE.rx;
   const dz = (z - ISLE.cz) / ISLE.rz;
@@ -43,16 +46,25 @@ function coastD(x, z) {
 // the middle, an open meadow by the west coast, a wind farm on the northern
 // downs, sea cliffs under Larkhill, and a lake in the south-west.
 const REG = {
-  forest: { x: -2000, z: -1150, r: 950 },
+  forest: { x: -2350, z: -1250, r: 950 },
   farm: { x: -250, z: -1650, r: 760 },
   high: { x: -1250, z: -380, r: 680 },
   meadow: { x: -2550, z: -250, r: 460 },
   wind: { x: -560, z: 1000, r: 380 },
 };
 const LAKE = { x: -1650, z: -2030, r: 250, y: 16 };
+for (const r of Object.values(REG)) { r.x *= WS; r.z *= WS; r.r *= WS; }
+LAKE.x *= WS;
+LAKE.z *= WS;
+LAKE.r *= 0.85;
+const POIS_EARLY = [];
+const QUARRY = { x: REG.high.x + 330, z: REG.high.z - 230, r: 85 };
+// The airfield in the farmland: a strip laid level across the fields.
+const FIELD_A = 0.38; // the fields' grid is turned a little off true
+const AIR = { x: 260, z: -1360, a: FIELD_A, len: 560, w: 46, y: 0 };
 const regionW = (R, x, z) => smooth(R.r, R.r * 0.4, Math.hypot(x - R.x, z - R.z));
 function lakeR(a) { return LAKE.r * (1 + 0.36 * (vnoise(Math.cos(a) * 1.7 + 5, Math.sin(a) * 1.7 + 5) - 0.5)); }
-function cliffW(x, z) { return smooth(-2250, -2650, x) * smooth(-1000, -200, z); }
+function cliffW(x, z) { return smooth(-2250 * WS, -2650 * WS, x) * smooth(-1000 * WS, -200 * WS, z); }
 function baseH0(x, z) {
   const d = coastD(x, z);
   const cw = cliffW(x, z);
@@ -64,8 +76,14 @@ function baseH0(x, z) {
   const ridge = Math.pow(1 - Math.abs(fbm(x * 0.0005 + 11, z * 0.0005 - 5, 3) * 2 - 1), 3) * 45;
   // Craggy tops in the highlands.
   const crags = wHigh * Math.pow(1 - Math.abs(vnoise(x * 0.004, z * 0.004) * 2 - 1), 4) * 35;
-  return -16 + land * 20 + inland * (hills + ridge + crags) + cw * 34 * smooth(1.0, 0.97, d);
+  let h = -16 + land * 20 + inland * (hills + ridge + crags) + cw * 34 * smooth(1.0, 0.97, d);
+  // A quarry cut into the highlands in great steps.
+  const qd = Math.hypot(x - QUARRY.x, z - QUARRY.z);
+  if (qd < QUARRY.r) h -= Math.floor(((QUARRY.r - qd) / QUARRY.r) * 6) * 7;
+  return h;
 }
+AIR.y = baseH0(AIR.x, AIR.z);
+POIS_EARLY.push({ x: QUARRY.x, z: QUARRY.z, r: QUARRY.r + 20 }, { x: AIR.x, z: AIR.z, r: AIR.len / 2 + 30 });
 // The lake sits in the land as it is: its surface a little below the
 // lowest point of the ground round it, so it never spills.
 {
@@ -95,8 +113,8 @@ function baseH(x, z) {
 // ---------- Towns ----------
 const TOWNS = [
   { name: "Verdant Bay", ox: 0, oz: 0, n: 10, y: 3, style: "city", downtown: [6.5, 6.5], parks: ["3,3", "3,4", "4,3", "4,4", "8,1", "1,7"], landmarks: { "6,6": "spire", "5,3": "civic", "2,5": "church", "8,8": "stadium", "6,2": "clock", "3,7": "museum" } },
-  { name: "Saltmarsh", ox: -600, oz: -2950, n: 4, y: 4, style: "harbor", downtown: [2, 2], parks: ["0,3"], landmarks: { "1,0": "market" } },
-  { name: "Larkhill", ox: -2900, oz: 560, n: 3, y: 46, style: "village", downtown: [1.5, 1.5], parks: ["1,1"], landmarks: { "1,2": "chapel" } },
+  { name: "Saltmarsh", ox: -460, oz: -2215, n: 4, y: 4, style: "harbor", downtown: [2, 2], parks: ["0,3"], landmarks: { "1,0": "market" } },
+  { name: "Larkhill", ox: -2160, oz: 420, n: 3, y: 46, style: "village", downtown: [1.5, 1.5], parks: ["1,1"], landmarks: { "1,2": "chapel" } },
 ];
 for (const t of TOWNS) { t.size = t.n * P; t.x0 = t.ox - EDGE - 6; t.z0 = t.oz - EDGE - 6; t.x1 = t.ox + t.size + EDGE + 6; t.z1 = t.oz + t.size + EDGE + 6; }
 function townAt(x, z, margin = 0) {
@@ -184,9 +202,9 @@ function makeRoad(name, a, b, via, seed) {
   return road;
 }
 const [CITY, HARBOR, VILLAGE] = TOWNS;
-makeRoad("Coast Highway", gate(CITY, "s", 3), gate(HARBOR, "n", 2), [[350, -550], [80, -1050], [-280, -1450], [-120, -1950], [-420, -2320]], 11);
-makeRoad("Ridge Road", gate(CITY, "w", 5), gate(VILLAGE, "e", 1), [[-480, 520], [-900, 280], [-1380, 640], [-1880, 420], [-2330, 760]], 23);
-makeRoad("Old Mill Road", gate(HARBOR, "w", 2), gate(VILLAGE, "s", 1), [[-1150, -2700], [-1750, -2860], [-2320, -2480], [-2880, -1880], [-3000, -1180], [-2830, -520], [-2900, 0]], 37);
+makeRoad("Coast Highway", gate(CITY, "s", 3), gate(HARBOR, "n", 2), [[350, -550], [80, -1050], [-280, -1450], [-120, -1950], [-420, -2320]].map(([x, z]) => [x * WS, z * WS]), 11);
+makeRoad("Ridge Road", gate(CITY, "w", 5), gate(VILLAGE, "e", 1), [[-480, 520], [-900, 280], [-1380, 640], [-1880, 420], [-2330, 760]].map(([x, z]) => [x * WS, z * WS]), 23);
+makeRoad("Old Mill Road", gate(HARBOR, "w", 2), gate(VILLAGE, "s", 1), [[-1150, -2700], [-1750, -2860], [-2320, -2480], [-2880, -1880], [-3000, -1180], [-2830, -520], [-2900, 0]].map(([x, z]) => [x * WS, z * WS]), 37);
 
 // Where the roads are, for quick lookups: each 4 m piece filed in 40 m cells.
 const RCELL = 40;
@@ -233,8 +251,16 @@ function roadAt(x, z, maxD = 40) {
 // The land with the towns settled into it: hills ease down to a town's
 // level over most of a kilometre, so each sits in a broad hollow or on a
 // broad shelf rather than at the foot of a cliff.
+function airLocal(x, z) {
+  const dx = x - AIR.x;
+  const dz = z - AIR.z;
+  return [dx * Math.cos(AIR.a) + dz * Math.sin(AIR.a), -dx * Math.sin(AIR.a) + dz * Math.cos(AIR.a)];
+}
 function natH(x, z) {
   let h = baseH(x, z);
+  const [au, av] = airLocal(x, z);
+  const ad = Math.hypot(Math.max(0, Math.abs(au) - AIR.len / 2), Math.max(0, Math.abs(av) - AIR.w / 2));
+  if (ad < 120) h += (AIR.y - h) * smooth(120, 0, ad);
   for (const t of TOWNS) {
     const dx = Math.max(t.x0 - x, 0, x - t.x1);
     const dz = Math.max(t.z0 - z, 0, z - t.z1);
@@ -297,7 +323,7 @@ function groundAt(x, z) {
 }
 
 // Places of interest, so the woods leave room round them.
-const POIS = [];
+const POIS = POIS_EARLY;
 function nearPOI(x, z) {
   for (const p of POIS) if ((x - p.x) ** 2 + (z - p.z) ** 2 < p.r * p.r) return true;
   return false;

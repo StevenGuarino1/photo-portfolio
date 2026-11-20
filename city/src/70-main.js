@@ -293,6 +293,8 @@ function step(dt) {
   updateLights(state.time);
   updateLandmarks(dt);
   updateSpinners(dt);
+  updateBalloons(state.time);
+  updateFar(dt, px, pz);
   skidT -= dt;
   for (const c of cars) {
     if (c.grounded && (c.slip > 3.2 || (c.in.hb && Math.abs(c.vl) > 6) || (c.in.brk && c.vl > 12 && c === car)) && skidT <= 0 && Math.abs(c.x - px) < 120 && Math.abs(c.z - pz) < 120) skid(c);
@@ -406,4 +408,4 @@ function frame() {
   });
 }
 renderer.setAnimationLoop(frame);
-window.__city = { POIS, LAKE, REG, landH, render: () => renderer.render(scene, camera), state, cars, traffic, peds, me, keys, step, camera, renderer, streamLand, roads, TOWNS, toggleCar, rescue, get camYaw() { return camYaw; } };
+window.__city = { AIR, QUARRY, POIS, LAKE, REG, landH, render: () => renderer.render(scene, camera), state, cars, traffic, peds, me, keys, step, camera, renderer, streamLand, roads, TOWNS, toggleCar, rescue, get camYaw() { return camYaw; } };

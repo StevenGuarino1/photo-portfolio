@@ -1,11 +1,12 @@
 // ---------- Ground tiles, woods, sea ----------
 const CH = 200; // a tile's size
 const CV = CH / GSTEP; // cells along a tile
-const TERRAIN_R = TOUCH ? 1500 : 2600; // how far the ground is drawn
-const FINE_R = TOUCH ? 600 : 900; // full detail within this
+const TERRAIN_R = TOUCH ? 1000 : 1500; // detailed ground this far; the whole island beyond, simpler
+const FINE_R = TOUCH ? 500 : 750; // full detail within this
 const TREE_R = TOUCH ? 520 : 760;
-scene.fog.near = 450;
-scene.fog.far = TERRAIN_R + 150;
+// A light haze: the whole island stays in sight from anywhere on it.
+scene.fog.near = 700;
+scene.fog.far = 5200;
 
 // The sea.
 {
@@ -33,7 +34,6 @@ const COL = {
 };
 // The crops in the farmland's fields.
 const CROPS = [0xd8c06a, 0x7fb24a, 0x5c8f3a, 0x8a6a4a, 0xe8d23a, 0x9a86c8, 0x8ec45a, 0xc9a85a, 0x6f9e3e].map((c) => new THREE.Color(c));
-const FIELD_A = 0.38; // the fields' grid is turned a little off true
 // Which field a point is in, and how close it is to the field's edge.
 function fieldAt(x, z) {
   const u = x * Math.cos(FIELD_A) + z * Math.sin(FIELD_A);
@@ -157,6 +157,7 @@ const TREE = {
   leaf: new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }),
   greens: [0x4f9a3a, 0x5aa646, 0x3f8a36, 0x6cb04a, 0x478f3e, 0x7aaa3a].map((c) => new THREE.Color(c)),
   pine: [0x2f6a3a, 0x356f3c, 0x2a5f36].map((c) => new THREE.Color(c)),
+  deep: [0x234f30, 0x2a5a34, 0x1f4a2c, 0x2e5f3a].map((c) => new THREE.Color(c)),
   rocks: [0x8a8880, 0x9c978c, 0x76777a].map((c) => new THREE.Color(c)),
   autumn: [0xd9822b, 0xe0a52a, 0xc4552a, 0xd8b23a, 0xb8402e].map((c) => new THREE.Color(c)),
   birch: [0x9ccf5a, 0xb5d86a].map((c) => new THREE.Color(c)),
@@ -174,61 +175,61 @@ function instanced(geo, mat, list, f, color) {
   return im;
 }
 const postsDone = new Set();
+// What, if anything, grows at (x, z), given a roll of the dice r.
+function treeAt(x, z, r) {
+  const wForest = regionW(REG.forest, x, z);
+  const wFarm = regionW(REG.farm, x, z);
+  const wHigh = regionW(REG.high, x, z);
+  const wMeadow = regionW(REG.meadow, x, z);
+  const wWind = regionW(REG.wind, x, z);
+  const woods = fbm(x * 0.0028 + 40, z * 0.0028 - 12, 4);
+  // Ordinary country: woods in patches. The great forest: solid, and
+  // tall. The highlands: a few hardy pines. Meadow and downs: the odd
+  // big oak. Farmland: trees only along the hedgerows.
+  let p = smooth(0.5, 0.68, woods) * 0.8 + 0.02;
+  p = p * (1 - wForest) + 0.9 * wForest;
+  p *= 1 - 0.85 * wHigh;
+  p *= 1 - 0.95 * Math.max(wMeadow, wWind);
+  if (wFarm > 0.2) p = p * (1 - wFarm) + (fieldAt(x, z).edge < 2.5 ? 0.3 : 0) * wFarm;
+  if (r() > p) return null;
+  if (townAt(x, z, 14) || roadAt(x, z, ROAD_HW + 5)) return null;
+  const ld = Math.hypot(x - LAKE.x, z - LAKE.z);
+  if (ld < lakeR(Math.atan2(z - LAKE.z, x - LAKE.x)) + 4) return null;
+  if (nearPOI(x, z)) return null;
+  const h = terrainH(x, z);
+  if (h < 1.5) return null;
+  const autumn = fbm(x * 0.0016 - 30, z * 0.0016 + 8, 3) > 0.62;
+  let kind;
+  if (Math.min(h, baseH(x, z)) < 4.5) kind = r() < 0.5 ? "palm" : null;
+  else if (wForest > 0.35) kind = "tall";
+  else if (ld < LAKE.r * 1.8) kind = r() < 0.7 ? "birch" : "round";
+  else if (wHigh > 0.4 || h > 90) kind = "pine";
+  else if (wForest > 0.1) kind = r() < 0.55 ? "pine" : r() < 0.25 ? "birch" : "round";
+  else kind = r() < 0.25 ? "pine" : r() < 0.12 ? "birch" : "round";
+  if (!kind) return null;
+  const big = Math.max(wMeadow, wWind) > 0.3 ? 1.7 : 1;
+  const s = kind === "tall" ? 1.0 + r() * 0.55 : (0.8 + r() * 0.7) * big;
+  return { x, z, y: h - 0.2, s, kind, k: r(), autumn: autumn && kind === "round" };
+}
 function treesFor(cx, cz) {
   const list = [];
   const r = rng(cx * 7919 + cz * 104729 + 13);
   for (let b = 0; b < CH; b += 7) for (let a = 0; a < CH; a += 7) {
-    const x = cx * CH + a + r() * 6;
-    const z = cz * CH + b + r() * 6;
-    const wForest = regionW(REG.forest, x, z);
-    const wFarm = regionW(REG.farm, x, z);
-    const wHigh = regionW(REG.high, x, z);
-    const wMeadow = regionW(REG.meadow, x, z);
-    const wWind = regionW(REG.wind, x, z);
-    const woods = fbm(x * 0.0028 + 40, z * 0.0028 - 12, 4);
-    // Ordinary country: woods in patches. The forest: nearly solid. The
-    // highlands: a few hardy pines. Meadow and downs: the odd big oak.
-    let p = smooth(0.5, 0.68, woods) * 0.8 + 0.02;
-    p = p * (1 - wForest) + 0.82 * wForest;
-    p *= 1 - 0.85 * wHigh;
-    p *= 1 - 0.95 * Math.max(wMeadow, wWind);
-    let hedgerow = false;
-    if (wFarm > 0.2) {
-      const f = fieldAt(x, z);
-      hedgerow = f.edge < 2.5;
-      p = p * (1 - wFarm) + (hedgerow ? 0.3 : 0.0) * wFarm;
-    }
-    if (r() > p) continue;
-    if (townAt(x, z, 14)) continue;
-    if (roadAt(x, z, ROAD_HW + 5)) continue;
-    const ld = Math.hypot(x - LAKE.x, z - LAKE.z);
-    if (ld < lakeR(Math.atan2(z - LAKE.z, x - LAKE.x)) + 4) continue;
-    if (nearPOI(x, z)) continue;
-    const h = terrainH(x, z);
-    if (h < 1.5) continue;
-    const nearLake = ld < LAKE.r * 1.8;
-    const autumn = fbm(x * 0.0016 - 30, z * 0.0016 + 8, 3) > 0.62;
-    let kind;
-    if (Math.min(h, baseH(x, z)) < 4.5) kind = r() < 0.5 ? "palm" : null;
-    else if (nearLake) kind = r() < 0.7 ? "birch" : "round";
-    else if (wHigh > 0.4 || h > 70) kind = "pine";
-    else if (wForest > 0.3) kind = r() < 0.55 ? "pine" : r() < 0.25 ? "birch" : "round";
-    else kind = r() < 0.25 ? "pine" : r() < 0.12 ? "birch" : "round";
-    if (!kind) continue;
-    const big = Math.max(wMeadow, wWind) > 0.3 ? 1.7 : 1;
-    list.push({ x, z, y: h - 0.2, s: (0.8 + r() * 0.7) * big, kind, k: r(), autumn: autumn && kind === "round" });
+    const t = treeAt(cx * CH + a + r() * 6, cz * CH + b + r() * 6, r);
+    if (t) list.push(t);
   }
   return list;
 }
 function buildTrees(cx, cz) {
   const list = treesFor(cx, cz);
   const key = cx * 4096 + cz;
-  if (!postsDone.has(key)) { postsDone.add(key); for (const t of list) addPost(t.x, t.z, t.kind === "palm" ? 0.3 : 0.32 * t.s); }
+  if (!postsDone.has(key)) { postsDone.add(key); for (const t of list) addPost(t.x, t.z, t.kind === "palm" ? 0.3 : t.kind === "tall" ? 0.5 * t.s : 0.32 * t.s); }
   const grp = new THREE.Group();
   const round = list.filter((t) => t.kind === "round");
   const pines = list.filter((t) => t.kind === "pine");
   const palms = list.filter((t) => t.kind === "palm");
   const birches = list.filter((t) => t.kind === "birch");
+  const talls = list.filter((t) => t.kind === "tall");
   const blobs = [];
   // Rocks and bushes scattered through the fields and under the trees.
   const r2 = rng(cx * 31 + cz * 977 + 5);
@@ -253,11 +254,53 @@ function buildTrees(cx, cz) {
   const add = (m) => m && grp.add(m);
   add(instanced(TREE.trunk, TREE.barkTinted, [...round, ...pines, ...birches], (t, m) => m.compose(tmpV.set(t.x, t.y, t.z), tmpQ.identity(), new THREE.Vector3(t.kind === "birch" ? 0.7 * t.s : t.s, (t.kind === "pine" ? 2 : t.kind === "birch" ? 4.5 : 2.8) * t.s, t.kind === "birch" ? 0.7 * t.s : t.s)), (t) => (t.kind === "birch" ? TREE.birchBark : TREE.brownBark)));
   add(instanced(TREE.blob, TREE.leaf, blobs, (b, m) => m.compose(tmpV.set(b.x, b.y, b.z), tmpQ.setFromEuler(tmpE.set(0, b.x, 0)), new THREE.Vector3(b.s, b.sy, b.s)), (b) => b.c));
+  // The great forest's trees: thirty to forty metres, bare trunks under a
+  // high dark canopy.
+  add(instanced(TREE.trunk, TREE.barkTinted, talls, (t, m) => m.compose(tmpV.set(t.x, t.y, t.z), tmpQ.identity(), new THREE.Vector3(1.1 * t.s, 14 * t.s, 1.1 * t.s)), () => TREE.brownBark));
+  add(instanced(TREE.cone, TREE.leaf, talls, (t, m) => m.compose(tmpV.set(t.x, t.y + 7 * t.s, t.z), tmpQ.setFromEuler(tmpE.set(0, t.k * 6, 0)), new THREE.Vector3(3.6 * t.s, 22 * t.s, 3.6 * t.s)), (t) => TREE.deep[Math.floor(t.k * TREE.deep.length)]));
   add(instanced(TREE.cone, TREE.leaf, pines, (t, m) => m.compose(tmpV.set(t.x, t.y + 1.4 * t.s, t.z), tmpQ.setFromEuler(tmpE.set(0, t.k * 6, 0)), new THREE.Vector3(2.2 * t.s, 8 * t.s, 2.2 * t.s)), (t) => TREE.pine[Math.floor(t.k * 3)]));
   add(instanced(new THREE.CylinderGeometry(0.16, 0.24, 1, 6).translate(0, 0.5, 0), TREE.palmBark, palms, (t, m) => m.compose(tmpV.set(t.x, t.y, t.z), tmpQ.identity(), new THREE.Vector3(t.s, 8 * t.s, t.s))));
   add(instanced(TREE.fronds, TREE.leaf, palms, (t, m) => m.compose(tmpV.set(t.x, t.y + 8 * t.s, t.z), tmpQ.setFromEuler(tmpE.set(0, t.k * 6, 0)), new THREE.Vector3(t.s, t.s, t.s)), () => TREE.greens[0]));
   scene.add(grp);
   return grp;
+}
+
+// ---------- The whole island, simply ----------
+// Beyond the detailed ground, one coarse mesh of the entire island (and a
+// stand-in forest, built with the places of interest) keeps every hill,
+// wood and landmark on the skyline from anywhere. It sits a few metres low
+// so the detailed tiles always cover it close up.
+{
+  const step = 24;
+  const x0 = ISLE.cx - ISLE.rx * 1.08;
+  const z0 = ISLE.cz - ISLE.rz * 1.08;
+  const nx = Math.ceil((ISLE.rx * 2.16) / step);
+  const nz = Math.ceil((ISLE.rz * 2.16) / step);
+  const pos = [];
+  const col = [];
+  const idx = [];
+  for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
+    const x = x0 + i * step;
+    const z = z0 + j * step;
+    const h = landH(x, z);
+    pos.push(x, h - 4, z);
+    const c = groundColour(x, z, h, 0);
+    // Woods read as a darker green from afar.
+    const t = treeAt(x, z, () => 0.5);
+    if (t && t.kind !== "palm") c.lerp(t.kind === "tall" ? TREE.deep[0] : TREE.greens[2], 0.55);
+    col.push(c.r, c.g, c.b);
+  }
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    const p = j * (nx + 1) + i;
+    idx.push(p, p + nx + 1, p + 1, p + 1, p + nx + 1, p + nx + 2);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const far = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  scene.add(far);
 }
 
 // ---------- Grass and wildflowers close by ----------
@@ -475,8 +518,8 @@ const turbines = [];
     turbines.push({ rotor, speed: 0.6 + hash2(x | 0, z | 0) * 0.4 });
   }
   // A lighthouse on the point west of the harbour.
-  const lx = -1250;
-  const lz = -3060;
+  const lx = -960;
+  const lz = -2300;
   const ly = Math.max(1, landH(lx, lz));
   const stripes = canvasTex(8, 64, (g) => { for (let y = 0; y < 64; y += 16) { g.fillStyle = "#f4f2ec"; g.fillRect(0, y, 8, 8); g.fillStyle = "#c9372c"; g.fillRect(0, y + 8, 8, 8); } });
   const lh = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 3.2, 26, 16), new THREE.MeshLambertMaterial({ map: stripes }));
@@ -499,7 +542,6 @@ function updateLandmarks(dt) {
 // noise; snow lies on the high ground except where it's too steep to hold;
 // below it bare rock, then forest down to a beach. Drawn past the fog, with
 // the haze of distance painted into its colours instead.
-const MOUNT = { x: -5600, z: 7600, h: 2600, r: 6400 };
 function ridged(x, z, oct) {
   let s = 0;
   let a = 0.5;
@@ -515,18 +557,26 @@ function ridged(x, z, oct) {
   }
   return s;
 }
+const MOUNT = { x: -3900, z: 5200, h: 3100, r: 3900 };
+// A tall, classic peak: steep upper slopes, ridges and gullies running
+// down it from the summit, a lesser shoulder peak, and a skirt of foothills.
 function mountainH(x, z) {
   const dx = x - MOUNT.x;
   const dz = z - MOUNT.z;
   const d = Math.hypot(dx, dz) / MOUNT.r;
   if (d > 1.05) return -60;
-  const body = Math.pow(Math.max(0, 1 - d), 2.1);
-  const peaks = 0.35 * Math.exp(-((dx + 1700) ** 2 + (dz - 900) ** 2) / 1.3e6) + 0.28 * Math.exp(-((dx - 1500) ** 2 + (dz + 1300) ** 2) / 1.1e6);
-  const rough = ridged(x * 0.00055, z * 0.00055, 7);
-  return MOUNT.h * (body * (0.62 + 0.62 * rough) + peaks * (0.5 + rough)) - 60 + smooth(1.0, 0.8, d) * 8;
+  const a = Math.atan2(dz, dx);
+  // Ridges radiating from the top, wandering a little as they descend.
+  const wob = (vnoise(Math.cos(a) * 2 + d * 3, Math.sin(a) * 2) - 0.5) * 1.6;
+  const ribs = Math.pow(Math.abs(Math.sin(a * 6.5 + wob + d * 2.2)), 0.6);
+  const cone = Math.pow(Math.max(0, 1 - d), 1.55);
+  const shoulder = 0.32 * Math.exp(-((dx + 900) ** 2 + (dz - 700) ** 2) / 4.5e5);
+  const foot = 0.08 * smooth(1.0, 0.5, d) * fbm(x * 0.002, z * 0.002, 4);
+  const rough = ridged(x * 0.0011, z * 0.0011, 5) * 0.12 * smooth(0.05, 0.4, d);
+  return MOUNT.h * (cone * (0.86 + 0.14 * ribs) + shoulder + foot + rough * cone) - 50 + smooth(1.0, 0.85, d) * 6;
 }
 {
-  const N = 300;
+  const N = 320;
   const span = MOUNT.r * 2.15;
   const step = span / N;
   const x0 = MOUNT.x - span / 2;
@@ -536,7 +586,7 @@ function mountainH(x, z) {
   const H = (i, j) => hs[clamp(j, 0, N) * (N + 1) + clamp(i, 0, N)];
   const pos = new Float32Array((N + 1) * (N + 1) * 3);
   const col = new Float32Array((N + 1) * (N + 1) * 3);
-  const haze = new THREE.Color(0xc4d8ec);
+  const haze = HAZE.clone();
   const snow = new THREE.Color(0xf6f8fc);
   const rock = new THREE.Color(0x646a74);
   const darkRock = new THREE.Color(0x4a4f58);
@@ -552,7 +602,7 @@ function mountainH(x, z) {
     pos[k * 3 + 1] = h;
     pos[k * 3 + 2] = z;
     const slope = Math.hypot(H(i + 1, j) - H(i - 1, j), H(i, j + 1) - H(i, j - 1)) / (2 * step);
-    const snowLine = 1150 + (fbm(x * 0.002, z * 0.002, 3) - 0.5) * 500;
+    const snowLine = 1400 + (fbm(x * 0.002, z * 0.002, 3) - 0.5) * 600;
     if (h < 12) c.copy(sand);
     else if (h < 600) c.copy(forest).lerp(rock, smooth(380, 650, h) + smooth(0.6, 1.1, slope) * 0.6);
     else c.copy(rock).lerp(darkRock, smooth(0.5, 1.0, slope) * 0.7);
@@ -560,7 +610,7 @@ function mountainH(x, z) {
     const snowy = smooth(snowLine - 120, snowLine + 150, h) * (1 - smooth(0.75, 1.15, slope));
     c.lerp(snow, snowy);
     // Thicker haze low down, where you look through more air.
-    c.lerp(haze, 0.32 + 0.5 * (1 - smooth(0, 900, h)));
+    c.lerp(haze, 0.25 + 0.6 * (1 - smooth(0, 1200, h)));
     col[k * 3] = c.r;
     col[k * 3 + 1] = c.g;
     col[k * 3 + 2] = c.b;

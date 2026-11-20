@@ -32,6 +32,8 @@ function summit(x, z, radius, away = 60) {
     const px = x + Math.cos(a) * d;
     const pz = z + Math.sin(a) * d;
     if (roadAt(px, pz, away) || townAt(px, pz, 80) || nearPOI(px, pz)) continue;
+    // Keep the big landmarks apart from one another.
+    if (POIS.some((q) => q.r >= 20 && Math.hypot(q.x - px, q.z - pz) < q.r + 200)) continue;
     const h = natH(px, pz);
     if (!best || h > best[2]) best = [px, pz, h];
   }
@@ -91,7 +93,7 @@ const WHITE = 0xf2f0ea;
 }
 // A radio mast on a hill above the coast road, lit red at the top.
 {
-  const [x, z] = summit(-620, -680, 300, 50);
+  const [x, z] = summit(-470, -510, 260, 50);
   const y = footY(x, z, 4);
   POIS.push({ x, z, r: 16 });
   const H = 120;
@@ -247,8 +249,8 @@ const WHITE = 0xf2f0ea;
   };
   const text = "VERDANT BAY";
   const px_ = 2.6;
-  const x = -1150;
-  const z0 = 140;
+  const x = -870;
+  const z0 = 100;
   POIS.push({ x, z: z0 + 95, r: 110 });
   [...text].forEach((ch, ci) => {
     FONT[ch].forEach((row, ry) => [...row].forEach((on, cx) => {
@@ -392,6 +394,174 @@ const WHITE = 0xf2f0ea;
   pp(CYL(5, 5, 6, 20), 0x9ab8c8, x, y + 19, z);
   pp(new THREE.ConeGeometry(5.2, 2.4, 20), 0x7a98a8, x, y + 23.2, z);
   addPost(x, z, 4.5);
+}
+// The airfield: a strip, a hangar, a windsock and a light plane.
+{
+  const { x, z, a, len, w, y } = AIR;
+  const ry = Math.PI / 2 - a;
+  const L = (u, v) => [x + Math.cos(a) * u - Math.sin(a) * v, z + Math.sin(a) * u + Math.cos(a) * v];
+  pp(BOX(len, 0.12, 30), 0x55585d, x, y + 0.05, z, { ry: -a });
+  for (let u = -len / 2 + 30; u < len / 2 - 30; u += 30) { const [mx, mz] = L(u, 0); pp(BOX(14, 0.04, 0.8), WHITE, mx, y + 0.13, mz, { ry: -a }); }
+  for (const e of [-1, 1]) for (let v = -12; v <= 12; v += 3) { const [mx, mz] = L(e * (len / 2 - 8), v); pp(BOX(9, 0.04, 1.4), WHITE, mx, y + 0.13, mz, { ry: -a }); }
+  const [hx, hz] = L(60, 42);
+  const hangar = new THREE.CylinderGeometry(12, 12, 34, 20, 1, false, 0, Math.PI);
+  hangar.rotateZ(Math.PI / 2);
+  pp(hangar, 0xb8bec6, hx, y, hz, { ry: -a + Math.PI / 2 });
+  pp(BOX(0.4, 11, 22), 0x8a9098, ...[L(60 - 17, 42)].map(([p, q]) => [p, y + 5.5, q])[0], { ry: -a });
+  addBox(hx - 15, hz - 15, hx + 15, hz + 15, 12);
+  const [wx, wz] = L(-120, 30);
+  pp(BOX(0.25, 7, 0.25), 0xd8d8d8, wx, y + 3.5, wz);
+  pp(new THREE.ConeGeometry(0.7, 3.2, 10, 1, true), 0xef7f2d, wx + 1.6, y + 6.6, wz, { rz: Math.PI / 2 + 0.25 });
+  // A little high-wing plane, parked.
+  const [px2, pz2] = L(20, 30);
+  pp(CYL(0.7, 0.45, 7, 10), 0xf4f1ea, px2, y + 1.4, pz2, { rz: Math.PI / 2, ry: -a });
+  pp(BOX(1, 0.15, 10), 0xd8352a, px2, y + 2.2, pz2, { ry: -a });
+  pp(BOX(1, 1.4, 0.12), 0xd8352a, ...[L(23.2, 30)].map(([p, q]) => [p, y + 2, q])[0], { ry: -a });
+  pp(BOX(0.8, 0.12, 3), 0xd8352a, ...[L(23.2, 30)].map(([p, q]) => [p, y + 1.4, q])[0], { ry: -a });
+  addPost(px2, pz2, 3);
+  poiParked.push([...L(40, 46), -a]);
+}
+// A crane and stacked stone at the quarry's lip.
+{
+  const ang = 0.7;
+  const x = QUARRY.x + Math.cos(ang) * (QUARRY.r + 8);
+  const z = QUARRY.z + Math.sin(ang) * (QUARRY.r + 8);
+  const y = footY(x, z, 4);
+  pp(BOX(1, 26, 1), 0xf2c230, x, y + 13, z);
+  pp(BOX(1, 1, 30), 0xf2c230, x, y + 26, z - 10, { ry: ang });
+  pp(BOX(3, 3, 3), 0x3a3f46, x, y + 1.5, z);
+  for (let k = 0; k < 6; k++) pp(BOX(2.2, 1.6, 1.6), 0xb9b2a4, x + 6 + (k % 3) * 2.4, y + 0.8 + Math.floor(k / 3) * 1.6, z + 6);
+  addPost(x, z, 2);
+}
+// A giant old oak in the meadow, the biggest tree on the island.
+{
+  const x = REG.meadow.x + 140;
+  const z = REG.meadow.z - 60;
+  const y = footY(x, z, 3) - 0.5;
+  POIS.push({ x, z, r: 30 });
+  pp(CYL(2, 3, 16, 12), 0x5a3e2a, x, y + 8, z);
+  for (const [dx, dz, ry2] of [[0, 0, 0], [1, 0, 1.2], [-1, 1, 2.6]]) pp(CYL(0.9, 1.4, 12, 8), 0x5a3e2a, x + dx * 3, y + 17, z + dz * 3, { rz: 0.6, ry: ry2 });
+  addPost(x, z, 3);
+  const leaf = new THREE.MeshLambertMaterial({ color: 0x4f8f3a, flatShading: true });
+  for (const [dx, dy, dz, r] of [[0, 30, 0, 14], [9, 26, -4, 10], [-8, 27, 6, 10], [3, 36, 5, 9], [-4, 34, -7, 9], [10, 31, 8, 8]]) {
+    const m = new THREE.Mesh(TREE.blobFine, leaf);
+    m.position.set(x + dx, y + dy, z + dz);
+    m.scale.set(r, r * 0.75, r);
+    m.castShadow = true;
+    scene.add(m);
+  }
+}
+// Beach huts in a row on the shore east of the city.
+{
+  const cols = [0xe85d4a, 0x3a7bd5, 0xf2c230, 0x2a9d8f, 0xf4f1ea, 0xd94f7a, 0x8fbd5a, 0xef7f2d, 0x7a4f9a, 0x5bc0de];
+  let n = 0;
+  for (let z = 120; z < 700 && n < 10; z += 9) {
+    let x = 760;
+    while (x < 1300 && baseH(x, z) > 2.6) x += 4;
+    if (x >= 1300 || baseH(x, z) < 1.4) continue;
+    const y = landH(x, z);
+    pp(BOX(3, 3, 3), cols[n], x, y + 1.5, z);
+    pp(PRISM.clone(), 0xf4f1ea, x, y + 3, z, { ry: Math.PI / 2, sx: 3.6, sy: 1.4, sz: 3.6 });
+    pp(BOX(1.1, 2, 0.05), 0xf4f1ea, x + 1.52, y + 1, z, { ry: Math.PI / 2 });
+    addBox(x - 1.5, z - 1.5, x + 1.5, z + 1.5, 3);
+    POIS.push({ x, z, r: 6 });
+    n++;
+  }
+}
+// A radio telescope: a great white dish tipped up at the sky.
+{
+  const [x, z] = summit(REG.high.x + 60, REG.high.z + 380, 260, 50);
+  const y = footY(x, z, 12) - 0.5;
+  POIS.push({ x, z, r: 30 });
+  pp(CYL(4, 6, 10, 10), 0xe8e8e4, x, y + 5, z);
+  pp(BOX(12, 3, 4), 0xd8d8d4, x, y + 11.5, z);
+  const dish = new THREE.SphereGeometry(30, 32, 10, 0, Math.PI * 2, 0, 0.62);
+  dish.scale(1, 0.55, 1);
+  dish.translate(0, -16.5 * 0.55 * 0 - 30 * 0.55 * Math.cos(0.62) , 0);
+  const dm = new THREE.Mesh(dish, new THREE.MeshLambertMaterial({ color: 0xf2f2ee, side: THREE.DoubleSide }));
+  dm.position.set(x, y + 26, z);
+  dm.rotation.set(-0.7, 0.4, 0);
+  dm.rotation.x += Math.PI;
+  dm.castShadow = true;
+  scene.add(dm);
+  addPost(x, z, 6);
+}
+// Hot-air balloons drifting over the farmland, high enough to see from anywhere.
+const balloons = [];
+{
+  const cols = [[0xe85d4a, 0xf2c230], [0x3a7bd5, 0xf4f1ea], [0x2a9d8f, 0xef7f2d]];
+  cols.forEach(([c1, c2], k) => {
+    const g = new THREE.SphereGeometry(9, 24, 16);
+    g.scale(1, 1.18, 1);
+    const p = g.attributes.position;
+    const col = new Float32Array(p.count * 3);
+    const A = new THREE.Color(c1);
+    const B = new THREE.Color(c2);
+    for (let i = 0; i < p.count; i++) {
+      const a = Math.atan2(p.getZ(i), p.getX(i));
+      const c = Math.floor((a / Math.PI + 1) * 6) % 2 ? A : B;
+      col.set([c.r, c.g, c.b], i * 3);
+    }
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    const grp = new THREE.Group();
+    const env = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    env.castShadow = true;
+    const basket = new THREE.Mesh(new THREE.BoxGeometry(2, 1.6, 2), new THREE.MeshLambertMaterial({ color: 0x8a5e3c }));
+    basket.position.y = -14;
+    grp.add(env, basket);
+    scene.add(grp);
+    balloons.push({ grp, cx: REG.farm.x + (k - 1) * 300, cz: REG.farm.z + (k - 1) * 200, r: 200 + k * 90, h: 230 + k * 70, sp: 0.012 + k * 0.004, ph: k * 2.1 });
+  });
+}
+// Stand-ins for the woods beyond the detailed ground: simple shapes, one
+// draw each for the whole island, cleared away close to you where the real
+// trees take over.
+const farTrees = [];
+{
+  const r = rng(4242);
+  const cones = [];
+  const blobs = [];
+  const step = 15;
+  for (let z = ISLE.cz - ISLE.rz; z < ISLE.cz + ISLE.rz; z += step) for (let x = ISLE.cx - ISLE.rx; x < ISLE.cx + ISLE.rx; x += step) {
+    const t = treeAt(x + r() * step, z + r() * step, r);
+    if (!t || t.kind === "palm") continue;
+    if (t.kind === "tall") cones.push(new THREE.Matrix4().compose(new THREE.Vector3(t.x, t.y + 4 * t.s, t.z), new THREE.Quaternion(), new THREE.Vector3(3.8 * t.s, 26 * t.s, 3.8 * t.s)));
+    else if (t.kind === "pine") cones.push(new THREE.Matrix4().compose(new THREE.Vector3(t.x, t.y, t.z), new THREE.Quaternion(), new THREE.Vector3(2.4 * t.s, 10 * t.s, 2.4 * t.s)));
+    else blobs.push(new THREE.Matrix4().compose(new THREE.Vector3(t.x, t.y + 3.6 * t.s, t.z), new THREE.Quaternion(), new THREE.Vector3(2.6 * t.s, 2.6 * t.s, 2.6 * t.s)));
+  }
+  const mat = new THREE.MeshLambertMaterial({ color: 0x2f5f36, flatShading: true });
+  const mat2 = new THREE.MeshLambertMaterial({ color: 0x4f8a3e, flatShading: true });
+  for (const [geo, m, list] of [[new THREE.ConeGeometry(1, 1, 6).translate(0, 0.5, 0), mat, cones], [new THREE.IcosahedronGeometry(1, 0), mat2, blobs]]) {
+    const im = new THREE.InstancedMesh(geo, m, list.length);
+    list.forEach((mm, k) => im.setMatrixAt(k, mm));
+    im.computeBoundingSphere();
+    scene.add(im);
+    farTrees.push({ im, list, pos: list.map((mm) => new THREE.Vector3().setFromMatrixPosition(mm)) });
+  }
+}
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+let farT = 0;
+function updateFar(dt, px, pz) {
+  farT -= dt;
+  if (farT > 0) return;
+  farT = 0.5;
+  const near = (TREE_R - 120) ** 2;
+  for (const f of farTrees) {
+    for (let k = 0; k < f.list.length; k++) {
+      const p = f.pos[k];
+      const d = (p.x - px) ** 2 + (p.z - pz) ** 2;
+      f.im.setMatrixAt(k, d < near ? ZERO : f.list[k]);
+    }
+    f.im.instanceMatrix.needsUpdate = true;
+  }
+}
+function updateBalloons(t) {
+  for (const b of balloons) {
+    const a = t * b.sp + b.ph;
+    const x = b.cx + Math.cos(a) * b.r;
+    const z = b.cz + Math.sin(a) * b.r;
+    b.grp.position.set(x, b.h + Math.sin(t * 0.2 + b.ph) * 12, z);
+  }
 }
 {
   const m = new THREE.Mesh(mergeGeometries(poiParts), new THREE.MeshLambertMaterial({ vertexColors: true }));

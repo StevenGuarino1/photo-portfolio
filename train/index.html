@@ -1,0 +1,2549 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Frostline</title>
+<meta name="description" content="A train crossing a frozen world at night. Start in the tail and fight your way forward, car by car, to the engine.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500;600&family=Silkscreen&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #04060b;
+    --ink: #eef1f6;
+    --dim: rgba(238, 241, 246, 0.64);
+    --faint: rgba(238, 241, 246, 0.36);
+    --line: rgba(238, 241, 246, 0.16);
+    --panel: rgba(6, 8, 13, 0.62);
+    --warm: #f2b46a;
+    --red: #e2483d;
+    --green: #7fd69a;
+    color-scheme: dark;
+  }
+  /* Always night on the train: the same tokens in either theme. */
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #04060b; --ink: #eef1f6; } }
+  :root[data-theme="dark"] { --bg: #04060b; --ink: #eef1f6; }
+
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden;
+    font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; user-select: none; -webkit-user-select: none; }
+  canvas#view { display: block; width: 100vw; height: 100vh; outline: none; touch-action: none; }
+  .hud { position: fixed; z-index: 10; pointer-events: none; }
+  .px { font-family: Silkscreen, ui-monospace, monospace; letter-spacing: 0.04em; }
+
+  #gun { left: 50%; bottom: 0; height: min(46vh, 62vw); aspect-ratio: 160 / 100; transform: translateX(-50%); image-rendering: pixelated; }
+  #cross { top: 50%; left: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; }
+  #cross i { position: absolute; background: rgba(238, 241, 246, 0.8); }
+  #cross i:nth-child(1) { left: 10px; top: 0; width: 2px; height: 6px; }
+  #cross i:nth-child(2) { left: 10px; bottom: 0; width: 2px; height: 6px; }
+  #cross i:nth-child(3) { top: 10px; left: 0; width: 6px; height: 2px; }
+  #cross i:nth-child(4) { top: 10px; right: 0; width: 6px; height: 2px; }
+  #cross.hit i { background: #ff6a5a; }
+  #cross.kill i { background: #ffd27a; }
+
+  #hp { left: calc(22px + env(safe-area-inset-left, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+  #hp b { display: block; font: 400 34px/1 Silkscreen, monospace; }
+  #hp .bar { width: 150px; height: 4px; margin-top: 8px; background: var(--line); }
+  #hp .bar span { display: block; height: 100%; width: 100%; background: var(--ink); transition: width 200ms ease; }
+  #hp.low b, #hp.low .bar span { color: var(--red); background-color: var(--red); }
+  #hp.low b { background: none; }
+  #ammo { right: calc(22px + env(safe-area-inset-right, 0px)); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); text-align: right; }
+  #ammo b { display: block; font: 400 34px/1 Silkscreen, monospace; }
+  #ammo small { display: block; margin-top: 8px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+  #where { left: calc(22px + env(safe-area-inset-left, 0px)); top: calc(18px + env(safe-area-inset-top, 0px)); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
+  #where em { font-style: normal; color: var(--warm); margin-left: 10px; }
+  #where em.clear { color: var(--green); }
+
+  #card { top: 22%; left: 0; right: 0; text-align: center; opacity: 0; transition: opacity 900ms ease; }
+  #card.on { opacity: 1; }
+  #card small { display: block; font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--dim); }
+  #card h2 { margin: 10px 0 6px; font: 600 clamp(38px, 6vw, 64px)/1 "Cormorant Garamond", Georgia, serif; letter-spacing: 0.02em; }
+  #card p { margin: 0; font: italic 500 clamp(17px, 2.2vw, 21px)/1.3 "Cormorant Garamond", Georgia, serif; color: var(--dim); }
+  #msg { bottom: 21%; left: 0; right: 0; text-align: center; font-size: 13px; letter-spacing: 0.06em; color: var(--ink);
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); opacity: 0; transition: opacity 400ms ease; }
+  #msg.on { opacity: 1; }
+  #hurt { inset: 0; opacity: 0; background: radial-gradient(ellipse at center, transparent 45%, rgba(170, 20, 16, 0.75) 100%); }
+  #fps { right: calc(16px + env(safe-area-inset-right, 0px)); top: calc(16px + env(safe-area-inset-top, 0px)); font: 11px ui-monospace, monospace; color: var(--faint); }
+
+  .screen { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; text-align: center; padding: 24px;
+    background: radial-gradient(ellipse at 50% 55%, rgba(14, 22, 40, 0.55), rgba(3, 4, 8, 0.94) 72%); transition: opacity 600ms ease; }
+  .screen.gone { opacity: 0; pointer-events: none; }
+  .screen h1 { margin: 0; font: 400 clamp(44px, 9vw, 92px)/1 Silkscreen, monospace; letter-spacing: 0.06em; }
+  .screen h1.serif { font: 600 clamp(40px, 7vw, 72px)/1 "Cormorant Garamond", Georgia, serif; letter-spacing: 0.02em; }
+  .screen p { margin: 16px auto 30px; max-width: 34em; color: var(--dim); font: italic 500 clamp(17px, 2.4vw, 22px)/1.4 "Cormorant Garamond", Georgia, serif; }
+  .screen button { font: 500 13px/1 Inter, sans-serif; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink); background: transparent;
+    border: 1px solid var(--line); padding: 15px 28px; border-radius: 2px; cursor: pointer; }
+  .screen button:hover, .screen button:focus-visible { border-color: var(--warm); outline: none; }
+  .screen small { display: block; margin-top: 22px; color: var(--faint); font-size: 12px; letter-spacing: 0.05em; line-height: 1.8; }
+  .screen .stats { display: flex; gap: 28px; justify-content: center; margin: 0 0 30px; }
+  .screen .stats div { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
+  .screen .stats b { display: block; margin-bottom: 6px; font: 400 26px/1 Silkscreen, monospace; color: var(--ink); letter-spacing: 0; }
+  #dead { background: radial-gradient(ellipse at 50% 55%, rgba(60, 8, 6, 0.5), rgba(8, 2, 2, 0.92) 72%); }
+  @media (max-width: 640px) {
+    #hp b, #ammo b { font-size: 26px; }
+    #hp .bar { width: 110px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div class="screen" id="intro">
+  <div>
+    <h1>FROSTLINE</h1>
+    <p>The world froze. The train never stopped. You've spent years in the last car. Tonight you go forward.</p>
+    <button id="board" type="button">Go forward</button>
+    <small>W A S D move · mouse aim · click shoot · R reload · 1 / 2 weapons · Shift run<br>Doors open once a car is clear</small>
+  </div>
+</div>
+<div class="screen gone" id="dead">
+  <div>
+    <h1 class="serif">You went down</h1>
+    <p id="deadWhere"></p>
+    <button id="retry" type="button">Get up</button>
+  </div>
+</div>
+<div class="screen gone" id="end">
+  <div>
+    <h1 class="serif">The engine is yours</h1>
+    <p>Warm, loud and still running. Out in front, the tracks run on into the snow.</p>
+    <div class="stats"><div><b id="sTime">0:00</b>time</div><div><b id="sKills">0</b>guards down</div><div><b id="sFalls">0</b>times down</div></div>
+    <button id="again" type="button">Ride again</button>
+  </div>
+</div>
+<div class="screen gone" id="paused">
+  <div>
+    <h1 class="serif">Holding on</h1>
+    <p>The train rocks on through the dark.</p>
+    <button id="resume" type="button">Back in</button>
+  </div>
+</div>
+<canvas class="hud" id="gun" width="160" height="100"></canvas>
+<div class="hud" id="cross"><i></i><i></i><i></i><i></i></div>
+<div class="hud" id="where"><span></span><em></em></div>
+<div class="hud" id="card"><small></small><h2></h2><p></p></div>
+<div class="hud" id="msg"></div>
+<div class="hud" id="hp"><b>100</b><div class="bar"><span></span></div></div>
+<div class="hud" id="ammo"><b>2</b><small>Scattergun</small></div>
+<div class="hud" id="hurt"></div>
+<div class="hud" id="fps" hidden></div>
+
+<script type="module">
+import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+
+// ---------- Frostline ----------
+// A long train crossing a frozen world at night, and you in its last car.
+// Built like the old grid shooters (straight walls, chunky pixel textures,
+// flat sprite enemies) but lit warm: each car is a room of its own, poorer
+// at the back, richer toward the front, and the snow streams past the
+// windows the whole way. Clear a car and its front door opens.
+
+const $ = (id) => document.getElementById(id);
+const TOUCH = matchMedia("(pointer: coarse)").matches;
+
+// Forward is +z. Every car is CL long; between cars, a VL vestibule.
+const HW = 4.5; // a car's half width: wider than a real train, so each car is a room
+const H = 4.6; // its height
+const CL = 28;
+const VL = 3.2;
+const STRIDE = CL + VL;
+const DW = 0.8; // half width of the doorways
+const DH = 2.5; // their height
+const VW = 1.35; // the vestibule's half width
+const VH = 2.9; // and height
+const EYE = 1.62;
+const SPEED = 24; // the train, in m/s
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.4;
+const canvas = renderer.domElement;
+canvas.id = "view";
+canvas.tabIndex = 0;
+document.body.prepend(canvas);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x04060b);
+scene.fog = new THREE.FogExp2(0x0a1120, 0.02);
+const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.05, 1500);
+camera.rotation.order = "YXZ";
+scene.add(camera);
+
+// ---------- Pixel textures ----------
+function rng(seed) {
+  let s = seed >>> 0;
+  return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+}
+const maxAniso = renderer.capabilities.getMaxAnisotropy();
+function pixelTex(w, h, draw, { repeat = true, srgb = true } = {}) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const g = c.getContext("2d");
+  g.imageSmoothingEnabled = false;
+  draw(g, w, h);
+  const t = new THREE.CanvasTexture(c);
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.anisotropy = Math.min(8, maxAniso);
+  if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+const shade = (c, k) => {
+  const r = Math.min(255, Math.max(0, ((c >> 16) & 255) * k));
+  const g = Math.min(255, Math.max(0, ((c >> 8) & 255) * k));
+  const b = Math.min(255, Math.max(0, (c & 255) * k));
+  return `rgb(${r | 0}, ${g | 0}, ${b | 0})`;
+};
+function speckle(g, w, h, base, amount, seed, x0 = 0, y0 = 0) {
+  const r = rng(seed);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    g.fillStyle = shade(base, 1 + (r() - 0.5) * amount);
+    g.fillRect(x0 + x, y0 + y, 1, 1);
+  }
+}
+const px = (g, c, x, y, w = 1, h = 1) => { g.fillStyle = c; g.fillRect(x, y, w, h); };
+// Planks running across the texture, each its own shade, with dark gaps.
+function planks(g, w, h, base, across, seed, gap = "#140d08") {
+  const r = rng(seed);
+  for (let p = 0; p < w; p += across) {
+    const k = 0.78 + r() * 0.4;
+    for (let y = 0; y < h; y++) for (let x = p; x < Math.min(w, p + across); x++) {
+      px(g, shade(base, k * (1 + (r() - 0.5) * 0.12) * (1 + Math.sin(y * 0.7 + p) * 0.03)), x, y);
+    }
+    px(g, gap, p, 0, 1, h);
+    const cut = (r() * h) | 0;
+    px(g, gap, p, cut, across, 1);
+  }
+}
+
+const T = {
+  // The tail: rusted steel panels, rivets, rust running down.
+  rust: pixelTex(32, 32, (g) => {
+    speckle(g, 32, 32, 0x3d3631, 0.2, 1);
+    const r = rng(2);
+    for (let i = 0; i < 14; i++) px(g, shade(0x5a3420, 0.7 + r() * 0.5), (r() * 32) | 0, (r() * 32) | 0, 1, 2 + ((r() * 9) | 0));
+    px(g, "#1d1714", 0, 0, 32, 1);
+    px(g, "#1d1714", 0, 0, 1, 32);
+    px(g, "#1d1714", 16, 0, 1, 32);
+    for (const [x, y] of [[2, 2], [13, 2], [19, 2], [29, 2], [2, 29], [13, 29], [19, 29], [29, 29], [2, 15], [29, 15]]) px(g, "#9a8370", x, y);
+  }),
+  // Freight: ribbed grey steel.
+  steel: pixelTex(32, 32, (g) => {
+    speckle(g, 32, 32, 0x3b4149, 0.1, 3);
+    for (let x = 0; x < 32; x += 8) { px(g, "#565e69", x, 0, 1, 32); px(g, "#22262c", x + 1, 0, 1, 32); }
+    px(g, "#1a1d22", 0, 0, 32, 1);
+    for (let x = 4; x < 32; x += 8) { px(g, "#7a838f", x, 3); px(g, "#7a838f", x, 28); }
+  }),
+  grate: pixelTex(16, 16, (g) => {
+    speckle(g, 16, 16, 0x24272c, 0.15, 5);
+    for (let i = 0; i < 16; i += 4) { px(g, "#3c4148", i, 0, 1, 16); px(g, "#3c4148", 0, i, 16, 1); px(g, "#101114", i + 2, i + 2, 1, 1); }
+  }),
+  planks: pixelTex(32, 32, (g) => {
+    planks(g, 32, 32, 0x4b3524, 8, 7);
+    const r = rng(8);
+    for (let i = 0; i < 40; i++) px(g, "rgba(10,8,6,0.35)", (r() * 32) | 0, (r() * 32) | 0, 2, 1);
+  }),
+  boards: pixelTex(32, 16, (g) => planks(g, 32, 16, 0x5a4029, 6, 9)),
+  crate: pixelTex(16, 16, (g) => {
+    const r = rng(11);
+    for (let y = 0; y < 16; y += 4) {
+      const k = 0.85 + r() * 0.3;
+      for (let yy = y; yy < y + 4; yy++) for (let x = 0; x < 16; x++) px(g, shade(0x76552f, k * (1 + (r() - 0.5) * 0.1)), x, yy);
+      px(g, "#2c1d10", 0, y, 16, 1);
+    }
+    px(g, "#3a2715", 0, 0, 16, 2); px(g, "#3a2715", 0, 14, 16, 2); px(g, "#3a2715", 0, 0, 2, 16); px(g, "#3a2715", 14, 0, 2, 16);
+    for (let i = 2; i < 14; i++) px(g, "#a07a46", i, i, 1, 1);
+  }),
+  // The guards' crates: olive, stencilled.
+  ammo: pixelTex(16, 16, (g) => {
+    speckle(g, 16, 16, 0x3c4630, 0.12, 13);
+    px(g, "#262c1e", 0, 0, 16, 1); px(g, "#262c1e", 0, 15, 16, 1); px(g, "#262c1e", 0, 0, 1, 16); px(g, "#262c1e", 15, 0, 1, 16);
+    px(g, "#b9b48e", 4, 6, 8, 1); px(g, "#b9b48e", 4, 9, 6, 1);
+  }),
+  tile: pixelTex(16, 16, (g) => {
+    speckle(g, 16, 16, 0xc8c4b8, 0.06, 15);
+    px(g, "#76736b", 0, 0, 16, 1); px(g, "#76736b", 0, 8, 16, 1); px(g, "#76736b", 0, 0, 1, 16); px(g, "#76736b", 8, 0, 1, 16);
+  }),
+  checker: pixelTex(32, 32, (g) => {
+    const r = rng(17);
+    for (let ty = 0; ty < 4; ty++) for (let tx = 0; tx < 4; tx++) {
+      const base = (tx + ty) % 2 ? 0x1c1d20 : 0xb9b4a6;
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) px(g, shade(base, 1 + (r() - 0.5) * 0.1), tx * 8 + x, ty * 8 + y);
+    }
+  }),
+  counter: pixelTex(16, 16, (g) => {
+    const r = rng(19);
+    for (let y = 0; y < 16; y++) { const k = 0.9 + r() * 0.2; for (let x = 0; x < 16; x++) px(g, shade(0x8c929a, k * (1 + (r() - 0.5) * 0.05)), x, y); }
+    px(g, "#4e535a", 0, 15, 16, 1);
+  }),
+  // Rich wainscot: a raised panel and its moulding.
+  wood: pixelTex(64, 40, (g) => {
+    const r = rng(31);
+    for (let y = 0; y < 40; y++) { const band = 1 + Math.sin(y * 0.9 + r() * 0.5) * 0.06; for (let x = 0; x < 64; x++) px(g, shade(0x3a2417, band + (r() - 0.5) * 0.1), x, y); }
+    px(g, "#24160e", 6, 7, 52, 1); px(g, "#24160e", 6, 7, 1, 26);
+    px(g, "#57391f", 6, 33, 53, 1); px(g, "#57391f", 58, 7, 1, 27);
+    px(g, "#1b100a", 0, 39, 64, 1); px(g, "#1b100a", 0, 0, 64, 1);
+  }),
+  damask: pixelTex(32, 32, (g) => {
+    speckle(g, 32, 32, 0x4b1b1e, 0.08, 21);
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) if ((x + y) % 16 === 0 || (x - y + 32) % 16 === 0) px(g, "#5e2629", x, y);
+    for (const [cx, cy] of [[8, 0], [0, 8], [8, 16], [24, 16], [16, 8], [16, 24], [24, 0], [0, 24], [8, 32], [24, 32]]) { px(g, "#6e2e30", cx - 1, cy - 2, 2, 4); px(g, "#6e2e30", cx - 2, cy - 1, 4, 2); }
+  }),
+  greenwall: pixelTex(32, 32, (g) => {
+    speckle(g, 32, 32, 0x1f3328, 0.07, 23);
+    for (let x = 0; x < 32; x += 4) px(g, "rgba(255,255,255,0.035)", x, 0, 1, 32);
+  }),
+  carpet: pixelTex(32, 32, (g) => {
+    speckle(g, 32, 32, 0x5a1519, 0.1, 25);
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+      const d = Math.abs(((x + 8) % 16) - 8) + Math.abs(((y + 8) % 16) - 8);
+      if (d === 6) px(g, "#8a6a2c", x, y);
+      if (d === 1) px(g, "#a07c34", x, y);
+    }
+  }),
+  carpetBlue: pixelTex(32, 32, (g) => {
+    speckle(g, 32, 32, 0x1a2140, 0.1, 27);
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+      const d = Math.hypot(((x + 16) % 32) - 16, ((y + 16) % 32) - 16);
+      if (Math.abs(d - 9) < 0.6 || Math.abs(d - 4) < 0.5) px(g, "#8a6a2c", x, y);
+    }
+    px(g, "#2a335c", 0, 0, 32, 1);
+  }),
+  cloth: pixelTex(16, 16, (g) => speckle(g, 16, 16, 0xd9d4c6, 0.05, 29)),
+  cream: pixelTex(32, 32, (g) => {
+    speckle(g, 32, 32, 0x8a8170, 0.06, 33);
+    px(g, "#5d564a", 0, 0, 32, 1); px(g, "#5d564a", 0, 0, 1, 32);
+    px(g, "#a69c88", 1, 1, 31, 1);
+  }),
+  soil: pixelTex(16, 16, (g) => speckle(g, 16, 16, 0x2e2117, 0.3, 35)),
+  slats: pixelTex(32, 32, (g) => planks(g, 32, 32, 0x6b5136, 4, 37, "#24180d")),
+  bellows: pixelTex(16, 16, (g) => {
+    for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) px(g, shade(0x1c1d20, x % 4 < 2 ? 1.25 : 0.7), x, y);
+  }),
+  plate: pixelTex(16, 16, (g) => {
+    speckle(g, 16, 16, 0x3e434a, 0.1, 39);
+    for (let y = 1; y < 16; y += 4) for (let x = (y % 8 === 1 ? 1 : 3); x < 16; x += 4) { px(g, "#5f6670", x, y, 2, 1); px(g, "#5f6670", x + 1, y + 1, 1, 1); }
+  }),
+  books: pixelTex(32, 32, (g) => {
+    const r = rng(41);
+    px(g, "#1a110b", 0, 0, 32, 32);
+    for (let row = 0; row < 4; row++) {
+      let x = 0;
+      while (x < 32) {
+        const w = 1 + ((r() * 3) | 0);
+        const hgt = 5 + ((r() * 3) | 0);
+        const col = [0x6b1f1f, 0x1f3b5a, 0x2d4a2a, 0x7a5a2a, 0x4a2a4a, 0x8a7a5a][(r() * 6) | 0];
+        px(g, shade(col, 0.8 + r() * 0.4), x, row * 8 + 8 - hgt - 1, w, hgt);
+        x += w + (r() < 0.15 ? 1 : 0);
+      }
+      px(g, "#3a2414", 0, row * 8 + 7, 32, 1);
+    }
+  }),
+  velvet: pixelTex(16, 32, (g) => {
+    for (let x = 0; x < 16; x++) { const k = 0.7 + 0.5 * Math.abs(Math.sin(x * 0.8)); for (let y = 0; y < 32; y++) px(g, shade(0x5a1018, k), x, y); }
+  }),
+  door: pixelTex(16, 32, (g) => {
+    speckle(g, 16, 32, 0x3e444c, 0.08, 43);
+    px(g, "#22262b", 0, 0, 1, 32); px(g, "#646c77", 15, 0, 1, 32);
+    px(g, "#0d1016", 4, 5, 8, 7); px(g, "#26303f", 5, 6, 6, 5);
+    px(g, "#22262b", 2, 18, 12, 1); px(g, "#22262b", 2, 26, 12, 1);
+  }),
+  brass: pixelTex(8, 8, (g) => speckle(g, 8, 8, 0x9a7a3c, 0.25, 45)),
+  dark: pixelTex(8, 8, (g) => speckle(g, 8, 8, 0x16171a, 0.2, 47)),
+  // Outside.
+  snow: pixelTex(64, 64, (g) => {
+    speckle(g, 64, 64, 0xb9c6da, 0.07, 51);
+    const r = rng(52);
+    for (let i = 0; i < 26; i++) { const x = (r() * 64) | 0; const y = (r() * 64) | 0; px(g, "#9eabc2", x, y, 1, 3 + ((r() * 8) | 0)); }
+    for (let i = 0; i < 40; i++) px(g, "#dfe7f4", (r() * 64) | 0, (r() * 64) | 0);
+  }),
+  track: pixelTex(32, 32, (g) => {
+    speckle(g, 32, 32, 0x55585e, 0.35, 53);
+    for (let y = 2; y < 32; y += 8) { px(g, "#2b2119", 0, y, 32, 3); px(g, "#3c2f24", 0, y, 32, 1); }
+    for (let i = 0; i < 60; i++) px(g, "#c9d3e2", (Math.sin(i * 12.9) * 0.5 + 0.5) * 32 | 0, (Math.sin(i * 78.2) * 0.5 + 0.5) * 32 | 0);
+  }),
+  frost: pixelTex(32, 32, (g) => {
+    const r = rng(57);
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+      const e = Math.min(x, y, 31 - x, 31 - y);
+      const a = Math.max(0, 0.75 - e * 0.09) * (0.5 + r() * 0.5) + (r() < 0.02 ? 0.25 : 0.04);
+      px(g, `rgba(220,232,250,${a.toFixed(3)})`, x, y);
+    }
+  }, { repeat: false }),
+};
+for (const k of ["frost"]) T[k].wrapS = T[k].wrapT = THREE.ClampToEdgeWrapping;
+// Sprite sheets (transparent): plants for the greenhouse, pines outside.
+T.bush = pixelTex(32, 32, (g) => {
+  const r = rng(61);
+  for (let i = 0; i < 420; i++) {
+    const a = r() * Math.PI * 2;
+    const d = Math.sqrt(r());
+    const x = 16 + Math.cos(a) * d * 14;
+    const y = 18 + Math.sin(a) * d * 12;
+    px(g, shade(0x2f6a2c, 0.55 + (1 - d) * 0.6 + r() * 0.2), x | 0, y | 0, 2, 1);
+  }
+  for (let i = 0; i < 7; i++) px(g, r() < 0.5 ? "#d2462c" : "#e8a33a", (6 + r() * 20) | 0, (10 + r() * 16) | 0, 2, 2);
+  px(g, "#3b2a1a", 15, 28, 2, 4);
+}, { repeat: false });
+T.tree = pixelTex(32, 48, (g) => {
+  const r = rng(63);
+  px(g, "#3a2818", 15, 26, 3, 22);
+  for (let i = 0; i < 520; i++) {
+    const a = r() * Math.PI * 2;
+    const d = Math.sqrt(r());
+    px(g, shade(0x2a5a26, 0.5 + (1 - d) * 0.7 + r() * 0.2), (16 + Math.cos(a) * d * 14) | 0, (16 + Math.sin(a) * d * 13) | 0, 2, 1);
+  }
+  for (let i = 0; i < 12; i++) px(g, "#f0a030", (5 + r() * 22) | 0, (6 + r() * 20) | 0, 2, 2);
+}, { repeat: false });
+T.pine = pixelTex(32, 64, (g) => {
+  const r = rng(65);
+  px(g, "#1a120c", 15, 52, 2, 12);
+  for (let tier = 0; tier < 5; tier++) {
+    const top = 4 + tier * 10;
+    const hgt = 16;
+    for (let y = 0; y < hgt; y++) {
+      const half = ((y + 2) / hgt) * (5 + tier * 2.4);
+      for (let x = Math.round(16 - half); x <= Math.round(16 + half); x++) {
+        const snowy = y < 3 || (r() < 0.12 && y < 8);
+        px(g, snowy ? "#b8c6dc" : shade(0x14261e, 0.7 + r() * 0.5), x, top + y);
+      }
+    }
+  }
+}, { repeat: false });
+T.mountains = pixelTex(512, 96, (g) => {
+  const r = rng(67);
+  const ridge = [];
+  let y = 40;
+  for (let x = 0; x < 512; x++) { y += (r() - 0.5) * 3 + Math.sin(x * 0.02) * 0.6; y = Math.max(10, Math.min(70, y)); ridge.push(y); }
+  // Wrap smoothly so it tiles.
+  for (let x = 0; x < 40; x++) ridge[511 - x] = ridge[511 - x] * (x / 40) + ridge[0] * (1 - x / 40);
+  for (let x = 0; x < 512; x++) {
+    for (let yy = ridge[x] | 0; yy < 96; yy++) {
+      const snow = yy - ridge[x] < 6 + Math.sin(x * 0.3) * 3 && ridge[x] < 46;
+      px(g, snow ? "#7d8aa6" : shade(0x1b2236, 0.9 + (yy / 96) * 0.25), x, yy);
+    }
+  }
+}, { repeat: true });
+T.mountains.wrapT = THREE.ClampToEdgeWrapping;
+
+// Soft, smooth light textures (light isn't a surface, so not pixelated).
+function softTex(draw) {
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  draw(c.getContext("2d"));
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const GLOW = softTex((g) => {
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.3, "rgba(255,255,255,0.4)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+});
+// A window's moonlight on the floor: a soft-edged rectangle.
+const POOL = softTex((g) => {
+  for (let y = 0; y < 128; y++) for (let x = 0; x < 128; x++) {
+    const e = Math.min(x, y, 127 - x, 127 - y) / 26;
+    g.fillStyle = `rgba(255,255,255,${Math.min(1, e) ** 2})`;
+    g.fillRect(x, y, 1, 1);
+  }
+});
+
+// ---------- Materials ----------
+const lam = (map, o = {}) => new THREE.MeshLambertMaterial({ map, ...o });
+const M = {
+  rust: lam(T.rust), steel: lam(T.steel), grate: lam(T.grate), planks: lam(T.planks), boards: lam(T.boards),
+  crate: lam(T.crate), ammo: lam(T.ammo), tile: lam(T.tile), checker: lam(T.checker), counter: lam(T.counter),
+  wood: lam(T.wood), damask: lam(T.damask), greenwall: lam(T.greenwall), carpet: lam(T.carpet), carpetBlue: lam(T.carpetBlue),
+  cloth: lam(T.cloth), cream: lam(T.cream), soil: lam(T.soil), slats: lam(T.slats), bellows: lam(T.bellows), plate: lam(T.plate),
+  books: lam(T.books), velvet: lam(T.velvet), door: lam(T.door), brass: lam(T.brass, { color: 0xffe0a0 }), dark: lam(T.dark),
+  blanketA: lam(T.cloth, { color: 0x5a4a3a }), blanketB: lam(T.cloth, { color: 0x3a4a5a }), blanketC: lam(T.cloth, { color: 0x6a3a2a }),
+  rag: lam(T.cloth, { color: 0x8a8070, side: THREE.DoubleSide }),
+  pipe: lam(T.dark, { color: 0x8a7a6a }),
+  black: lam(T.dark, { color: 0x555555 }),
+  leather: lam(T.cloth, { color: 0x3a1c12 }),
+  iron: lam(T.dark, { color: 0x9aa0aa }),
+};
+const glassMat = new THREE.MeshBasicMaterial({ map: T.frost, color: 0xa8bcdc, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+
+// ---------- Geometry, merged per material ----------
+// A plane whose texture repeats every tw x th metres, starting at (u0, v0)
+// metres, so neighbouring pieces of one wall line up.
+function plane(w, h, tw = w, th = h, u0 = 0, v0 = 0) {
+  const g = new THREE.PlaneGeometry(w, h);
+  const uv = g.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * w + u0) / tw, (uv.getY(i) * h + v0) / th);
+  return g;
+}
+function box(w, h, d, tw = 1, th = 1) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const uv = g.attributes.uv;
+  const dims = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  for (let f = 0; f < 6; f++) for (let k = 0; k < 4; k++) {
+    const i = f * 4 + k;
+    uv.setXY(i, (uv.getX(i) * dims[f][0]) / tw, (uv.getY(i) * dims[f][1]) / th);
+  }
+  return g;
+}
+const bins = new Map();
+const tmpM = new THREE.Matrix4();
+const tmpQ = new THREE.Quaternion();
+const tmpE = new THREE.Euler();
+const tmpV = new THREE.Vector3();
+const ONE = new THREE.Vector3(1, 1, 1);
+function put(geo, mat, { x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0 } = {}) {
+  if (geo.index === null) geo = geo; // all ours are indexed
+  geo.applyMatrix4(tmpM.compose(tmpV.set(x, y, z), tmpQ.setFromEuler(tmpE.set(rx, ry, rz)), ONE));
+  if (!bins.has(mat)) bins.set(mat, []);
+  bins.get(mat).push(geo);
+}
+function flush(group) {
+  for (const [mat, list] of bins) {
+    const mesh = new THREE.Mesh(mergeGeometries(list), mat);
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    group.add(mesh);
+  }
+  bins.clear();
+}
+
+// ---------- Outside ----------
+// The train stands still and the world runs past it: the snowfield and the
+// track bed scroll, the trees, poles and the odd lit cabin go by in chunks
+// that wrap round, the mountains slide slowly, and the snow streaks back
+// past the windows. The sky (aurora, stars, moon) goes wherever you go, as
+// far off as the real thing.
+let scroll = 0; // metres travelled
+const MOON_DIR = new THREE.Vector3(0.78, 0.55, 0.3).normalize(); // up toward the moon, off the right-hand side
+
+const skyGroup = new THREE.Group();
+scene.add(skyGroup);
+const skyMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: { value: 0 } },
+  vertexShader: `varying vec3 vDir; void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `
+    uniform float uTime;
+    varying vec3 vDir;
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float noise(vec2 p) {
+      vec2 i = floor(p), f = fract(p);
+      f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+    }
+    void main() {
+      float y = vDir.y;
+      vec3 c = mix(vec3(0.05, 0.075, 0.14), vec3(0.008, 0.014, 0.04), pow(clamp(y, 0.0, 1.0), 0.45));
+      if (y < 0.0) c = vec3(0.04, 0.05, 0.08);
+      // The aurora: curtains hanging in a band that wanders across the sky.
+      float az = atan(vDir.x, vDir.z);
+      float mid = 0.38 + 0.1 * sin(az * 1.7 + uTime * 0.03);
+      float band = exp(-pow((y - mid) / 0.17, 2.0)) * smoothstep(0.02, 0.2, y);
+      float cur = noise(vec2(az * 6.0 + uTime * 0.05, uTime * 0.04)) * 0.65 + noise(vec2(az * 26.0 - uTime * 0.12, 3.1)) * 0.35;
+      cur = smoothstep(0.38, 0.95, cur);
+      float rays = 0.6 + 0.4 * noise(vec2(az * 60.0, y * 3.0 - uTime * 0.2));
+      vec3 aur = mix(vec3(0.12, 0.95, 0.55), vec3(0.45, 0.3, 0.95), smoothstep(mid - 0.05, mid + 0.22, y));
+      c += aur * band * cur * rays * 0.42;
+      gl_FragColor = vec4(c, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+  side: THREE.BackSide,
+  depthWrite: false,
+  fog: false,
+});
+{
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(1000, 48, 24), skyMat);
+  dome.renderOrder = -3;
+  const N = 2600;
+  const sp = new Float32Array(N * 3);
+  const sc = new Float32Array(N * 3);
+  const r = rng(71);
+  for (let i = 0; i < N; i++) {
+    const y = 0.02 + r() * 0.98;
+    const a = r() * Math.PI * 2;
+    const h = Math.sqrt(1 - y * y);
+    sp.set([Math.cos(a) * h * 900, y * 900, Math.sin(a) * h * 900], i * 3);
+    const k = r() < 0.1 ? 1 : 0.3 + r() * 0.4;
+    sc.set([0.8 * k, 0.86 * k, k], i * 3);
+  }
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute("position", new THREE.BufferAttribute(sp, 3));
+  sg.setAttribute("color", new THREE.BufferAttribute(sc, 3));
+  const stars = new THREE.Points(sg, new THREE.PointsMaterial({ size: 2, sizeAttenuation: false, vertexColors: true, fog: false, depthWrite: false }));
+  stars.renderOrder = -2;
+  const moonTex = pixelTex(16, 16, (g) => {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const d = Math.hypot(x - 7.5, y - 7.5);
+      if (d <= 7) px(g, d > 6 ? "#b9c3e6" : (x * 3 + y * 5) % 13 === 0 ? "#c4cdeb" : "#eef1fc", x, y);
+    }
+  }, { repeat: false });
+  const moon = new THREE.Mesh(new THREE.PlaneGeometry(34, 34), new THREE.MeshBasicMaterial({ map: moonTex, transparent: true, alphaTest: 0.5, fog: false, depthWrite: false }));
+  moon.position.copy(MOON_DIR).multiplyScalar(850);
+  moon.lookAt(0, 0, 0);
+  moon.renderOrder = -2;
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: 0x6070a0, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  halo.position.copy(MOON_DIR).multiplyScalar(860);
+  halo.scale.setScalar(260);
+  halo.renderOrder = -2;
+  skyGroup.add(dome, stars, moon, halo);
+}
+
+// The ground: a snowfield and the track bed, scrolled under the train.
+const GROUND_Y = -1.3;
+const outside = new THREE.Group();
+scene.add(outside);
+const snowTex = T.snow.clone();
+snowTex.repeat.set(300, 300); // 8 m tiles
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), new THREE.MeshBasicMaterial({ map: snowTex, color: 0x4c5874 }));
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = GROUND_Y;
+const trackTex = T.track.clone();
+trackTex.repeat.set(1, 600); // 4 m tiles
+const trackBed = new THREE.Mesh(new THREE.PlaneGeometry(4, 2400), new THREE.MeshBasicMaterial({ map: trackTex, color: 0x3c424e }));
+trackBed.rotation.x = -Math.PI / 2;
+trackBed.position.y = GROUND_Y + 0.03;
+const rails = new THREE.Mesh(mergeGeometries([-0.72, 0.72].map((x) => box(0.08, 0.14, 2400).translate(x, GROUND_Y + 0.1, 0))), new THREE.MeshBasicMaterial({ color: 0x5a606c }));
+outside.add(ground, trackBed, rails);
+
+// Mountains far off either side.
+const mountMats = [];
+for (const s of [-1, 1]) {
+  const t = T.mountains.clone();
+  t.repeat.set(4, 1);
+  const m = new THREE.MeshBasicMaterial({ map: t, color: 0x9aa8c8, transparent: true, alphaTest: 0.5, fog: false });
+  mountMats.push(m);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(4800, 190), m);
+  mesh.position.set(s * 700, 70, 0);
+  mesh.rotation.y = -s * Math.PI / 2;
+  mesh.renderOrder = -1;
+  outside.add(mesh);
+}
+
+// Scenery in chunks that wrap: pines, telegraph poles, now and then a cabin
+// with its lights on.
+const CHUNK = 220;
+const CHUNKS = 4;
+const pineMat = new THREE.MeshBasicMaterial({ map: T.pine, color: 0x56627c, alphaTest: 0.5, side: THREE.DoubleSide });
+const poleMat = new THREE.MeshBasicMaterial({ map: T.dark, color: 0x3a3028 });
+const cabinMat = new THREE.MeshBasicMaterial({ map: T.planks, color: 0x505868 });
+const roofMat = new THREE.MeshBasicMaterial({ map: T.snow, color: 0x6a7690 });
+const litMat = new THREE.MeshBasicMaterial({ color: 0xffb35c });
+const chunks = [];
+for (let k = 0; k < CHUNKS; k++) {
+  const r = rng(100 + k);
+  const grp = new THREE.Group();
+  const pines = [];
+  for (let i = 0; i < 90; i++) {
+    const side = r() < 0.5 ? -1 : 1;
+    const x = side * (10 + Math.pow(r(), 1.6) * 170);
+    const z = r() * CHUNK;
+    const h = 5 + r() * 7;
+    for (const ry of [0, Math.PI / 2]) {
+      const g = plane(h * 0.5, h, h * 0.5, h);
+      g.rotateY(ry);
+      g.translate(x, GROUND_Y + h / 2, z);
+      pines.push(g);
+    }
+  }
+  grp.add(new THREE.Mesh(mergeGeometries(pines), pineMat));
+  const poles = [];
+  for (let z = 0; z < CHUNK; z += 44) {
+    poles.push(box(0.22, 8, 0.22).translate(-7, GROUND_Y + 4, z));
+    poles.push(box(2.2, 0.16, 0.16).translate(-7, GROUND_Y + 7.4, z));
+  }
+  grp.add(new THREE.Mesh(mergeGeometries(poles), poleMat));
+  if (k % 2 === 0 || r() < 0.5) {
+    const side = r() < 0.5 ? -1 : 1;
+    const cx = side * (34 + r() * 60);
+    const cz = 40 + r() * 140;
+    const cabin = new THREE.Group();
+    const body = new THREE.Mesh(box(6, 3.2, 5, 2, 2), cabinMat);
+    body.position.y = GROUND_Y + 1.6;
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(4.6, 2.4, 4), roofMat);
+    roof.rotation.y = Math.PI / 4;
+    roof.position.y = GROUND_Y + 4.4;
+    cabin.add(body, roof);
+    for (const wz of [-1.2, 1.2]) {
+      const w = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.8), litMat);
+      w.position.set(-side * 3.01, GROUND_Y + 1.7, wz);
+      w.rotation.y = -side * Math.PI / 2;
+      cabin.add(w);
+    }
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: 0xff9a40, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
+    glow.position.set(-side * 3.6, GROUND_Y + 1.7, 0);
+    glow.scale.setScalar(9);
+    cabin.add(glow);
+    cabin.position.set(cx, 0, cz);
+    grp.add(cabin);
+  }
+  outside.add(grp);
+  chunks.push({ grp, base: k * CHUNK });
+}
+// The wires between the poles (straight; they run the whole way).
+{
+  const wires = new THREE.Mesh(mergeGeometries([-7.9, -6.1].map((x) => box(0.025, 0.025, 2400).translate(x, GROUND_Y + 7.5, 0))), new THREE.MeshBasicMaterial({ color: 0x1a1e26 }));
+  outside.add(wires);
+}
+
+// Snow streaking past: each flake a short line along its motion.
+const FLAKES = TOUCH ? 900 : 1800;
+const flakePos = new Float32Array(FLAKES * 6);
+const flake = new Float32Array(FLAKES * 4); // x, y, z, fall speed
+const snowGeo = new THREE.BufferGeometry();
+snowGeo.setAttribute("position", new THREE.BufferAttribute(flakePos, 3));
+const snowLines = new THREE.LineSegments(snowGeo, new THREE.LineBasicMaterial({ color: 0xb8c6e0 }));
+snowLines.frustumCulled = false;
+scene.add(snowLines);
+const insideTrain = (x, y) => Math.abs(x) < HW + 0.3 && y < H + 0.5;
+function placeFlake(i, z0, z1, zc) {
+  let x, y;
+  do {
+    x = (Math.random() - 0.5) * 90;
+    y = GROUND_Y + Math.random() * 24;
+  } while (insideTrain(x, y));
+  flake[i * 4] = x;
+  flake[i * 4 + 1] = y;
+  flake[i * 4 + 2] = zc + z0 + Math.random() * (z1 - z0);
+  flake[i * 4 + 3] = 1.5 + Math.random() * 2.5;
+}
+for (let i = 0; i < FLAKES; i++) placeFlake(i, -60, 60, 0);
+
+let windGust = 0;
+function updateWorld(dt, t, pz) {
+  scroll += SPEED * dt;
+  skyMat.uniforms.uTime.value = t;
+  skyGroup.position.copy(camera.position);
+  // The ground follows you and its texture runs backward.
+  ground.position.z = trackBed.position.z = rails.position.z = pz;
+  snowTex.offset.y = -((scroll + pz) / 8) % 1;
+  trackTex.offset.y = -((scroll + pz) / 4) % 1;
+  for (const m of mountMats) m.map.offset.x = ((scroll / 1200) % 1) * (m === mountMats[0] ? -1 : 1);
+  for (const c of chunks) {
+    const span = CHUNK * CHUNKS;
+    let z = (((c.base - scroll) % span) + span) % span;
+    c.grp.position.z = pz - span / 2 + z;
+  }
+  // Snow.
+  windGust = 0.5 + 0.5 * Math.sin(t * 0.21) * Math.sin(t * 0.13);
+  const vx = -2 - windGust * 3;
+  for (let i = 0; i < FLAKES; i++) {
+    const o = i * 4;
+    flake[o] += vx * dt;
+    flake[o + 1] -= flake[o + 3] * dt;
+    flake[o + 2] -= SPEED * dt;
+    if (flake[o + 2] < pz - 60 || flake[o + 1] < GROUND_Y || insideTrain(flake[o], flake[o + 1])) placeFlake(i, 40, 60, pz);
+    else if (flake[o + 2] > pz + 60) placeFlake(i, -60, -40, pz);
+    const p = i * 6;
+    flakePos[p] = flake[o];
+    flakePos[p + 1] = flake[o + 1];
+    flakePos[p + 2] = flake[o + 2];
+    flakePos[p + 3] = flake[o] - vx * 0.03;
+    flakePos[p + 4] = flake[o + 1] + flake[o + 3] * 0.03;
+    flakePos[p + 5] = flake[o + 2] + SPEED * 0.03;
+  }
+  snowGeo.attributes.position.needsUpdate = true;
+}
+
+// ---------- The train ----------
+// Seven cars from the tail to the engine, each a room: the bunks at the back,
+// freight, the galley, the greenhouse, the dining car, the captain's lounge,
+// and the engine. Between each pair, a short vestibule and two doors. A car's
+// front door stays locked until every guard in it is down.
+const cars = [];
+const doors = [];
+function addCol(c, x0, x1, a0, a1, h = H) {
+  const col = { x0, x1, z0: c.z0 + a0, z1: c.z0 + a1, h, on: true };
+  c.cols.push(col);
+  return col;
+}
+// Everything that might be in the way near z: the colliders of the car
+// you're in and its neighbours.
+function nearCols(z) {
+  const i = Math.floor(z / STRIDE);
+  const out = [];
+  for (let k = i - 1; k <= i + 1; k++) if (cars[k]) for (const col of cars[k].cols) if (col.on) out.push(col);
+  return out;
+}
+
+// Lamps: where the light comes from. A handful of real lights is shared out
+// to the nearest lamps (see the light pool below); every lamp also has a
+// glow and a bulb you can see.
+const glowMats = new Map();
+function glowSprite(color, scale, opacity = 0.55) {
+  const key = color + ":" + opacity;
+  if (!glowMats.has(key)) glowMats.set(key, new THREE.SpriteMaterial({ map: GLOW, color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const s = new THREE.Sprite(glowMats.get(key));
+  s.scale.setScalar(scale);
+  return s;
+}
+function lamp(c, x, y, a, color, int, dist = 10, o = {}) {
+  const L = { c, x, y, a, z: c.z0 + a, color: new THREE.Color(color), int, dist, flicker: o.flicker || 0, swing: o.swing || 0, phase: Math.random() * 10, pos: new THREE.Vector3(x, y, c.z0 + a) };
+  const holder = new THREE.Group();
+  holder.position.set(x, y, a);
+  if (o.glow !== 0) holder.add(glowSprite(color, o.glow ?? 1.6, o.glowOpacity ?? 0.55));
+  if (o.bulb !== false) holder.add(new THREE.Mesh(new THREE.SphereGeometry(o.bulbR ?? 0.07, 8, 6), new THREE.MeshBasicMaterial({ color: new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.5) })));
+  c.group.add(holder);
+  L.holder = holder;
+  c.lamps.push(L);
+  return L;
+}
+
+// ---------- The shell of a car ----------
+function makeCar(i, spec) {
+  const c = { i, z0: i * STRIDE, group: new THREE.Group(), cols: [], lamps: [], spawns: [], pickups: [], enemies: [], pools: [], cleared: false, entered: false, ...spec };
+  c.group.position.z = c.z0;
+  scene.add(c.group);
+  cars.push(c);
+  return c;
+}
+function shell(c) {
+  const { wall, low, lowH = 1.1, floor, ceil, win } = c;
+  const ft = c.floorTile ?? 2;
+  put(plane(2 * HW, CL, ft, ft), floor, { y: 0, z: CL / 2, rx: -Math.PI / 2 });
+  if (!c.glassRoof) put(plane(2 * HW, CL, c.ceilTile ?? 2, c.ceilTile ?? 2), ceil, { y: H, z: CL / 2, rx: Math.PI / 2 });
+  const wins = [];
+  for (let a = win.start; a + win.w / 2 <= CL - win.start + win.w / 2 + 0.01; a += win.every) wins.push(a);
+  c.wins = wins;
+  const cuts = [0, ...wins.flatMap((a) => [a - win.w / 2, a + win.w / 2]), CL];
+  for (const s of [-1, 1]) {
+    const ry = -s * Math.PI / 2;
+    const seg = (a0, a1, b0, b1, m, tw, th) => {
+      if (a1 - a0 < 0.01 || b1 - b0 < 0.01) return;
+      put(plane(a1 - a0, b1 - b0, tw, th, s > 0 ? a0 : CL - a1, b0), m, { x: s * HW, y: (b0 + b1) / 2, z: (a0 + a1) / 2, ry });
+    };
+    const piece = (a0, a1, y0, y1) => {
+      if (low) {
+        seg(a0, a1, y0, Math.min(y1, lowH), low, c.lowTW ?? 1.8, c.lowTH ?? lowH);
+        seg(a0, a1, Math.max(y0, lowH), y1, wall, c.wallTile ?? 2, c.wallTile ?? 2);
+      } else seg(a0, a1, y0, y1, wall, c.wallTile ?? 2, c.wallTile ?? 2);
+    };
+    for (let k = 0; k < cuts.length - 1; k++) {
+      if (k % 2 === 0) piece(cuts[k], cuts[k + 1], 0, H);
+      else {
+        piece(cuts[k], cuts[k + 1], 0, win.sill);
+        piece(cuts[k], cuts[k + 1], win.sill + win.h, H);
+      }
+    }
+    if (low && !c.noRail) put(box(0.08, 0.08, CL), M.dark, { x: s * (HW - 0.04), y: lowH, z: CL / 2 });
+    addCol(c, s > 0 ? HW : -HW - 0.4, s > 0 ? HW + 0.4 : -HW, -0.3, CL + 0.3);
+    const frame = c.frame ?? M.dark;
+    for (const a of wins) {
+      const y = win.sill + win.h / 2;
+      put(plane(win.w, win.h), glassMat, { x: s * (HW + 0.04), y, z: a, ry });
+      put(box(0.14, win.h + 0.16, 0.08), frame, { x: s * (HW - 0.03), y, z: a - win.w / 2 - 0.04 });
+      put(box(0.14, win.h + 0.16, 0.08), frame, { x: s * (HW - 0.03), y, z: a + win.w / 2 + 0.04 });
+      put(box(0.14, 0.08, win.w + 0.16), frame, { x: s * (HW - 0.03), y: win.sill + win.h + 0.04, z: a });
+      put(box(0.26, 0.06, win.w + 0.24), frame, { x: s * (HW - 0.1), y: win.sill - 0.03, z: a });
+      if (win.mullion) put(box(0.06, win.h, 0.06), frame, { x: s * (HW - 0.01), y, z: a });
+      if (c.boarded) for (const k of [0.15, 0.5, 0.86]) put(box(0.06, win.h * 0.2, win.w + 0.3, 1, 0.25), M.boards, { x: s * (HW - 0.06), y: win.sill + win.h * k, z: a, rx: (k - 0.5) * 0.12 });
+      if (c.curtains) for (const d of [-1, 1]) put(plane(0.5, win.h + 0.7, 0.5, 1), M.velvet, { x: s * (HW - 0.07), y: y + 0.1, z: a + d * (win.w / 2 + 0.2), ry });
+      // Moonlight through the right-hand windows lands on the floor.
+      if (s > 0 && !c.noPools) {
+        const xNear = HW - win.sill * 1.42;
+        const xFar = Math.max(-HW + 0.2, HW - (win.sill + win.h) * 1.42);
+        const pw = xNear - xFar;
+        if (pw > 0.2) {
+          const mat = new THREE.MeshBasicMaterial({ map: POOL, color: c.poolColor ?? 0x5a6c9c, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false });
+          const pool = new THREE.Mesh(new THREE.PlaneGeometry(pw, win.w * 1.05), mat);
+          pool.rotation.x = -Math.PI / 2;
+          pool.position.set((xNear + xFar) / 2, 0.012, a - (win.sill + win.h / 2) * 0.5);
+          c.group.add(pool);
+          c.pools.push({ mat, a: pool.position.z, base: c.poolOpacity ?? 0.4 });
+        }
+      }
+    }
+  }
+  // The end walls, thick enough to hold the sliding doors.
+  const endMat = c.endWall ?? wall;
+  for (const front of [false, true]) {
+    if (front && c.noFrontDoor) continue;
+    const a = front ? CL + 0.15 : -0.15;
+    for (const s of [-1, 1]) {
+      put(box(HW - DW, H, 0.3, 2, 2), endMat, { x: s * (HW + DW) / 2, y: H / 2, z: a });
+      addCol(c, s > 0 ? DW : -HW, s > 0 ? HW : -DW, a - 0.15, a + 0.15);
+      put(box(0.14, DH + 0.1, 0.42), M.iron, { x: s * (DW + 0.07), y: (DH + 0.1) / 2, z: a });
+    }
+    put(box(2 * DW, H - DH, 0.3, 2, 2), endMat, { x: 0, y: (H + DH) / 2, z: a });
+    put(box(2 * DW + 0.28, 0.12, 0.42), M.iron, { x: 0, y: DH + 0.06, z: a });
+  }
+}
+
+function makeDoor(c, front) {
+  const a = front ? CL + 0.15 : -0.15;
+  const lampMat = new THREE.MeshBasicMaterial({ color: 0xff3020 });
+  const leaves = [-1, 1].map((s) => {
+    const m = new THREE.Mesh(box(DW, DH, 0.08, DW, DH), M.door);
+    m.position.set(s * DW / 2, DH / 2, a);
+    c.group.add(m);
+    return m;
+  });
+  for (const d of [-1, 1]) {
+    const l = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.1, 0.04), lampMat);
+    l.position.set(0, DH + 0.3, a + d * 0.17);
+    c.group.add(l);
+  }
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: 0xff3020, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false }));
+  glow.position.set(0, DH + 0.3, a + (front ? -0.3 : 0.3));
+  glow.scale.setScalar(0.9);
+  c.group.add(glow);
+  const door = { c, front, z: c.z0 + a, leaves, open: 0, target: 0, locked: true, lampMat, glow, col: addCol(c, -DW, DW, a - 0.15, a + 0.15) };
+  doors.push(door);
+  return door;
+}
+function setDoorLamp(d, green) {
+  const col = green ? 0x60ff8a : 0xff3020;
+  d.lampMat.color.set(col);
+  d.glow.material.color.set(col);
+}
+
+// The vestibule between this car and the next: rubber bellows, a plated
+// floor, cold light leaking through the folds, and the wind loud.
+function vestibule(c) {
+  const a0 = CL;
+  const a1 = STRIDE;
+  const am = (a0 + a1) / 2;
+  put(plane(2 * VW, VL, 1, 1), M.plate, { y: 0, z: am, rx: -Math.PI / 2 });
+  put(plane(2 * VW, VL, 0.5, 1), M.bellows, { y: VH, z: am, rx: Math.PI / 2 });
+  for (const s of [-1, 1]) {
+    put(plane(VL, VH, 0.5, VH), M.bellows, { x: s * VW, y: VH / 2, z: am, ry: -s * Math.PI / 2 });
+    addCol(c, s > 0 ? VW : -VW - 0.4, s > 0 ? VW + 0.4 : -VW, a0, a1);
+  }
+  const leak = new THREE.MeshBasicMaterial({ color: 0x5f7cb0 });
+  for (const s of [-1, 1]) for (const a of [a0 + 0.9, am, a1 - 0.9]) put(plane(0.035, VH - 0.3), leak, { x: s * (VW - 0.01), y: VH / 2, z: a, ry: -s * Math.PI / 2 });
+  lamp(c, 0, VH - 0.12, am, 0xff4a2a, 2.2, 5, { glow: 0.9, bulbR: 0.06 });
+}
+
+// ---------- Props ----------
+function solid(c, w, h, d, mat, x, a, { y = 0, tw = 1, th = 1, col = true, ry = 0 } = {}) {
+  put(box(w, h, d, tw, th), mat, { x, y: y + h / 2, z: a, ry });
+  if (col) addCol(c, x - w / 2, x + w / 2, a - d / 2, a + d / 2, y + h);
+}
+function crate(c, x, a, w, d, h, mat = M.crate) {
+  if (h > 1.5) {
+    put(box(w, h / 2, d, w, h / 2), mat, { x, y: h / 4, z: a });
+    put(box(w * 0.9, h / 2, d * 0.9, w * 0.9, h / 2), mat, { x: x + 0.05, y: h * 0.75, z: a, ry: 0.06 });
+  } else put(box(w, h, d, w, h), mat, { x, y: h / 2, z: a });
+  addCol(c, x - w / 2, x + w / 2, a - d / 2, a + d / 2, h);
+}
+function barrel(c, x, a, mat = M.rust) {
+  put(new THREE.CylinderGeometry(0.34, 0.34, 0.95, 12), mat, { x, y: 0.475, z: a });
+  put(new THREE.CylinderGeometry(0.355, 0.355, 0.05, 12), M.dark, { x, y: 0.3, z: a });
+  put(new THREE.CylinderGeometry(0.355, 0.355, 0.05, 12), M.dark, { x, y: 0.7, z: a });
+  addCol(c, x - 0.34, x + 0.34, a - 0.34, a + 0.34, 0.95);
+}
+function fireBarrel(c, x, a) {
+  barrel(c, x, a);
+  const fire = new THREE.Group();
+  for (const [col, sx, sy, y] of [[0xff6a1a, 0.9, 1.1, 0.25], [0xffb040, 0.5, 0.8, 0.15], [0xfff0c0, 0.25, 0.4, 0.05]]) {
+    const s = glowSprite(col, 1, 0.9);
+    s.scale.set(sx, sy, 1);
+    s.position.y = y;
+    fire.add(s);
+  }
+  fire.position.set(x, 1.0, a);
+  c.group.add(fire);
+  c.fires = (c.fires || []).concat(fire);
+  lamp(c, x, 1.35, a, 0xff8a3a, 9, 10, { flicker: 1, glow: 2.4, bulb: false });
+}
+function bunk(c, s, a0, len) {
+  const x = s * (HW - 0.52);
+  for (const [dx, da] of [[-0.46, 0.05], [0.46, 0.05], [-0.46, len - 0.05], [0.46, len - 0.05]]) put(box(0.07, 2.6, 0.07), M.pipe, { x: x + dx, y: 1.3, z: a0 + da });
+  const blankets = [M.blanketA, M.blanketB, M.blanketC];
+  [0.35, 1.25, 2.15].forEach((y, k) => {
+    put(box(1.0, 0.07, len), M.pipe, { x, y, z: a0 + len / 2 });
+    put(box(0.9, 0.16, len - 0.2, 1, 1), blankets[(k + Math.round(a0)) % 3], { x, y: y + 0.11, z: a0 + len / 2 });
+  });
+  addCol(c, x - 0.52, x + 0.52, a0, a0 + len, 2.6);
+}
+function laundry(c, a, y = 2.9) {
+  put(box(2 * HW - 2.2, 0.02, 0.02), M.dark, { y, z: a });
+  const r = rng(Math.round(a * 13));
+  for (let x = -HW + 1.6; x < HW - 1.6; x += 0.6 + r() * 0.8) {
+    const h = 0.3 + r() * 0.35;
+    put(plane(0.3 + r() * 0.25, h, 1, 1), r() < 0.5 ? M.rag : M.blanketB, { x, y: y - h / 2, z: a + (r() - 0.5) * 0.05, ry: (r() - 0.5) * 0.3 });
+  }
+}
+function pipes(c, xs, y = H - 0.25) {
+  for (const x of xs) put(new THREE.CylinderGeometry(0.09, 0.09, CL, 8), M.pipe, { x, y, z: CL / 2, rx: Math.PI / 2 });
+}
+function counter(c, x0, x1, a0, a1, h = 0.95, top = M.counter, body = M.steel) {
+  const w = x1 - x0;
+  const d = a1 - a0;
+  put(box(w, h - 0.06, d, 1, 1), body, { x: (x0 + x1) / 2, y: (h - 0.06) / 2, z: (a0 + a1) / 2 });
+  put(box(w + 0.06, 0.06, d + 0.06, 1, 1), top, { x: (x0 + x1) / 2, y: h - 0.03, z: (a0 + a1) / 2 });
+  addCol(c, x0, x1, a0, a1, h);
+}
+const plantMat = new THREE.MeshLambertMaterial({ map: T.bush, emissiveMap: T.bush, emissive: 0x404040, alphaTest: 0.5, side: THREE.DoubleSide });
+const treeMat = new THREE.MeshLambertMaterial({ map: T.tree, emissiveMap: T.tree, emissive: 0x404040, alphaTest: 0.5, side: THREE.DoubleSide });
+function plant(x, y, a, s, mat = plantMat) {
+  const hgt = mat === treeMat ? s * 1.5 : s;
+  for (const ry of [0.4, 0.4 + Math.PI / 2]) put(plane(s, hgt, s, hgt), mat, { x, y: y + hgt / 2, z: a, ry });
+}
+function planter(c, x, a0, a1, w = 1.2) {
+  put(box(w, 0.62, a1 - a0, 1, 0.62), M.slats, { x, y: 0.31, z: (a0 + a1) / 2 });
+  put(plane(w - 0.1, a1 - a0 - 0.1, 1, 1), M.soil, { x, y: 0.63, z: (a0 + a1) / 2, rx: -Math.PI / 2 });
+  addCol(c, x - w / 2, x + w / 2, a0, a1, 0.62);
+  const r = rng(Math.round(a0 * 7 + x * 3));
+  for (let a = a0 + 0.5; a < a1 - 0.3; a += 0.55 + r() * 0.3) plant(x + (r() - 0.5) * 0.5, 0.6, a, 0.8 + r() * 0.7);
+}
+function table(c, x, a, lampOn = true) {
+  put(box(1.2, 0.05, 1.2, 1, 1), M.cloth, { x, y: 0.77, z: a });
+  put(box(1.24, 0.42, 1.24, 1, 1), M.cloth, { x, y: 0.55, z: a });
+  for (const d of [-1, 1]) {
+    put(box(0.46, 0.06, 0.46), M.leather, { x: x + d * 0.85, y: 0.46, z: a });
+    put(box(0.06, 0.6, 0.46), M.wood, { x: x + d * 1.08, y: 0.75, z: a });
+  }
+  addCol(c, x - 0.62, x + 0.62, a - 0.62, a + 0.62, 0.8);
+  if (lampOn) {
+    put(new THREE.CylinderGeometry(0.02, 0.02, 0.28, 6), M.brass, { x, y: 0.94, z: a });
+    const shadeM = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.13, 0.12, 10, 1, true), new THREE.MeshBasicMaterial({ color: 0xffb066, side: THREE.DoubleSide }));
+    shadeM.position.set(x, 1.1, a);
+    c.group.add(shadeM);
+    const g = glowSprite(0xff9a40, 1.1, 0.5);
+    g.position.set(x, 1.08, a);
+    c.group.add(g);
+  }
+}
+function armchair(c, x, a, ry = 0) {
+  const g = new THREE.Group();
+  const mk = (w, h, d, px_, py, pz) => { const m = new THREE.Mesh(box(w, h, d, 0.5, 0.5), M.leather); m.position.set(px_, py, pz); g.add(m); };
+  mk(0.9, 0.42, 0.85, 0, 0.21, 0);
+  mk(0.9, 0.7, 0.18, 0, 0.7, -0.36);
+  mk(0.16, 0.3, 0.85, -0.45, 0.55, 0);
+  mk(0.16, 0.3, 0.85, 0.45, 0.55, 0);
+  g.position.set(x, 0, a);
+  g.rotation.y = ry;
+  g.updateMatrixWorld(true);
+  g.traverse((m) => { if (m.isMesh) put(m.geometry.clone().applyMatrix4(m.matrixWorld), m.material); });
+  addCol(c, x - 0.5, x + 0.5, a - 0.5, a + 0.5, 1.0);
+}
+function ceilingLight(c, x, a, color, int, dist = 11, o = {}) {
+  put(box(0.9, 0.05, 0.25), M.iron, { x, y: H - 0.03, z: a });
+  return lamp(c, x, H - 0.12, a, color, int, dist, { glow: 2.0, bulbR: 0.09, ...o });
+}
+function hangingLamp(c, x, a, color, int, dist = 11, drop = 0.9) {
+  put(box(0.03, drop, 0.03), M.dark, { x, y: H - drop / 2, z: a });
+  return lamp(c, x, H - drop - 0.1, a, color, int, dist, { swing: drop, glow: 2.0, bulbR: 0.1 });
+}
+function chandelier(c, a) {
+  put(box(0.03, 0.6, 0.03), M.brass, { y: H - 0.3, z: a });
+  put(new THREE.TorusGeometry(0.45, 0.03, 6, 16), M.brass, { y: H - 0.75, z: a, rx: Math.PI / 2 });
+  for (let k = 0; k < 6; k++) {
+    const t = (k / 6) * Math.PI * 2;
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 4), new THREE.MeshBasicMaterial({ color: 0xffe2b0 }));
+    m.position.set(Math.cos(t) * 0.45, H - 0.68, a + Math.sin(t) * 0.45);
+    c.group.add(m);
+  }
+  return lamp(c, 0, H - 0.8, a, 0xffc890, 18, 15, { glow: 3.0, bulb: false });
+}
+function health(c, x, a, y = 0) { c.pickups.push({ kind: "health", x, a, y }); }
+
+// ---------- The seven cars ----------
+const SPECS = [
+  {
+    title: "The Tail", sub: "Where they kept you.",
+    wall: M.rust, floor: M.planks, ceil: M.rust, boarded: true, noPools: false, poolOpacity: 0.32,
+    win: { w: 1.0, h: 0.55, sill: 2.75, every: 3.6, start: 3.4 },
+    hemi: [0x5a4030, 0x140c08, 0.5], fog: 0x0e0b0a,
+    build(c) {
+      for (const s of [-1, 1]) for (const a0 of [1.6, 5.6, 9.6, 13.6]) bunk(c, s, a0, 3.6);
+      pipes(c, [-2.6, -2.35, 2.5]);
+      fireBarrel(c, -1.7, 7.4);
+      fireBarrel(c, 1.9, 14.2);
+      laundry(c, 4.6);
+      laundry(c, 10.8, 3.0);
+      laundry(c, 17.4);
+      solid(c, 1.2, 0.72, 0.8, M.planks, 0.9, 3.6, { tw: 1, th: 1 });
+      for (const [x, a] of [[0.2, 3.1], [1.6, 4.1]]) solid(c, 0.32, 0.45, 0.32, M.planks, x, a, { col: false });
+      crate(c, -0.6, 11.2, 0.9, 0.9, 0.9);
+      // The guards' barricade near the front.
+      crate(c, -2.3, 22, 2.0, 0.8, 1.15, M.ammo);
+      crate(c, 2.2, 22.4, 2.2, 0.8, 1.25, M.ammo);
+      crate(c, -3.9, 24.8, 1.0, 1.4, 2.2, M.ammo);
+      crate(c, 3.8, 25.6, 1.1, 1.1, 1.0, M.ammo);
+      barrel(c, 0.2, 19.6);
+      lamp(c, 0, H - 0.4, 10.5, 0xffc070, 3.5, 9, { glow: 1.3 });
+      lamp(c, 0, H - 0.4, 23.5, 0xffe0b0, 6, 11, { glow: 1.6 });
+      health(c, -3.2, 18.6);
+      c.spawns.push(["brute", -1.2, 20.4], ["brute", 2.4, 20.8], ["gunner", -2.4, 24.6], ["gunner", 2.0, 25.4]);
+    },
+  },
+  {
+    title: "Freight", sub: "Everything they took from you.",
+    wall: M.steel, floor: M.grate, ceil: M.steel, floorTile: 1.5,
+    win: { w: 1.3, h: 0.45, sill: 3.5, every: 4, start: 3 },
+    hemi: [0x34405a, 0x0a0b0e, 0.55], fog: 0x0a0e16,
+    build(c) {
+      pipes(c, [-3.6, 3.6]);
+      for (const [x, a, w, d, h, m] of [
+        [-3.2, 3.2, 1.8, 1.6, 2.4], [2.8, 4.6, 2.2, 1.6, 1.3], [-0.6, 8.2, 1.4, 1.4, 1.4], [3.2, 10.2, 2.0, 2.4, 2.6],
+        [-3.0, 12.4, 2.4, 2.0, 1.2, M.ammo], [0.9, 14.8, 1.6, 1.6, 2.2], [-2.0, 18.2, 1.4, 1.4, 1.4], [3.0, 19.4, 2.0, 1.6, 1.2, M.ammo],
+        [-3.3, 22.4, 1.8, 2.0, 2.6], [1.4, 23.8, 2.0, 1.4, 1.3], [-3.6, 7.0, 1.2, 1.2, 1.0],
+      ]) crate(c, x, a, w, d, h, m);
+      barrel(c, 1.6, 2.0, M.steel); barrel(c, 2.3, 2.3, M.steel); barrel(c, -1.2, 26.2, M.steel);
+      for (const a of [4, 11, 18, 25]) hangingLamp(c, 0, a, 0xffd8a0, 7.5, 11);
+      health(c, -3.9, 15.2);
+      c.spawns.push(["brute", -1.0, 13.0], ["gunner", 3.0, 16.4], ["brute", -2.6, 20.6], ["brute", 2.0, 21.6], ["gunner", -3.0, 25.8], ["gunner", 1.4, 26.4]);
+    },
+  },
+  {
+    title: "The Galley", sub: "Real food. You can smell it.",
+    wall: M.cream, low: M.tile, lowH: 1.6, lowTW: 1, lowTH: 1, floor: M.checker, ceil: M.counter, floorTile: 2,
+    win: { w: 1.4, h: 1.0, sill: 1.6, every: 3.6, start: 2.6 },
+    hemi: [0x50586a, 0x14100c, 0.6], fog: 0x0e1016,
+    build(c) {
+      for (const s of [-1, 1]) {
+        counter(c, s > 0 ? HW - 0.85 : -HW, s > 0 ? HW : -HW + 0.85, 1.6, 11.6);
+        counter(c, s > 0 ? HW - 0.85 : -HW, s > 0 ? HW : -HW + 0.85, 15.8, 25.8);
+        solid(c, 1.0, 2.4, 2.0, M.steel, s * (HW - 0.5), 13.7, { tw: 1, th: 1 });
+        for (const a of [3.5, 7.5, 19.5, 23.5]) {
+          const plateM = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.55), new THREE.MeshBasicMaterial({ color: 0xff5a1a }));
+          plateM.rotation.x = -Math.PI / 2;
+          plateM.position.set(s * (HW - 0.45), 0.96, a);
+          c.group.add(plateM);
+          put(new THREE.CylinderGeometry(0.2, 0.17, 0.26, 10), M.iron, { x: s * (HW - 0.45), y: 1.09, z: a });
+          c.steam = (c.steam || []).concat({ x: s * (HW - 0.45), a });
+        }
+      }
+      counter(c, -1.0, 1.0, 7.0, 11.0);
+      counter(c, -1.0, 1.0, 17.0, 21.0);
+      for (const a of [9, 19]) {
+        put(box(1.6, 0.04, 3.6), M.iron, { y: 3.2, z: a });
+        for (const d of [-1.4, -0.5, 0.4, 1.3]) put(new THREE.CylinderGeometry(0.16, 0.13, 0.22, 10), M.iron, { x: (d % 1) * 0.6, y: 2.95, z: a + d });
+      }
+      for (const a of [5, 11, 17, 23]) ceilingLight(c, 0, a, 0xe8f0ff, 9, 13);
+      lamp(c, -HW + 0.5, 1.3, 5.5, 0xff6a20, 2.5, 4, { glow: 0.8, bulb: false, flicker: 0.3 });
+      lamp(c, HW - 0.5, 1.3, 21.5, 0xff6a20, 2.5, 4, { glow: 0.8, bulb: false, flicker: 0.3 });
+      c.pickups.push({ kind: "repeater", x: 0, a: 9, y: 0.96 });
+      health(c, 2.6, 13.6);
+      c.spawns.push(["brute", 0, 14.2], ["gunner", -3.0, 15.0], ["gunner", 3.2, 18.2], ["brute", -2.0, 20.2], ["brute", 2.4, 22.4], ["gunner", -1.8, 23.6], ["gunner", 2.0, 25.6]);
+    },
+  },
+  {
+    title: "The Greenhouse", sub: "Something still grows at the end of the world.",
+    wall: M.cream, floor: M.slats, ceil: M.cream, glassRoof: true, poolColor: 0x5a7aa0, poolOpacity: 0.45,
+    win: { w: 2.3, h: 2.7, sill: 0.75, every: 2.8, start: 1.6, mullion: true }, frame: M.cream,
+    hemi: [0x40605a, 0x0c140e, 0.75], fog: 0x0a1414,
+    build(c) {
+      // The glass roof, on ribs.
+      put(plane(2 * HW, CL, 1, 1), glassMat, { y: H + 0.02, z: CL / 2, rx: Math.PI / 2 });
+      for (let a = 0; a <= CL; a += 2.8) put(box(2 * HW, 0.12, 0.1), M.cream, { y: H - 0.06, z: a });
+      for (const x of [-HW + 0.05, -1.5, 1.5, HW - 0.05]) put(box(0.1, 0.12, CL), M.cream, { x, y: H - 0.06, z: CL / 2 });
+      for (const s of [-1, 1]) { planter(c, s * 2.4, 3, 12); planter(c, s * 2.4, 16, 25); }
+      for (const [x, a] of [[0, 14], [-3.9, 14], [3.9, 14]]) {
+        put(new THREE.CylinderGeometry(0.42, 0.34, 0.6, 10), M.planks, { x, y: 0.3, z: a });
+        addCol(c, x - 0.42, x + 0.42, a - 0.42, a + 0.42, 0.6);
+        plant(x, 0.55, a, 1.5, treeMat);
+      }
+      for (const s of [-1, 1]) for (const [a, col] of [[7.5, 0xb87cff], [20.5, 0xffb070]]) {
+        put(box(0.16, 0.06, 6), M.iron, { x: s * 2.4, y: 3.3, z: a });
+        const strip = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 5.8), new THREE.MeshBasicMaterial({ color: col }));
+        strip.rotation.x = Math.PI / 2;
+        strip.position.set(s * 2.4, 3.26, a);
+        c.group.add(strip);
+        lamp(c, s * 2.4, 3.1, a, col, col === 0xffb070 ? 6 : 4, 9, { glow: 2.4, bulb: false });
+      }
+      health(c, -3.9, 8);
+      c.spawns.push(["gunner", -2.4, 13.6], ["gunner", 2.6, 14.6], ["brute", 0, 18], ["brute", 1.5, 21], ["brute", -1.0, 23], ["gunner", -3.9, 24], ["gunner", 3.9, 25.2]);
+    },
+  },
+  {
+    title: "Dining", sub: "White linen. Silver. They never knew you were back there.",
+    wall: M.damask, low: M.wood, lowH: 1.1, floor: M.carpet, ceil: M.cream, curtains: true, frame: M.wood,
+    win: { w: 1.8, h: 1.5, sill: 1.05, every: 3.5, start: 2.4 },
+    hemi: [0x7a5a44, 0x24140c, 0.7], fog: 0x120c0a,
+    build(c) {
+      for (const s of [-1, 1]) for (const a of [4, 8, 12, 16, 20, 24]) table(c, s * 2.6, a);
+      solid(c, 0.8, 1.0, 1.2, M.wood, 0.4, 14.2, { tw: 1, th: 1 });
+      for (const a of [7, 14, 21]) chandelier(c, a);
+      health(c, -3.9, 14);
+      health(c, 3.9, 6);
+      c.spawns.push(["gunner", -2.6, 10.2], ["brute", -1.0, 12.2], ["gunner", 2.6, 14.6], ["brute", 1.0, 17.0], ["gunner", -2.6, 18.4], ["brute", -0.5, 22.0], ["gunner", 2.6, 22.6], ["brute", 3.7, 25.4], ["gunner", 0, 26.2]);
+    },
+  },
+  {
+    title: "The Lounge", sub: "The captain keeps his fire lit.",
+    wall: M.greenwall, low: M.wood, lowH: 1.1, floor: M.carpetBlue, ceil: M.cream, curtains: true, frame: M.wood,
+    win: { w: 2.4, h: 1.7, sill: 0.95, every: 4.4, start: 3.2 },
+    hemi: [0x4a5a50, 0x100c0a, 0.6], fog: 0x0c100e,
+    build(c) {
+      // Shelves of books between the windows on the left.
+      for (const a of [5.4, 9.8, 14.2, 18.6, 23.0]) put(plane(1.6, 2.6, 1, 1), M.books, { x: -HW + 0.06, y: 1.9, z: a, ry: Math.PI / 2 });
+      // The grand piano.
+      solid(c, 1.5, 0.35, 2.0, M.black, -2.4, 8.8, { y: 0.7 });
+      put(box(1.5, 0.04, 2.0), M.black, { x: -2.6, y: 1.4, z: 8.8, rz: 0.6 });
+      for (const [dx, da] of [[-0.6, -0.8], [0.6, -0.8], [0, 0.85]]) put(box(0.08, 0.7, 0.08), M.black, { x: -2.4 + dx, y: 0.35, z: 8.8 + da });
+      put(box(0.6, 0.45, 0.35), M.leather, { x: -1.3, y: 0.22, z: 8.0 });
+      // The bar, and bottles behind it.
+      counter(c, HW - 1.1, HW - 0.5, 14.6, 22.2, 1.12, M.brass, M.wood);
+      const r = rng(5);
+      for (let a = 14.8; a < 22; a += 0.18) put(new THREE.CylinderGeometry(0.035, 0.04, 0.3, 6), r() < 0.5 ? M.blanketB : M.blanketC, { x: HW - 0.2, y: 1.65 + ((r() * 2) | 0) * 0.5, z: a });
+      put(box(0.3, 0.04, 7.6), M.wood, { x: HW - 0.18, y: 1.48, z: 18.4 });
+      put(box(0.3, 0.04, 7.6), M.wood, { x: HW - 0.18, y: 1.98, z: 18.4 });
+      // Armchairs round low tables.
+      for (const [x, a, ry] of [[1.6, 5.4, Math.PI * 0.9], [2.8, 7.0, -Math.PI * 0.6], [-2.8, 16.4, Math.PI * 0.5], [-2.8, 19.0, Math.PI * 0.5], [1.2, 24.0, Math.PI]]) armchair(c, x, a, ry);
+      solid(c, 0.8, 0.45, 0.8, M.wood, 2.4, 6.0);
+      solid(c, 0.8, 0.45, 1.2, M.wood, -1.8, 17.7);
+      // A fire in a real fireplace, on the right.
+      solid(c, 0.6, 1.5, 2.2, M.tile, HW - 0.3, 10.6, { tw: 0.5, th: 0.5 });
+      const hearth = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.8), new THREE.MeshBasicMaterial({ color: 0xff7a24 }));
+      hearth.position.set(HW - 0.61, 0.5, 10.6);
+      hearth.rotation.y = -Math.PI / 2;
+      c.group.add(hearth);
+      c.fires = [hearth];
+      lamp(c, HW - 1.0, 0.7, 10.6, 0xff8a3a, 10, 10, { flicker: 1, glow: 2.6, bulb: false });
+      lamp(c, -HW + 0.6, 1.7, 22.5, 0xffc080, 5, 8, { glow: 1.6 });
+      chandelier(c, 14);
+      ceilingLight(c, 0, 24, 0xffd6a0, 6, 10);
+      health(c, -3.8, 12);
+      health(c, 3.0, 2.4);
+      c.spawns.push(["brute", -1.5, 18.6], ["captain", 0, 22.4], ["gunner", 3.6, 24.4], ["gunner", -3.4, 25.2]);
+    },
+  },
+  {
+    title: "The Engine", sub: "It never stops.",
+    wall: M.steel, floor: M.plate, ceil: M.steel, noFrontDoor: true, floorTile: 1,
+    win: { w: 1.3, h: 0.45, sill: 3.5, every: 4, start: 3 },
+    hemi: [0x8a6a40, 0x2a1a0c, 1.0], fog: 0x140e08,
+    build(c) {
+      // The great engine down the middle, glowing at the seams.
+      put(new THREE.CylinderGeometry(1.35, 1.35, 13, 20), M.iron, { y: 1.55, z: 15, rx: Math.PI / 2 });
+      addCol(c, -1.4, 1.4, 8.5, 21.5, 2.9);
+      for (let a = 9.5; a < 21; a += 1.8) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(1.37, 0.06, 6, 24), new THREE.MeshBasicMaterial({ color: 0xffa040 }));
+        ring.position.set(0, 1.55, a);
+        c.group.add(ring);
+      }
+      for (const s of [-1, 1]) {
+        put(new THREE.CylinderGeometry(0.15, 0.15, CL - 4, 8), M.pipe, { x: s * 3.4, y: 3.6, z: CL / 2, rx: Math.PI / 2 });
+        put(box(0.05, 1.0, 13), M.brass, { x: s * 2.0, y: 0.5, z: 15 });
+        addCol(c, s > 0 ? 1.95 : -2.05, s > 0 ? 2.05 : -1.95, 8.5, 21.5, 1.0);
+      }
+      for (const a of [5, 15, 24]) lamp(c, 0, 3.9, a, 0xffa040, 16, 14, { glow: 3, bulb: false, flicker: 0.15 });
+      // The firebox door at the back end of the engine, glowing through its grille.
+      const fireDoor = new THREE.Mesh(new THREE.CircleGeometry(0.9, 20), new THREE.MeshBasicMaterial({ color: 0xff7a24 }));
+      fireDoor.position.set(0, 1.55, 8.44);
+      fireDoor.rotation.y = Math.PI;
+      c.group.add(fireDoor);
+      c.fires = [fireDoor];
+      for (let k = -3; k <= 3; k++) put(box(0.07, 1.8 * Math.sqrt(1 - (k / 3.6) ** 2), 0.05), M.black, { x: k * 0.24, y: 1.55, z: 8.4 });
+      lamp(c, 0, 1.55, 7.6, 0xff7a30, 10, 9, { glow: 3.4, bulb: false, flicker: 0.6 });
+      // The front: a wide window onto the tracks ahead.
+      const fz = CL + 0.15;
+      for (const s of [-1, 1]) put(box(HW - 1.9, H, 0.3, 2, 2), M.steel, { x: s * (HW + 1.9) / 2, y: H / 2, z: fz });
+      put(box(3.8, 1.2, 0.3, 2, 2), M.steel, { y: 0.6, z: fz });
+      put(box(3.8, H - 3.0, 0.3, 2, 2), M.steel, { y: (H + 3.0) / 2, z: fz });
+      put(plane(3.8, 1.8), glassMat, { y: 2.1, z: fz + 0.1, ry: Math.PI });
+      addCol(c, -HW, HW, CL, CL + 0.3);
+      put(box(3.0, 1.0, 0.8, 1, 1), M.iron, { y: 0.5, z: CL - 0.8 });
+      addCol(c, -1.5, 1.5, CL - 1.2, CL, 1.0);
+      for (let k = 0; k < 7; k++) {
+        const b = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.02), new THREE.MeshBasicMaterial({ color: [0x60ff8a, 0xffb040, 0xff4030][k % 3] }));
+        b.position.set(-1.2 + k * 0.4, 1.02, CL - 1.21);
+        c.group.add(b);
+      }
+    },
+  },
+];
+
+function buildTrain() {
+  SPECS.forEach((spec, i) => {
+    const c = makeCar(i, spec);
+    shell(c);
+    spec.build(c);
+    if (i < SPECS.length - 1) vestibule(c);
+    flush(c.group);
+    c.back = makeDoor(c, false); // the tail's stays shut for good
+    c.frontDoor = i < SPECS.length - 1 ? makeDoor(c, true) : null;
+  });
+  // The very back of the train stays shut.
+  cars[0].sealed = true;
+}
+buildTrain();
+
+// ---------- The light pool ----------
+// Eight real lights, handed out to the lamps nearest you; everything else
+// glows but casts nothing. (A fixed number, so nothing recompiles.)
+const POOL_N = 8;
+const lightPool = Array.from({ length: POOL_N }, () => {
+  const l = new THREE.PointLight(0xffffff, 0, 10, 1.25);
+  scene.add(l);
+  return { l, lamp: null };
+});
+const hemi = new THREE.HemisphereLight(0x5a4030, 0x140c08, 0.5);
+scene.add(hemi);
+const moonLight = new THREE.DirectionalLight(0x8ea4dc, 0.28);
+moonLight.position.copy(MOON_DIR).multiplyScalar(50);
+scene.add(moonLight);
+const hemiSky = new THREE.Color();
+const hemiGround = new THREE.Color();
+const fogCol = new THREE.Color();
+let lightTimer = 0;
+function updateLights(dt, t, pz, visible) {
+  lightTimer -= dt;
+  if (lightTimer <= 0) {
+    lightTimer = 0.2;
+    const cand = [];
+    for (const c of visible) for (const L of c.lamps) cand.push(L);
+    cand.sort((a, b) => Math.abs(a.z - pz) - Math.abs(b.z - pz));
+    lightPool.forEach((p, k) => (p.lamp = cand[k] || null));
+  }
+  for (const L of visible.flatMap((c) => c.lamps)) {
+    if (L.swing) {
+      const sw = Math.sin(t * 1.3 + L.phase) * 0.12 + trainSway * 0.08;
+      L.holder.position.x = L.x + Math.sin(sw) * L.swing;
+      L.holder.position.y = L.y + (1 - Math.cos(sw)) * L.swing;
+    }
+    L.pos.set(L.holder.position.x, L.holder.position.y, L.z);
+    L.k = L.flicker ? 1 - L.flicker * (0.25 * Math.sin(t * 13 + L.phase) * Math.sin(t * 7.3) + 0.15 * Math.random()) : 1;
+  }
+  for (const { l, lamp: L } of lightPool) {
+    if (!L) { l.intensity = 0; continue; }
+    l.position.copy(L.pos);
+    l.color.copy(L.color);
+    l.distance = L.dist;
+    l.intensity = L.int * L.k;
+  }
+}
+
+// ---------- The guards ----------
+// Flat pixel sprites that always face you, the way the old shooters did it,
+// but lit by the car's lamps, with lenses that glow in the dark. Three
+// kinds: brutes with shock batons who close in, riflemen who keep their
+// distance and shoot, and the captain in white at the front.
+const TYPES = {
+  brute: { hp: 80, speed: 3.4, r: 0.36, h: 1.95, scale: 1.04, melee: true, dmg: 15, reach: 1.5, windup: 0.4, cool: [0.8, 1.2], sight: 26 },
+  gunner: { hp: 55, speed: 2.5, r: 0.34, h: 1.9, scale: 1, dmg: 8, windup: 0.62, cool: [1.3, 2.4], sight: 30, keep: [6, 14] },
+  captain: { hp: 700, speed: 2.9, r: 0.46, h: 2.35, scale: 1.25, dmg: 7, windup: 0.5, cool: [1.1, 1.7], burst: 3, sight: 34, keep: [5, 11], boss: true },
+};
+const PAL = {
+  gunner: { coat: "#232a38", dark: "#141923", trim: "#8a2222", trou: "#171a22", boot: "#0b0c0f", helm: "#303744", mask: "#0e1014", lens: "#ff3b2f", metal: "#626975", wood: "#5a3a22", glove: "#2e2722" },
+  brute: { coat: "#3a332c", dark: "#231f1a", trim: "#8a6a2a", trou: "#1e1b18", boot: "#0b0c0f", helm: "#45403a", mask: "#141210", lens: "#ffae2e", metal: "#6a6a6a", wood: "#4a3020", glove: "#2a2420" },
+  captain: { coat: "#d8d3c6", dark: "#9e988a", trim: "#d0a648", trou: "#23262d", boot: "#101114", helm: "#ebe6d9", mask: "#c49b80", lens: "#ff3b2f", metal: "#8a8f99", wood: "#6a4a2a", glove: "#e8e4da" },
+};
+const FW = 32;
+const FH = 48;
+const NF = 8; // idle, walk, walk, aim/raise, fire/strike, hurt, falling, down
+function drawGuard(g, e, ox, P, kind, f) {
+  const R = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(ox + x, y, w, h); };
+  const E = (x, y, w, h, c) => { R(x, y, w, h, c); e.fillStyle = c; e.fillRect(ox + x, y, w, h); };
+  const wide = kind === "brute" ? 1 : 0;
+  if (f === 7) { // down
+    R(1, 42, 4, 4, P.boot); R(4, 41, 18, 5, P.coat); R(4, 45, 18, 1, P.dark); R(9, 43, 9, 1, P.trim);
+    R(21, 40, 7, 6, P.helm); R(22, 44, 5, 2, P.mask); E(23, 44, 1, 1, P.lens);
+    if (kind !== "brute") R(6, 39, 16, 1, P.metal); else { R(26, 46, 5, 1, "#1a1a1a"); E(30, 46, 1, 1, "#4aa0d0"); }
+    return;
+  }
+  const dy = f === 6 ? 9 : 0;
+  const lean = f === 5 ? 1 : 0;
+  const L = f === 1 ? 1 : f === 2 ? -1 : 0;
+  // Legs and boots (on their knees when falling).
+  if (f === 6) { R(10, 40, 5, 5, P.trou); R(17, 40, 5, 5, P.trou); R(9, 45, 6, 2, P.boot); R(17, 45, 6, 2, P.boot); }
+  else {
+    R(12, 34, 3, 10 - (L > 0 ? 2 : 0), P.trou); R(17, 34, 3, 10 - (L < 0 ? 2 : 0), P.trou);
+    R(11, L > 0 ? 42 : 44, 4, 3, P.boot); R(17, L < 0 ? 42 : 44, 4, 3, P.boot);
+  }
+  const X = (x) => x + lean;
+  // The greatcoat.
+  R(X(10 - wide), 17 + dy, 12 + wide * 2, 18, P.coat);
+  R(X(9 - wide), 29 + dy, 14 + wide * 2, 7 - (f === 6 ? 3 : 0), P.coat);
+  R(X(19 + wide), 17 + dy, 3, 18, P.dark);
+  R(X(15), 19 + dy, 1, 16 - (f === 6 ? 3 : 0), P.dark);
+  R(X(10 - wide), 27 + dy, 12 + wide * 2, 1, P.trim);
+  R(X(15), 27 + dy, 2, 1, P.metal);
+  R(X(9 - wide), 17 + dy, 14 + wide * 2, 2, P.coat);
+  R(X(9 - wide), 17 + dy, 2, 1, P.trim); R(X(21 + wide), 17 + dy, 2, 1, P.trim);
+  R(X(12), 16 + dy, 8, 2, P.dark);
+  for (const y of [21, 24, 30]) R(X(13), y + dy, 1, 1, P.metal);
+  // The head.
+  const hx = lean * 2;
+  if (kind === "captain") {
+    R(11 + hx, 6 + dy, 10, 4, P.helm); R(11 + hx, 10 + dy, 10, 1, "#15161a"); R(15 + hx, 7 + dy, 2, 1, P.trim);
+    R(13 + hx, 11 + dy, 6, 5, P.mask); E(13 + hx, 12 + dy, 2, 1, P.lens); E(17 + hx, 12 + dy, 2, 1, P.lens);
+    R(14 + hx, 14 + dy, 4, 1, "#e6e2da");
+  } else {
+    R(13 + hx, 5 + dy, 6, 1, P.helm); R(12 + hx, 6 + dy, 8, 5, P.helm); R(11 + hx, 10 + dy, 10, 1, P.dark);
+    R(13 + hx, 11 + dy, 6, 5, P.mask); E(13 + hx, 12 + dy, 2, 1, P.lens); E(17 + hx, 12 + dy, 2, 1, P.lens);
+    R(15 + hx, 14 + dy, 2, 2, P.metal);
+  }
+  // Arms and what they're holding.
+  if (f === 5) { // hit: arms thrown up
+    R(X(6), 13, 3, 8, P.coat); R(X(23), 13, 3, 8, P.coat); R(X(6), 11, 3, 2, P.glove); R(X(23), 11, 3, 2, P.glove);
+    return;
+  }
+  if (f === 6) { R(8, 26 + 2, 3, 10, P.coat); R(21, 26 + 2, 3, 10, P.coat); return; }
+  if (kind === "brute") {
+    if (f === 3) { // baton raised
+      R(8, 19, 3, 9, P.coat); R(8, 28, 3, 2, P.glove);
+      R(22, 9, 3, 10, P.coat); R(22, 7, 3, 2, P.glove); R(23, 0, 2, 7, "#1a1a1a"); E(23, 0, 2, 2, "#8fdcff");
+    } else if (f === 4) { // swing
+      R(8, 19, 3, 9, P.coat); R(8, 28, 3, 2, P.glove);
+      R(17, 19, 5, 5, P.coat); R(15, 22, 3, 3, P.glove);
+      for (let k = 0; k < 7; k++) R(14 - k, 24 + k, 2, 1, "#1a1a1a");
+      E(6, 30, 3, 3, "#bff0ff"); E(5, 29, 1, 1, "#8fdcff"); E(9, 33, 1, 1, "#8fdcff");
+    } else {
+      R(8, 19, 3, 9, P.coat); R(8, 28, 3, 2, P.glove);
+      R(22, 19, 3, 9, P.coat); R(22, 28, 3, 2, P.glove); R(23, 30, 2, 9, "#1a1a1a"); E(23, 38, 2, 1, "#4aa0d0");
+    }
+    return;
+  }
+  if (f === 3 || f === 4) { // aiming at you
+    R(10, 19, 4, 6, P.coat); R(18, 19, 4, 6, P.coat);
+    R(13, 22, 6, 3, P.glove);
+    R(14, 18, 4, 5, P.metal); R(15, 19, 2, 2, "#050505");
+    R(19, 17, 3, 3, P.wood);
+    if (f === 4) {
+      E(15, 12, 2, 14, "#ffd27a"); E(10, 19, 12, 2, "#ffd27a"); E(13, 16, 6, 7, "#fff1c0");
+      E(12, 15, 1, 1, "#ffb040"); E(19, 15, 1, 1, "#ffb040"); E(12, 23, 1, 1, "#ffb040"); E(19, 23, 1, 1, "#ffb040");
+    }
+    return;
+  }
+  // Rifle held across the body.
+  R(8, 19, 3, 9, P.coat); R(21, 19, 3, 5, P.coat);
+  for (let k = 0; k < 15; k++) R(8 + k, 31 - Math.round(k * 0.75), 2, 2, k < 4 ? P.wood : P.metal);
+  R(9, 28, 3, 2, P.glove); R(19, 22, 3, 2, P.glove);
+}
+// A dark outline round every figure, so they read against the dark.
+function outline(g, w, h) {
+  const img = g.getImageData(0, 0, w, h);
+  const d = img.data;
+  const out = new Uint8ClampedArray(d);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4;
+    if (d[i + 3]) continue;
+    const n = (xx, yy) => xx >= 0 && yy >= 0 && xx < w && yy < h && d[(yy * w + xx) * 4 + 3] > 0 && Math.floor(xx / FW) === Math.floor(x / FW);
+    if (n(x - 1, y) || n(x + 1, y) || n(x, y - 1) || n(x, y + 1)) { out[i] = 6; out[i + 1] = 6; out[i + 2] = 8; out[i + 3] = 255; }
+  }
+  g.putImageData(new ImageData(out, w, h), 0, 0);
+}
+const ATLAS = {};
+for (const kind of Object.keys(TYPES)) {
+  const cv = document.createElement("canvas");
+  cv.width = FW * NF;
+  cv.height = FH;
+  const ev = document.createElement("canvas");
+  ev.width = FW * NF;
+  ev.height = FH;
+  const g = cv.getContext("2d");
+  const e = ev.getContext("2d");
+  for (let f = 0; f < NF; f++) drawGuard(g, e, f * FW, PAL[kind], kind, f);
+  outline(g, cv.width, cv.height);
+  // Underneath the glowing bits, a faint copy of the whole figure, so a
+  // guard never vanishes into the dark entirely.
+  e.globalCompositeOperation = "destination-over";
+  e.globalAlpha = 0.2;
+  e.drawImage(cv, 0, 0);
+  e.globalAlpha = 1;
+  e.globalCompositeOperation = "source-over";
+  const mk = (c, srgb) => {
+    const t = new THREE.CanvasTexture(c);
+    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+    t.magFilter = THREE.NearestFilter;
+    t.minFilter = THREE.NearestFilter;
+    t.generateMipmaps = false;
+    return t;
+  };
+  ATLAS[kind] = { map: mk(cv, true), glow: mk(ev, true) };
+}
+
+// ---------- Rays ----------
+function rayBox(o, d, b, maxT) {
+  let t0 = 0;
+  let t1 = maxT;
+  const ax = [[o.x, d.x, b.x0, b.x1], [o.y, d.y, 0, b.h], [o.z, d.z, b.z0, b.z1]];
+  for (const [p, v, lo, hi] of ax) {
+    if (Math.abs(v) < 1e-9) { if (p < lo || p > hi) return -1; continue; }
+    let ta = (lo - p) / v;
+    let tb = (hi - p) / v;
+    if (ta > tb) [ta, tb] = [tb, ta];
+    if (ta > t0) t0 = ta;
+    if (tb < t1) t1 = tb;
+    if (t0 > t1) return -1;
+  }
+  return t0;
+}
+// How far a ray goes before it hits a wall, a door, furniture, the floor or
+// the ceiling.
+function rayWalls(o, d, maxT) {
+  let best = maxT;
+  for (const b of nearCols(o.z)) {
+    const t = rayBox(o, d, b, best);
+    if (t >= 0 && t < best) best = t;
+  }
+  if (d.y < 0) best = Math.min(best, -o.y / d.y);
+  if (d.y > 0) best = Math.min(best, (H - o.y) / d.y);
+  return best;
+}
+const _o = new THREE.Vector3();
+const _d = new THREE.Vector3();
+function los(x0, y0, z0, x1, y1, z1) {
+  _o.set(x0, y0, z0);
+  _d.set(x1 - x0, y1 - y0, z1 - z0);
+  const len = _d.length();
+  _d.divideScalar(len);
+  return rayWalls(_o, _d, len) >= len - 0.05;
+}
+// The nearest guard a ray hits (a guard is an upright cylinder).
+function rayEnemies(o, d, maxT) {
+  let best = null;
+  for (const e of enemies) {
+    if (!e.c.visible || e.state === "dying" || e.state === "dead") continue;
+    const r = e.T.r;
+    const fx = o.x - e.x;
+    const fz = o.z - e.z;
+    const a = d.x * d.x + d.z * d.z;
+    if (a < 1e-9) continue;
+    const b = 2 * (fx * d.x + fz * d.z);
+    const cc = fx * fx + fz * fz - r * r;
+    const disc = b * b - 4 * a * cc;
+    if (disc < 0) continue;
+    const t = (-b - Math.sqrt(disc)) / (2 * a);
+    if (t < 0 || t > maxT || (best && t > best.t)) continue;
+    const y = o.y + d.y * t;
+    if (y < 0 || y > e.T.h) continue;
+    best = { e, t, y };
+  }
+  return best;
+}
+
+// ---------- Circles sliding round boxes ----------
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function resolve(o, r, cols) {
+  for (const b of cols) {
+    const cx = clamp(o.x, b.x0, b.x1);
+    const cz = clamp(o.z, b.z0, b.z1);
+    const dx = o.x - cx;
+    const dz = o.z - cz;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= r * r) continue;
+    if (d2 > 1e-10) {
+      const d = Math.sqrt(d2);
+      o.x += (dx / d) * (r - d);
+      o.z += (dz / d) * (r - d);
+    } else {
+      const pushes = [[o.x - b.x0, -1, 0], [b.x1 - o.x, 1, 0], [o.z - b.z0, 0, -1], [b.z1 - o.z, 0, 1]];
+      pushes.sort((p, q) => p[0] - q[0]);
+      const [m, px_, pz] = pushes[0];
+      o.x += px_ * (m + r);
+      o.z += pz * (m + r);
+    }
+  }
+}
+function moveCircle(o, dx, dz, r) {
+  const cols = nearCols(o.z);
+  o.x += dx;
+  resolve(o, r, cols);
+  o.z += dz;
+  resolve(o, r, cols);
+}
+
+// ---------- Guards ----------
+const enemies = [];
+const randIn = ([a, b]) => a + Math.random() * (b - a);
+function makeEnemy(c, kind, x, a) {
+  const Ty = TYPES[kind];
+  const geo = new THREE.PlaneGeometry(1.4 * Ty.scale, 2.1 * Ty.scale);
+  geo.translate(0, 1.05 * Ty.scale, 0);
+  const mat = new THREE.MeshLambertMaterial({ map: ATLAS[kind].map, emissiveMap: ATLAS[kind].glow, emissive: 0xffffff, alphaTest: 0.5, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geo, mat);
+  scene.add(mesh);
+  const e = { c, kind, T: Ty, hx: x, hz: c.z0 + a, mesh, mat, geo, frame: -1 };
+  resetEnemy(e);
+  c.enemies.push(e);
+  enemies.push(e);
+  return e;
+}
+function setFrame(e, f) {
+  if (e.frame === f) return;
+  e.frame = f;
+  const uv = e.geo.attributes.uv;
+  const u0 = f / NF + 0.0005;
+  const u1 = (f + 1) / NF - 0.0005;
+  uv.setX(0, u0); uv.setX(1, u1); uv.setX(2, u0); uv.setX(3, u1);
+  uv.needsUpdate = true;
+}
+function resetEnemy(e) {
+  Object.assign(e, { x: e.hx, z: e.hz, hp: e.T.hp, state: "idle", t: 0, cool: 0.6 + Math.random(), alert: false, sees: false, losT: Math.random() * 0.2, react: 0, lastX: null, lastZ: null, walk: 0, strafe: Math.random() < 0.5 ? -1 : 1, strafeT: 1 + Math.random(), detour: 0, detourT: 0, flash: 0, burst: 0 });
+  e.mesh.visible = true;
+  e.mat.color.setRGB(1, 1, 1);
+  setFrame(e, 0);
+}
+for (const c of cars) for (const [kind, x, a] of c.spawns) makeEnemy(c, kind, x, a);
+
+// Tracers and little bursts where shots land.
+const tracers = Array.from({ length: 10 }, () => {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
+  const m = new THREE.LineBasicMaterial({ color: 0xffd08a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+  const l = new THREE.LineSegments(g, m);
+  l.frustumCulled = false;
+  scene.add(l);
+  return { l, life: 0 };
+});
+let tracerAt = 0;
+function tracer(a, b) {
+  const tr = tracers[tracerAt++ % tracers.length];
+  const p = tr.l.geometry.attributes.position;
+  p.setXYZ(0, a.x, a.y, a.z);
+  p.setXYZ(1, b.x, b.y, b.z);
+  p.needsUpdate = true;
+  tr.life = 0.09;
+}
+const puffs = Array.from({ length: 36 }, () => {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+  scene.add(s);
+  return { s, life: 0, max: 1, size: 1, vy: 0 };
+});
+let puffAt = 0;
+function puff(p, color, size = 0.35, life = 0.25, vy = 0) {
+  const q = puffs[puffAt++ % puffs.length];
+  q.s.position.copy(p);
+  q.s.material.color.set(color);
+  q.life = q.max = life;
+  q.size = size;
+  q.vy = vy;
+}
+function updateFx(dt) {
+  for (const tr of tracers) { tr.life -= dt; tr.l.material.opacity = Math.max(0, tr.life / 0.09) * 0.9; }
+  for (const q of puffs) {
+    if (q.life <= 0) { q.s.material.opacity = 0; continue; }
+    q.life -= dt;
+    const k = Math.max(0, q.life / q.max);
+    q.s.material.opacity = k * 0.9;
+    q.s.scale.setScalar(q.size * (1.6 - k * 0.6));
+    q.s.position.y += q.vy * dt;
+  }
+}
+// A flash of light when a guard fires (its own light, so the count of
+// lights never changes).
+const enemyFlash = new THREE.PointLight(0xffc070, 0, 9, 1.6);
+scene.add(enemyFlash);
+
+function alertCar(c, x, z, radius) {
+  for (const e of c.enemies) if (e.state === "idle" && Math.hypot(e.x - x, e.z - z) < radius) e.alert = true;
+}
+function damageEnemy(e, dmg, at) {
+  if (e.state === "dying" || e.state === "dead") return false;
+  e.hp -= dmg;
+  e.flash = 0.09;
+  e.alert = true;
+  alertCar(e.c, e.x, e.z, 10);
+  puff(at, 0x9a1a14, 0.32, 0.3);
+  if (e.hp <= 0) {
+    e.state = "dying";
+    e.t = 0;
+    sfx.guardDown(e);
+    stats.kills++;
+    checkCleared(e.c);
+    return true;
+  }
+  sfx.guardHurt(e);
+  if (!e.T.boss || Math.random() < 0.25) {
+    if (e.state !== "windup" || !e.T.boss) { e.state = "hurt"; e.t = 0; }
+  }
+  return false;
+}
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+function guardFires(e, dist) {
+  const moving = Math.hypot(P.vx, P.vz);
+  let p = clamp(0.84 - dist * 0.024, 0.22, 0.84) * (moving > 5 ? 0.55 : moving > 2 ? 0.78 : 1);
+  if (!los(e.x, e.T.h * 0.62, e.z, P.x, EYE - 0.2, P.z)) p = 0;
+  const hit = Math.random() < p;
+  _a.set(e.x, e.T.h * 0.6, e.z);
+  _b.set(P.x, EYE - 0.35, P.z);
+  if (!hit) { _b.x += (Math.random() - 0.5) * 2.2; _b.y += (Math.random() - 0.3) * 1.2; _b.z += (Math.random() - 0.5) * 2.2; }
+  _a.lerp(_b, 0.08);
+  tracer(_a, _b);
+  enemyFlash.position.set(e.x, e.T.h * 0.6, e.z);
+  enemyFlash.intensity = 14;
+  sfx.guardShot(e);
+  if (hit) hurtPlayer(e.T.dmg, e);
+}
+
+function updateEnemy(e, dt, active) {
+  const Ty = e.T;
+  e.t += dt;
+  e.cool -= dt;
+  if (e.flash > 0) {
+    e.flash -= dt;
+    e.mat.color.setRGB(3, 1.4, 1.2);
+    if (e.flash <= 0) e.mat.color.setRGB(1, 1, 1);
+  }
+  if (e.state === "dead") return;
+  if (e.state === "dying") { setFrame(e, e.t < 0.28 ? 6 : 7); if (e.t >= 0.28) e.state = "dead"; return; }
+  if (!active || !P.alive) { setFrame(e, e.state === "idle" ? 0 : e.frame); return; }
+  const dx = P.x - e.x;
+  const dz = P.z - e.z;
+  const dist = Math.hypot(dx, dz);
+  e.losT -= dt;
+  if (e.losT <= 0) {
+    e.losT = 0.14 + Math.random() * 0.1;
+    e.sees = dist < Ty.sight && los(e.x, Ty.h * 0.85, e.z, P.x, EYE, P.z);
+    if (e.sees) { e.lastX = P.x; e.lastZ = P.z; }
+  }
+  if (e.state === "idle") {
+    setFrame(e, 0);
+    if (e.sees || e.alert) {
+      e.state = "chase";
+      e.react = 0.25 + Math.random() * 0.4;
+      alertCar(e.c, e.x, e.z, 12);
+      if (Math.random() < 0.6) sfx.radio(e);
+    }
+    return;
+  }
+  if (e.react > 0) { e.react -= dt; setFrame(e, 0); return; }
+  if (e.state === "hurt") { setFrame(e, 5); if (e.t > 0.24) e.state = "chase"; return; }
+  if (e.state === "windup") {
+    setFrame(e, 3);
+    if (e.t >= Ty.windup) {
+      e.t = 0;
+      if (Ty.melee) {
+        e.state = "strike";
+        if (dist < Ty.reach + 0.55 && Math.abs((P.y ?? 0)) < 1) { hurtPlayer(Ty.dmg, e); sfx.zap(e); }
+      } else {
+        e.state = "fire";
+        guardFires(e, dist);
+      }
+    }
+    return;
+  }
+  if (e.state === "strike" || e.state === "fire") {
+    setFrame(e, 4);
+    if (e.t > (Ty.melee ? 0.32 : 0.13)) {
+      if (!Ty.melee && e.burst > 0) { e.burst--; e.state = "windup"; e.t = Ty.windup - 0.16; }
+      else { e.state = "chase"; e.cool = randIn(Ty.cool); e.t = 0; }
+    }
+    return;
+  }
+  // Chasing: work out where to go.
+  let mx = 0;
+  let mz = 0;
+  const toward = (tx, tz) => { const d = Math.hypot(tx - e.x, tz - e.z) || 1; mx = (tx - e.x) / d; mz = (tz - e.z) / d; return d; };
+  if (Ty.melee) {
+    if (e.sees && dist < Ty.reach && e.cool <= 0) { e.state = "windup"; e.t = 0; sfx.swing(e); return; }
+    if (e.sees) { if (dist > Ty.reach * 0.75) toward(P.x, P.z); }
+    else if (e.lastX !== null && toward(e.lastX, e.lastZ) < 0.6) e.lastX = null;
+    else if (e.lastX === null) toward(P.x, P.z);
+  } else {
+    if (e.sees && e.cool <= 0) { e.state = "windup"; e.t = 0; e.burst = (Ty.burst || 1) - 1; return; }
+    e.strafeT -= dt;
+    if (e.strafeT <= 0) { e.strafe *= -1; e.strafeT = 0.9 + Math.random() * 1.4; }
+    if (!e.sees) {
+      if (e.lastX !== null) { if (toward(e.lastX, e.lastZ) < 0.6) e.lastX = null; }
+      else toward(P.x, P.z);
+    } else if (dist > Ty.keep[1]) toward(P.x, P.z);
+    else if (dist < Ty.keep[0]) { toward(P.x, P.z); mx = -mx; mz = -mz; }
+    else { mx = (-dz / dist) * e.strafe * 0.8; mz = (dx / dist) * e.strafe * 0.8; }
+  }
+  if (e.detourT > 0) {
+    e.detourT -= dt;
+    const px_ = -mz * e.detour;
+    const pz = mx * e.detour;
+    mx = mx * 0.3 + px_;
+    mz = mz * 0.3 + pz;
+  }
+  const len = Math.hypot(mx, mz);
+  if (len > 0.01) {
+    const step = Ty.speed * dt;
+    const want = { x: e.x, z: e.z };
+    moveCircle(want, (mx / len) * step, (mz / len) * step, Ty.r);
+    // Keep to this car.
+    want.z = clamp(want.z, e.c.z0 + 0.5, e.c.z0 + CL - 0.5);
+    const moved = Math.hypot(want.x - e.x, want.z - e.z);
+    if (moved < step * 0.35 && e.detourT <= 0) { e.detour = Math.random() < 0.5 ? -1 : 1; e.detourT = 0.5 + Math.random() * 0.5; }
+    e.x = want.x;
+    e.z = want.z;
+    e.walk += moved;
+    setFrame(e, 1 + (Math.floor(e.walk / 0.5) % 2));
+  } else setFrame(e, 0);
+}
+function updateEnemies(dt, cur) {
+  for (const e of enemies) {
+    const vis = e.c.visible;
+    e.mesh.visible = vis;
+    if (!vis) continue;
+    updateEnemy(e, dt, e.c === cur);
+    e.mesh.position.set(e.x, 0, e.z);
+    e.mesh.rotation.y = Math.atan2(camera.position.x - e.x, camera.position.z - e.z);
+  }
+  // Keep them from standing in one another.
+  const list = cur.enemies;
+  for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    const a = list[i];
+    const b = list[j];
+    if (a.state === "dead" || b.state === "dead" || a.state === "dying" || b.state === "dying") continue;
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const d = Math.hypot(dx, dz);
+    const min = a.T.r + b.T.r + 0.1;
+    if (d < min && d > 1e-4) {
+      const k = (min - d) / 2 / d;
+      a.x -= dx * k; a.z -= dz * k; b.x += dx * k; b.z += dz * k;
+    }
+  }
+  enemyFlash.intensity *= Math.pow(0.0001, dt);
+}
+
+// ---------- You ----------
+const P = { x: 0, z: 2.2, yaw: Math.PI, pitch: 0, vx: 0, vz: 0, hp: 100, alive: true, stride: 0, hurt: 0, shake: 0, kick: 0, dropT: 0 };
+const keys = new Set();
+
+// ---------- Guns ----------
+const GUNS = {
+  scatter: { name: "Scattergun", mag: 2, reload: 1.3, delay: 0.26, pellets: 9, spread: 0.07, dmg: 13, range: 26, kick: 0.06, auto: false },
+  repeater: { name: "Repeater", mag: 30, reload: 1.7, delay: 0.1, pellets: 1, spread: 0.014, dmg: 17, range: 40, kick: 0.014, auto: true },
+};
+const W = { have: { scatter: true, repeater: false }, cur: "scatter", ammo: { scatter: 2, repeater: 30 }, cool: 0, reloading: 0, trigger: false, flash: 0, swap: 0 };
+
+// The gun in your hands, drawn as pixel art once and moved about.
+function crisp(c) {
+  const g = c.getContext("2d");
+  const img = g.getImageData(0, 0, c.width, c.height);
+  for (let i = 3; i < img.data.length; i += 4) img.data[i] = img.data[i] > 110 ? 255 : 0;
+  g.putImageData(img, 0, 0);
+  return c;
+}
+function gunCanvas(draw) {
+  const c = document.createElement("canvas");
+  c.width = 160;
+  c.height = 100;
+  draw(c.getContext("2d"));
+  return crisp(c);
+}
+const poly = (g, col, pts) => { g.fillStyle = col; g.beginPath(); g.moveTo(...pts[0]); for (const p of pts.slice(1)) g.lineTo(...p); g.closePath(); g.fill(); };
+const oval = (g, col, x, y, rx, ry, rot = 0) => { g.fillStyle = col; g.beginPath(); g.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); g.fill(); };
+function flashArt(g, x, y, s) {
+  poly(g, "#ff8a2a", [[x, y - 26 * s], [x + 7 * s, y - 6 * s], [x + 26 * s, y], [x + 7 * s, y + 6 * s], [x, y + 18 * s], [x - 7 * s, y + 6 * s], [x - 26 * s, y], [x - 7 * s, y - 6 * s]]);
+  poly(g, "#ffd27a", [[x, y - 16 * s], [x + 5 * s, y - 4 * s], [x + 16 * s, y], [x + 5 * s, y + 4 * s], [x, y + 11 * s], [x - 5 * s, y + 4 * s], [x - 16 * s, y], [x - 5 * s, y - 4 * s]]);
+  oval(g, "#fff6d8", x, y, 7 * s, 5 * s);
+}
+function hands(g, left = [60, 62], right = [120, 90]) {
+  poly(g, "#2a2622", [[0, 100], [18, 100], [left[0] + 4, left[1] + 6], [left[0] - 8, left[1] - 4]]);
+  oval(g, "#3b3029", left[0], left[1], 15, 10, -0.5);
+  for (let k = 0; k < 4; k++) oval(g, "#4a3b31", left[0] + 7 + k * 2, left[1] - 7 + k * 4, 4, 2.5, -0.3);
+  poly(g, "#2a2622", [[160, 100], [138, 100], [right[0] - 6, right[1] + 4], [right[0] + 12, right[1] - 6], [160, 74]]);
+  oval(g, "#3b3029", right[0], right[1], 16, 11, 0.4);
+  for (let k = 0; k < 4; k++) oval(g, "#4a3b31", right[0] - 12 + k * 4, right[1] - 8 + k, 3, 2.5, 0.2);
+}
+function scatterArt(g, fire) {
+  if (fire) flashArt(g, 80, 9, 1.1);
+  poly(g, "#5a3a1f", [[66, 40], [94, 40], [104, 80], [56, 80]]); // fore-end
+  poly(g, "#6e4826", [[68, 40], [78, 40], [72, 80], [60, 80]]);
+  poly(g, "#22252b", [[71, 11], [79.5, 11], [78, 76], [61, 76]]); // barrels
+  poly(g, "#22252b", [[80.5, 11], [89, 11], [99, 76], [82, 76]]);
+  poly(g, "#4a505a", [[72, 11], [75, 11], [69, 76], [64, 76]]);
+  poly(g, "#4a505a", [[82, 11], [85, 11], [87, 76], [84, 76]]);
+  oval(g, "#5d636e", 75.3, 12, 5, 3.2); oval(g, "#5d636e", 84.7, 12, 5, 3.2);
+  oval(g, "#050506", 75.3, 12, 3.2, 2); oval(g, "#050506", 84.7, 12, 3.2, 2);
+  poly(g, "#31353d", [[60, 74], [102, 74], [114, 100], [54, 100]]); // receiver
+  poly(g, "#8a6a32", [[66, 80], [98, 80], [100, 84], [64, 84]]);
+  poly(g, "#4e3018", [[96, 84], [130, 88], [140, 100], [100, 100]]); // stock
+  hands(g, [60, 64], [122, 92]);
+}
+function repeaterArt(g, fire) {
+  if (fire) flashArt(g, 80, 13, 0.8);
+  poly(g, "#202329", [[77.5, 12], [82.5, 12], [84, 40], [76, 40]]); // barrel
+  oval(g, "#050506", 80, 13, 2.4, 1.6);
+  poly(g, "#2a2e35", [[70, 38], [90, 38], [100, 86], [60, 86]]); // body
+  poly(g, "#454b55", [[71, 38], [76, 38], [67, 86], [61, 86]]);
+  poly(g, "#5a3a1f", [[64, 54], [96, 54], [99, 70], [61, 70]]); // grip guard
+  oval(g, "#1a1c21", 56, 66, 15, 15); oval(g, "#2e323a", 56, 66, 11, 11); oval(g, "#1a1c21", 56, 66, 4, 4); // drum
+  poly(g, "#16181c", [[76, 30], [84, 30], [84, 38], [76, 38]]); // sight
+  poly(g, "#4e3018", [[92, 84], [128, 88], [138, 100], [96, 100]]);
+  hands(g, [66, 76], [122, 92]);
+}
+const GUN_ART = {
+  scatter: [gunCanvas((g) => scatterArt(g, false)), gunCanvas((g) => scatterArt(g, true))],
+  repeater: [gunCanvas((g) => repeaterArt(g, false)), gunCanvas((g) => repeaterArt(g, true))],
+};
+const gunEl = $("gun");
+const gunG = gunEl.getContext("2d");
+gunG.imageSmoothingEnabled = false;
+const muzzle = new THREE.PointLight(0xffc070, 0, 10, 1.6);
+camera.add(muzzle);
+muzzle.position.set(0.1, -0.15, -0.8);
+function drawGun(t) {
+  gunG.clearRect(0, 0, 160, 100);
+  const speed = Math.hypot(P.vx, P.vz);
+  const bobX = Math.sin(P.stride * 3.7) * Math.min(1, speed / 4) * 4;
+  const bobY = Math.abs(Math.cos(P.stride * 3.7)) * Math.min(1, speed / 4) * 3 + Math.sin(t * 1.6) * 0.8;
+  let ox = bobX;
+  let oy = bobY + P.kick * 160;
+  let rot = 0;
+  const G = GUNS[W.cur];
+  if (W.reloading > 0) {
+    const k = 1 - W.reloading / G.reload;
+    const dip = Math.sin(Math.min(1, k) * Math.PI);
+    oy += dip * 34;
+    rot = -dip * 0.32;
+  }
+  if (W.swap > 0) oy += W.swap * 120;
+  if (!P.alive) oy += 200;
+  gunG.save();
+  gunG.translate(80 + Math.round(ox), 100 + Math.round(oy));
+  gunG.rotate(rot);
+  gunG.drawImage(GUN_ART[W.cur][W.flash > 0 ? 1 : 0], -80, -100);
+  gunG.restore();
+}
+
+// ---------- Shooting ----------
+const _f = new THREE.Vector3();
+const _r = new THREE.Vector3();
+const _u = new THREE.Vector3();
+const _hit = new THREE.Vector3();
+let crossT = 0;
+function fire() {
+  const G = GUNS[W.cur];
+  if (!P.alive || W.reloading > 0 || W.cool > 0 || W.swap > 0) return;
+  if (W.ammo[W.cur] <= 0) { startReload(); return; }
+  W.ammo[W.cur]--;
+  W.cool = G.delay;
+  W.flash = 0.06;
+  P.kick = Math.min(0.2, P.kick + G.kick);
+  P.pitch = Math.min(1.35, P.pitch + G.kick * 0.5);
+  muzzle.intensity = W.cur === "scatter" ? 26 : 14;
+  sfx.shot(W.cur);
+  camera.getWorldDirection(_f);
+  _r.set(1, 0, 0).applyQuaternion(camera.quaternion);
+  _u.set(0, 1, 0).applyQuaternion(camera.quaternion);
+  const o = camera.position;
+  let hitAny = false;
+  let killed = false;
+  for (let k = 0; k < G.pellets; k++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random()) * G.spread * (W.cur === "repeater" && Math.hypot(P.vx, P.vz) > 3 ? 2.2 : 1);
+    _d.copy(_f).addScaledVector(_r, Math.cos(a) * r).addScaledVector(_u, Math.sin(a) * r).normalize();
+    const wallT = rayWalls(o, _d, G.range);
+    const h = rayEnemies(o, _d, wallT);
+    if (h) {
+      let dmg = G.dmg * (W.cur === "scatter" ? clamp(1.25 - h.t / 16, 0.3, 1) : 1);
+      if (h.y > h.e.T.h * 0.8) dmg *= 1.7;
+      _hit.copy(o).addScaledVector(_d, h.t);
+      if (damageEnemy(h.e, dmg, _hit)) killed = true;
+      hitAny = true;
+    } else if (wallT < G.range) {
+      _hit.copy(o).addScaledVector(_d, wallT - 0.05);
+      puff(_hit, 0xffc890, 0.22, 0.16);
+      if (k % 3 === 0) puff(_hit, 0x55504a, 0.4, 0.5, 0.25);
+    }
+  }
+  if (hitAny) {
+    const cr = $("cross");
+    cr.className = killed ? "kill" : "hit";
+    crossT = 0.12;
+  }
+  alertCar(cur, P.x, P.z, 24);
+  if (W.ammo[W.cur] === 0) setTimeout(() => { if (W.ammo[W.cur] === 0) startReload(); }, G.delay * 1000 + 60);
+}
+function startReload() {
+  const G = GUNS[W.cur];
+  if (W.reloading > 0 || W.ammo[W.cur] === G.mag || !P.alive) return;
+  W.reloading = G.reload;
+  sfx.reload(W.cur, G.reload);
+}
+function switchTo(name) {
+  if (!W.have[name] || W.cur === name || !P.alive) return;
+  W.cur = name;
+  W.reloading = 0;
+  W.swap = 0.35;
+  sfx.swap();
+}
+
+function hurtPlayer(dmg, from) {
+  if (!P.alive || state !== "play") return;
+  P.hp = Math.max(0, P.hp - dmg);
+  P.hurt = Math.min(1, P.hurt + dmg / 30 + 0.25);
+  P.shake = 0.25;
+  sfx.hurt();
+  if (P.hp <= 0) playerDown();
+}
+
+// ---------- Moving ----------
+function updatePlayer(dt) {
+  W.cool -= dt;
+  W.flash -= dt;
+  W.swap = Math.max(0, W.swap - dt);
+  P.kick *= Math.pow(0.002, dt);
+  muzzle.intensity *= Math.pow(0.00001, dt);
+  P.hurt = Math.max(0, P.hurt - dt * 0.9);
+  P.shake = Math.max(0, P.shake - dt);
+  if (W.reloading > 0) {
+    W.reloading -= dt;
+    if (W.reloading <= 0) { W.reloading = 0; W.ammo[W.cur] = GUNS[W.cur].mag; }
+  }
+  if (!P.alive) { P.vx = P.vz = 0; return; }
+  if (W.trigger && (GUNS[W.cur].auto || !W.fired)) { fire(); W.fired = true; }
+  let fx = 0;
+  let fz = 0;
+  if (keys.has("KeyW") || keys.has("ArrowUp")) fz += 1;
+  if (keys.has("KeyS") || keys.has("ArrowDown")) fz -= 1;
+  if (keys.has("KeyA") || keys.has("ArrowLeft")) fx -= 1;
+  if (keys.has("KeyD") || keys.has("ArrowRight")) fx += 1;
+  const len = Math.hypot(fx, fz) || 1;
+  const run = keys.has("ShiftLeft") || keys.has("ShiftRight");
+  const sp = run ? 7.0 : 4.5;
+  // Forward is where you're facing (yaw 0 looks down -z).
+  const sx = -Math.sin(P.yaw);
+  const sz = -Math.cos(P.yaw);
+  const wx = ((sx * fz + Math.cos(P.yaw) * fx) / len) * sp;
+  const wz = ((sz * fz - Math.sin(P.yaw) * fx) / len) * sp;
+  const k = Math.min(1, dt * 10);
+  P.vx += (wx - P.vx) * k;
+  P.vz += (wz - P.vz) * k;
+  moveCircle(P, P.vx * dt, P.vz * dt, 0.35);
+  P.stride += Math.hypot(P.vx, P.vz) * dt;
+}
+
+// ---------- Things to pick up ----------
+const tinTex = pixelTex(16, 16, (g) => {
+  speckle(g, 16, 16, 0xc8c2b0, 0.06, 81);
+  px(g, "#b3241c", 6, 3, 4, 10); px(g, "#b3241c", 3, 6, 10, 4);
+  px(g, "#6a655a", 0, 0, 16, 1); px(g, "#6a655a", 0, 15, 16, 1);
+}, { repeat: false });
+const tinMat = new THREE.MeshLambertMaterial({ map: tinTex, emissive: 0x302820 });
+const gunPickMat = new THREE.MeshLambertMaterial({ map: T.dark, color: 0x9aa0aa, emissive: 0x202020 });
+for (const c of cars) for (const pk of c.pickups) {
+  const g = new THREE.Group();
+  if (pk.kind === "health") g.add(new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.26, 0.34), tinMat));
+  else {
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 0.9), gunPickMat);
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.08, 12), gunPickMat);
+    drum.rotation.z = Math.PI / 2;
+    drum.position.set(0, -0.08, 0.05);
+    g.add(body, drum);
+  }
+  const glow = glowSprite(pk.kind === "health" ? 0xff7060 : 0xffd27a, pk.kind === "health" ? 1.0 : 1.6, 0.45);
+  g.add(glow);
+  g.position.set(pk.x, pk.y + 0.35, c.z0 + pk.a);
+  scene.add(g);
+  pk.mesh = g;
+  pk.c = c;
+  pk.taken = false;
+}
+function updatePickups(t) {
+  for (const c of cars) {
+    if (!c.visible) { for (const pk of c.pickups) pk.mesh.visible = false; continue; }
+    for (const pk of c.pickups) {
+      const gone = pk.taken || (pk.kind === "repeater" && W.have.repeater);
+      pk.mesh.visible = !gone;
+      if (gone) continue;
+      pk.mesh.rotation.y = t * 1.4;
+      pk.mesh.position.y = pk.y + 0.35 + Math.sin(t * 2.2 + pk.a) * 0.06;
+      if (!P.alive || Math.hypot(P.x - pk.mesh.position.x, P.z - pk.mesh.position.z) > 1.1) continue;
+      if (pk.kind === "health") {
+        if (P.hp >= 100) continue;
+        P.hp = Math.min(100, P.hp + 35);
+        pk.taken = true;
+        sfx.pickup();
+        say("Rations. +35");
+      } else {
+        W.have.repeater = true;
+        W.ammo.repeater = GUNS.repeater.mag;
+        switchTo("repeater");
+        sfx.pickup();
+        say("The Repeater. Hold to fire · 1 and 2 to switch", 3.6);
+      }
+    }
+  }
+}
+
+// ---------- Sound ----------
+// All made here, no files: the rumble of the train and the clack of the
+// rail joints, the wind (loud between cars), and the guns, the guards and
+// the doors. Sounds from guards are panned to where they are.
+const AU = { ctx: null };
+function audioStart() {
+  if (AU.ctx) { AU.ctx.resume(); return; }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  const ctx = new AC();
+  AU.ctx = ctx;
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -14;
+  comp.ratio.value = 4;
+  comp.connect(ctx.destination);
+  AU.master = ctx.createGain();
+  AU.master.gain.value = 0.8;
+  AU.master.connect(comp);
+  // A short metal-room reverb.
+  const len = ctx.sampleRate * 1.4;
+  const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = ir.getChannelData(ch);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2);
+  }
+  AU.verb = ctx.createConvolver();
+  AU.verb.buffer = ir;
+  const wet = ctx.createGain();
+  wet.gain.value = 0.32;
+  AU.verb.connect(wet).connect(AU.master);
+  AU.dry = ctx.createGain();
+  AU.dry.connect(AU.master);
+  AU.dry.connect(AU.verb);
+  // White noise to shape everything else from.
+  const nb = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+  const nd = nb.getChannelData(0);
+  for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  AU.noise = nb;
+  // The train itself: a low rumble and the wind outside.
+  const loop = (filterType, freq, q, gain) => {
+    const s = ctx.createBufferSource();
+    s.buffer = nb;
+    s.loop = true;
+    const f = ctx.createBiquadFilter();
+    f.type = filterType;
+    f.frequency.value = freq;
+    f.Q.value = q;
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    s.connect(f).connect(g).connect(AU.master);
+    s.start();
+    return { f, g };
+  };
+  AU.rumble = loop("lowpass", 110, 0.7, 0.55);
+  AU.rumble2 = loop("bandpass", 320, 1.2, 0.05);
+  AU.wind = loop("bandpass", 700, 0.6, 0.03);
+  AU.lastJoint = Math.floor(scroll / 25);
+}
+const now = () => AU.ctx.currentTime;
+function noiseHit({ t = 0, dur = 0.2, type = "lowpass", f0 = 2000, f1 = f0, q = 0.8, gain = 0.5, pan = 0, out = AU.dry, attack = 0.002 }) {
+  if (!AU.ctx) return;
+  const ctx = AU.ctx;
+  const s = ctx.createBufferSource();
+  s.buffer = AU.noise;
+  const f = ctx.createBiquadFilter();
+  f.type = type;
+  f.Q.value = q;
+  const at = now() + t;
+  f.frequency.setValueAtTime(f0, at);
+  f.frequency.exponentialRampToValueAtTime(Math.max(20, f1), at + dur);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(gain, at + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  const p = ctx.createStereoPanner();
+  p.pan.value = clamp(pan, -1, 1);
+  s.connect(f).connect(g).connect(p).connect(out);
+  s.start(at, Math.random() * 1.5);
+  s.stop(at + dur + 0.05);
+}
+function tone({ t = 0, dur = 0.2, type = "sine", f0 = 440, f1 = f0, gain = 0.3, pan = 0, out = AU.dry, attack = 0.005, filter = 0 }) {
+  if (!AU.ctx) return;
+  const ctx = AU.ctx;
+  const o = ctx.createOscillator();
+  o.type = type;
+  const at = now() + t;
+  o.frequency.setValueAtTime(f0, at);
+  o.frequency.exponentialRampToValueAtTime(Math.max(10, f1), at + dur);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(gain, at + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  const p = ctx.createStereoPanner();
+  p.pan.value = clamp(pan, -1, 1);
+  let node = o;
+  if (filter) {
+    const f = ctx.createBiquadFilter();
+    f.type = "bandpass";
+    f.frequency.value = filter;
+    f.Q.value = 2;
+    node = o.connect(f);
+  }
+  node.connect(g).connect(p).connect(out);
+  o.start(at);
+  o.stop(at + dur + 0.05);
+}
+// Where a guard is, as pan and loudness.
+function place(e) {
+  const dx = e.x - camera.position.x;
+  const dz = e.z - camera.position.z;
+  const d = Math.hypot(dx, dz);
+  const rx = Math.cos(P.yaw);
+  const rz = -Math.sin(P.yaw);
+  return { pan: d > 0.01 ? ((dx * rx + dz * rz) / d) * 0.8 : 0, vol: 1 / (1 + d * 0.09) };
+}
+const sfx = {
+  shot(kind) {
+    if (kind === "scatter") {
+      noiseHit({ dur: 0.38, f0: 7000, f1: 500, gain: 0.9 });
+      tone({ dur: 0.25, f0: 140, f1: 38, gain: 0.8, type: "sine" });
+      noiseHit({ t: 0.33, dur: 0.06, type: "bandpass", f0: 3200, q: 4, gain: 0.08 });
+    } else {
+      noiseHit({ dur: 0.12, type: "bandpass", f0: 3000, f1: 900, q: 0.7, gain: 0.55 });
+      tone({ dur: 0.09, f0: 170, f1: 60, gain: 0.45 });
+    }
+  },
+  reload(kind, dur) {
+    const tick = (t, f) => noiseHit({ t, dur: 0.05, type: "bandpass", f0: f, q: 5, gain: 0.25 });
+    if (kind === "scatter") { tick(0.1, 2400); tick(dur * 0.45, 1800); tick(dur * 0.6, 1800); tick(dur - 0.12, 2800); }
+    else { tick(0.15, 2200); tick(dur * 0.5, 1500); tick(dur - 0.15, 3000); }
+  },
+  swap() { noiseHit({ dur: 0.08, type: "bandpass", f0: 2000, q: 3, gain: 0.18 }); },
+  empty() { noiseHit({ dur: 0.03, type: "bandpass", f0: 3500, q: 6, gain: 0.2 }); },
+  guardShot(e) {
+    const { pan, vol } = place(e);
+    noiseHit({ dur: 0.16, type: "highpass", f0: 1400, f1: 600, gain: 0.6 * vol, pan });
+    tone({ dur: 0.12, f0: 220, f1: 70, gain: 0.35 * vol, pan });
+  },
+  guardHurt(e) {
+    const { pan, vol } = place(e);
+    tone({ dur: 0.16, type: "sawtooth", f0: 210 * (e.T.boss ? 0.6 : 1), f1: 120, gain: 0.22 * vol, pan, filter: 750 });
+  },
+  guardDown(e) {
+    const { pan, vol } = place(e);
+    tone({ dur: 0.5, type: "sawtooth", f0: 180 * (e.T.boss ? 0.6 : 1), f1: 60, gain: 0.28 * vol, pan, filter: 600 });
+    noiseHit({ t: 0.3, dur: 0.25, f0: 300, f1: 80, gain: 0.5 * vol, pan });
+  },
+  radio(e) {
+    const { pan, vol } = place(e);
+    for (const [t, f] of [[0, 1180], [0.09, 880]]) tone({ t, dur: 0.07, type: "square", f0: f, gain: 0.08 * vol, pan, filter: f });
+    noiseHit({ t: 0.18, dur: 0.25, type: "bandpass", f0: 1800, q: 1.5, gain: 0.06 * vol, pan });
+  },
+  swing(e) {
+    const { pan, vol } = place(e);
+    noiseHit({ dur: 0.3, type: "bandpass", f0: 600, f1: 2400, q: 2, gain: 0.25 * vol, pan, attack: 0.15 });
+  },
+  zap(e) {
+    tone({ dur: 0.2, type: "square", f0: 92, f1: 70, gain: 0.25, filter: 900 });
+    noiseHit({ dur: 0.15, type: "highpass", f0: 4000, gain: 0.3 });
+  },
+  hurt() {
+    tone({ dur: 0.25, f0: 90, f1: 40, gain: 0.7 });
+    noiseHit({ dur: 0.18, f0: 600, f1: 150, gain: 0.4 });
+  },
+  door() {
+    noiseHit({ dur: 0.5, type: "highpass", f0: 3500, f1: 2000, gain: 0.18 });
+    noiseHit({ t: 0.08, dur: 0.55, f0: 400, f1: 120, gain: 0.35 });
+  },
+  unlock() {
+    tone({ dur: 0.35, f0: 660, gain: 0.12 });
+    tone({ t: 0.14, dur: 0.6, f0: 990, gain: 0.12 });
+  },
+  pickup() {
+    tone({ dur: 0.14, f0: 520, f1: 1040, gain: 0.14 });
+    tone({ t: 0.08, dur: 0.2, f0: 780, f1: 1560, gain: 0.08 });
+  },
+  down() {
+    tone({ dur: 1.4, f0: 180, f1: 40, gain: 0.5, type: "triangle" });
+    noiseHit({ t: 0.5, dur: 0.4, f0: 300, f1: 60, gain: 0.6 });
+  },
+  end() {
+    for (const [t, f] of [[0, 196], [0.4, 247], [0.8, 294], [1.2, 392]]) tone({ t, dur: 2.4, f0: f, gain: 0.08, type: "triangle" });
+  },
+  crackle() { noiseHit({ dur: 0.03, type: "bandpass", f0: 1500 + Math.random() * 2500, q: 3, gain: 0.05 + Math.random() * 0.06 }); },
+};
+// Every frame: the rail joints, the wind, the fire.
+function updateAudio(dt, inVest, c) {
+  if (!AU.ctx) return;
+  const joint = Math.floor(scroll / 25);
+  if (joint !== AU.lastJoint) {
+    AU.lastJoint = joint;
+    // Two bogies, two wheels each: clack-clack . . . clack-clack.
+    for (const t of [0, 0.11, 0.62, 0.73]) {
+      noiseHit({ t, dur: 0.07, type: "bandpass", f0: 900, f1: 500, q: 1.2, gain: inVest ? 0.5 : 0.22 });
+      tone({ t, dur: 0.09, f0: 80, f1: 50, gain: inVest ? 0.4 : 0.22 });
+    }
+  }
+  const tgt = inVest ? 0.22 : c.glassRoof ? 0.06 : 0.03;
+  AU.wind.g.gain.value += (tgt * (0.6 + windGust * 0.6) - AU.wind.g.gain.value) * Math.min(1, dt * 3);
+  AU.wind.f.frequency.value = 500 + windGust * 500;
+  AU.rumble.g.gain.value += ((inVest ? 0.85 : 0.5) - AU.rumble.g.gain.value) * Math.min(1, dt * 3);
+  if (c.fires && Math.random() < dt * 9) sfx.crackle();
+}
+
+// ---------- The run ----------
+let state = "intro"; // play, paused, dead, end
+let cur = cars[0];
+let checkpoint = { x: 0, z: 2.2 };
+let trainSway = 0;
+const stats = { kills: 0, falls: 0, time: 0 };
+
+// ---------- HUD ----------
+const hud = { hp: $("hp"), hpB: $("hp").querySelector("b"), hpBar: $("hp").querySelector(".bar span"), ammoB: $("ammo").querySelector("b"), ammoS: $("ammo").querySelector("small"), where: $("where").querySelector("span"), whereEm: $("where").querySelector("em"), hurt: $("hurt"), msg: $("msg"), card: $("card") };
+let last = {};
+function setText(el, key, v) { if (last[key] !== v) { last[key] = v; el.textContent = v; } }
+function updateHud() {
+  setText(hud.hpB, "hp", String(Math.ceil(P.hp)));
+  if (last.hpw !== Math.ceil(P.hp)) { last.hpw = Math.ceil(P.hp); hud.hpBar.style.width = `${P.hp}%`; hud.hp.classList.toggle("low", P.hp <= 30); }
+  const G = GUNS[W.cur];
+  setText(hud.ammoB, "ammo", W.reloading > 0 ? "··" : `${W.ammo[W.cur]}`);
+  setText(hud.ammoS, "gun", `${G.name}${W.have.repeater ? (W.cur === "scatter" ? "  ·  2 Repeater" : "  ·  1 Scattergun") : ""}`);
+  setText(hud.where, "where", `Car ${cur.i + 1} of ${cars.length} · ${cur.title.replace(/^The /, "")}`);
+  const left = cur.enemies.filter((e) => e.state !== "dead" && e.state !== "dying").length;
+  const em = cur.frontDoor ? (left ? `${left} guard${left > 1 ? "s" : ""}` : "clear · go forward") : "";
+  setText(hud.whereEm, "em", em);
+  if (last.clear !== !left) { last.clear = !left; hud.whereEm.classList.toggle("clear", !left); }
+  hud.hurt.style.opacity = String(Math.min(1, P.hurt * 0.9 + (P.hp <= 30 ? 0.25 + Math.sin(performance.now() / 300) * 0.08 : 0)));
+}
+let msgT = 0;
+function say(text, secs = 2.6) {
+  hud.msg.textContent = text;
+  hud.msg.classList.add("on");
+  msgT = secs;
+}
+let cardT = 0;
+function showCard(c) {
+  hud.card.querySelector("small").textContent = `Car ${c.i + 1}`;
+  hud.card.querySelector("h2").textContent = c.title;
+  hud.card.querySelector("p").textContent = c.sub;
+  hud.card.classList.add("on");
+  cardT = 3.6;
+}
+
+// ---------- Cars, doors, progress ----------
+function checkCleared(c) {
+  if (c.cleared || c.enemies.some((e) => e.state !== "dead" && e.state !== "dying")) return;
+  c.cleared = true;
+  if (c.frontDoor) {
+    setTimeout(() => {
+      if (c !== cur || !P.alive) return;
+      sfx.unlock();
+      setDoorLamp(c.frontDoor, true);
+      say(c.i === cars.length - 2 ? "The way to the engine is open" : "Car clear. The door ahead is open");
+    }, 700);
+  }
+}
+function enterCar(c) {
+  const prev = cur;
+  cur = c;
+  c.entered = true;
+  checkpoint = { x: 0, z: c.z0 + 1.6 };
+  // The way back shuts behind you.
+  if (prev.frontDoor) prev.frontDoor.sealed = true;
+  c.back.sealed = true;
+  showCard(c);
+  if (!c.enemies.length) c.cleared = true;
+  if (c.i === 2 && !W.have.repeater) setTimeout(() => { if (cur === c && !W.have.repeater) say("Something on the counter, in the middle"); }, 4200);
+}
+function updateDoors(dt) {
+  for (const d of doors) {
+    const c = d.c;
+    let open = false;
+    if (!d.sealed) {
+      // A front door opens once its car is clear; the next car's back door
+      // opens for you as you come through the vestibule.
+      const ok = d.front ? c.cleared : cars[c.i - 1]?.cleared && c.i > 0;
+      if (ok && P.alive && Math.abs(P.z - d.z) < 3.4 && Math.abs(P.x) < 2.6) open = true;
+    }
+    const target = open ? 1 : 0;
+    if (target === 1 && d.target === 0) sfx.door();
+    d.target = target;
+    d.open += (target - d.open) * Math.min(1, dt * (target ? 5 : 3.5));
+    d.leaves[0].position.x = -DW / 2 - d.open * DW * 0.98;
+    d.leaves[1].position.x = DW / 2 + d.open * DW * 0.98;
+    // Don't shut on someone standing in the doorway.
+    if (!open && Math.abs(P.z - d.z) < 0.6) { d.open = Math.max(d.open, 0.9); }
+    d.col.on = d.open < 0.85;
+    const green = !d.sealed && (d.front ? c.cleared : (cars[c.i - 1]?.cleared && c.i > 0));
+    if (d.green !== green) { d.green = green; setDoorLamp(d, green); }
+  }
+}
+function visibleCars() {
+  const out = [];
+  for (const c of cars) {
+    let v = false;
+    if (c === cur) v = true;
+    else if (c.i === cur.i + 1) v = cur.frontDoor && (cur.frontDoor.open > 0.01 || P.z > cur.z0 + CL);
+    else if (c.i === cur.i - 1) v = cur.back.open > 0.01 || P.z < cur.z0 + 2;
+    c.visible = !!v;
+    c.group.visible = c.visible;
+    if (c.visible) out.push(c);
+  }
+  return out;
+}
+
+// ---------- Down, and up again ----------
+function playerDown() {
+  P.alive = false;
+  P.dropT = 0;
+  stats.falls++;
+  sfx.down();
+  setTimeout(() => {
+    if (state !== "play") return;
+    state = "dead";
+    $("deadWhere").textContent = `Down in ${cur.title.toLowerCase().startsWith("the") ? cur.title.toLowerCase() : "the " + cur.title.toLowerCase() + " car"}. The guards are back where they were.`;
+    $("dead").classList.remove("gone");
+    document.exitPointerLock?.();
+  }, 1500);
+}
+function retry() {
+  for (const e of cur.enemies) resetEnemy(e);
+  cur.cleared = false;
+  if (cur.frontDoor) { cur.frontDoor.sealed = false; setDoorLamp(cur.frontDoor, false); }
+  for (const pk of cur.pickups) pk.taken = false;
+  Object.assign(P, { x: checkpoint.x, z: checkpoint.z, yaw: Math.PI, pitch: 0, vx: 0, vz: 0, hp: 100, alive: true, hurt: 0, dropT: 0 });
+  W.ammo.scatter = GUNS.scatter.mag;
+  W.ammo.repeater = GUNS.repeater.mag;
+  W.reloading = 0;
+  $("dead").classList.add("gone");
+  state = "play";
+  lockPointer();
+  showCard(cur);
+}
+function finish() {
+  state = "end";
+  sfx.end();
+  const t = Math.round(stats.time);
+  $("sTime").textContent = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+  $("sKills").textContent = String(stats.kills);
+  $("sFalls").textContent = String(stats.falls);
+  setTimeout(() => { $("end").classList.remove("gone"); document.exitPointerLock?.(); }, 1200);
+}
+
+// ---------- Input ----------
+let locked = false;
+function lockPointer() {
+  if (TOUCH) return;
+  try { const r = canvas.requestPointerLock?.(); if (r && r.catch) r.catch(() => {}); } catch { /* fine */ }
+}
+document.addEventListener("pointerlockchange", () => {
+  const was = locked;
+  locked = document.pointerLockElement === canvas;
+  if (was && !locked && state === "play") { state = "paused"; $("paused").classList.remove("gone"); keys.clear(); W.trigger = false; }
+});
+document.addEventListener("mousemove", (e) => {
+  if (!locked || state !== "play" || !P.alive) return;
+  P.yaw -= e.movementX * 0.0022;
+  P.pitch = clamp(P.pitch - e.movementY * 0.0022, -1.35, 1.35);
+});
+canvas.addEventListener("mousedown", (e) => {
+  if (state !== "play") return;
+  if (!locked) lockPointer();
+  if (e.button === 0) { W.trigger = true; W.fired = false; }
+});
+addEventListener("mouseup", (e) => { if (e.button === 0) { W.trigger = false; W.fired = false; } });
+addEventListener("keydown", (e) => {
+  if (state !== "play") return;
+  keys.add(e.code);
+  if (e.code === "KeyR") startReload();
+  if (e.code === "Digit1") switchTo("scatter");
+  if (e.code === "Digit2") switchTo("repeater");
+  if (e.code === "KeyQ") switchTo(W.cur === "scatter" ? "repeater" : "scatter");
+  if (e.code === "KeyP") $("fps").hidden = !$("fps").hidden;
+  if (e.code.startsWith("Arrow") || e.code === "Space") e.preventDefault();
+});
+addEventListener("keyup", (e) => keys.delete(e.code));
+addEventListener("blur", () => { keys.clear(); W.trigger = false; });
+addEventListener("wheel", (e) => { if (state === "play" && W.have.repeater) switchTo(W.cur === "scatter" ? "repeater" : "scatter"); }, { passive: true });
+function begin() {
+  audioStart();
+  $("intro").classList.add("gone");
+  state = "play";
+  lockPointer();
+  showCard(cur);
+  setTimeout(() => say("They'll come once they see you. Use the bunks and crates for cover", 4), 3800);
+}
+$("board").addEventListener("click", begin);
+$("retry").addEventListener("click", () => { audioStart(); retry(); });
+$("resume").addEventListener("click", () => { $("paused").classList.add("gone"); state = "play"; lockPointer(); });
+$("again").addEventListener("click", () => location.reload());
+
+// ---------- Quality ----------
+// Sharp within a budget of pixels, and less sharp while frames run slow.
+let quality = 1;
+function applySize() {
+  const ratio = Math.min(devicePixelRatio, 1.75, Math.sqrt(3.4e6 / (innerWidth * innerHeight))) * quality;
+  renderer.setPixelRatio(ratio);
+  renderer.setSize(innerWidth, innerHeight);
+}
+applySize();
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  applySize();
+});
+const perf = { acc: 0, n: 0 };
+function watchSpeed(raw) {
+  perf.acc += raw;
+  perf.n++;
+  if (perf.acc < 1.2) return;
+  const ms = (perf.acc / perf.n) * 1000;
+  perf.acc = perf.n = 0;
+  if (!$("fps").hidden) $("fps").textContent = `${Math.round(1000 / ms)} fps · ${Math.round(quality * 100)}%`;
+  if (document.hidden) return;
+  let q = quality;
+  if (ms > 21) q = Math.max(0.5, q * (ms > 30 ? 0.8 : 0.9));
+  else if (ms < 13 && q < 1) q = Math.min(1, q * 1.08);
+  if (Math.abs(q - quality) > 0.01) { quality = q; applySize(); }
+}
+
+// ---------- Each frame ----------
+const clock = new THREE.Clock();
+let simT = 0;
+const hemiTo = { sky: new THREE.Color(), ground: new THREE.Color() };
+function step(dt) {
+  simT += dt;
+  const t = simT;
+  trainSway = Math.sin(t * 1.1) * 0.6 + Math.sin(t * 2.7 + 1) * 0.25 + Math.sin(t * 0.37) * 0.3;
+  if (state === "play") {
+    stats.time += dt;
+    updatePlayer(dt);
+    // Into the next car?
+    const next = cars[cur.i + 1];
+    if (next && P.z > next.z0 + 2.2) enterCar(next);
+    if (cur.i === cars.length - 1 && P.z > cur.z0 + 10 && state === "play") finish();
+  }
+  if (!P.alive) P.dropT += dt;
+  const vis = visibleCars();
+  updateDoors(dt);
+  if (state === "play" || state === "dead") updateEnemies(dt, cur);
+  updatePickups(t);
+  updateFx(dt);
+  updateWorld(dt, t, P.z);
+  updateLights(dt, t, P.z, vis);
+  for (const c of vis) {
+    for (const p of c.pools) {
+      // A telegraph pole's shadow flicks across each pool as it passes.
+      const ph = ((((scroll + c.z0 + p.a) % 44) + 44) % 44) / 44;
+      p.mat.opacity = p.base * (1 - 0.7 * Math.exp(-Math.pow((ph - 0.5) * 28, 2)));
+    }
+    if (c.fires) for (const f of c.fires) f.scale.setScalar(0.85 + Math.random() * 0.3);
+  }
+  // The car's own air: its fog and its fill light, eased between cars.
+  const k = Math.min(1, dt * 1.5);
+  hemi.color.lerp(hemiTo.sky.set(cur.hemi[0]), k);
+  hemi.groundColor.lerp(hemiTo.ground.set(cur.hemi[1]), k);
+  hemi.intensity += (cur.hemi[2] - hemi.intensity) * k;
+  scene.fog.color.lerp(fogCol.set(cur.fog), k);
+  // The camera: your eyes, the train's sway, the shake of being hit.
+  const speed = Math.hypot(P.vx, P.vz);
+  const bob = Math.sin(P.stride * 7.4) * 0.03 * Math.min(1, speed / 4);
+  const drop = P.alive ? 0 : Math.min(1, P.dropT / 0.9);
+  camera.position.set(P.x, EYE + bob - drop * 1.25, P.z);
+  const sh = P.shake * 0.05;
+  camera.rotation.set(P.pitch + P.kick + (Math.random() - 0.5) * sh, P.yaw + (Math.random() - 0.5) * sh, trainSway * 0.006 + drop * 0.6);
+  const inVest = P.z > cur.z0 + CL || P.z < cur.z0;
+  updateAudio(dt, inVest, cur);
+  if (msgT > 0) { msgT -= dt; if (msgT <= 0) hud.msg.classList.remove("on"); }
+  if (cardT > 0) { cardT -= dt; if (cardT <= 0) hud.card.classList.remove("on"); }
+  if (crossT > 0) { crossT -= dt; if (crossT <= 0) $("cross").className = ""; }
+  updateHud();
+}
+function render() {
+  renderer.render(scene, camera);
+  drawGun(simT);
+}
+function frame() {
+  const raw = clock.getDelta();
+  const dt = Math.min(raw, 0.05);
+  if (state === "play") watchSpeed(raw);
+  if (state !== "paused") step(dt);
+  render();
+}
+renderer.setAnimationLoop(frame);
+window.__train = { enterCar, checkCleared, P, W, GUNS, cars, enemies, doors, step, render, camera, renderer, begin, retry, get state() { return state; }, set state(v) { state = v; }, get cur() { return cur; }, fire, switchTo, keys };
+</script>
+</body>
+</html>

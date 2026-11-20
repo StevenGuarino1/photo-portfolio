@@ -38,20 +38,65 @@ function coastD(x, z) {
   return Math.pow(dx ** 4 + dz ** 4, 0.25) + (fbm(x * 0.0011 + 7, z * 0.0011 + 3, 3) - 0.5) * 0.22;
 }
 // The land before roads and towns are cut into it.
-function baseH(x, z) {
+// Parts of the island, each with its own character: a great forest in the
+// west, farmland in a patchwork of fields to the south, rocky highlands in
+// the middle, an open meadow by the west coast, a wind farm on the northern
+// downs, sea cliffs under Larkhill, and a lake in the south-west.
+const REG = {
+  forest: { x: -2000, z: -1150, r: 950 },
+  farm: { x: -250, z: -1650, r: 760 },
+  high: { x: -1250, z: -380, r: 680 },
+  meadow: { x: -2550, z: -250, r: 460 },
+  wind: { x: -560, z: 1000, r: 380 },
+};
+const LAKE = { x: -1650, z: -2030, r: 250, y: 16 };
+const regionW = (R, x, z) => smooth(R.r, R.r * 0.4, Math.hypot(x - R.x, z - R.z));
+function lakeR(a) { return LAKE.r * (1 + 0.36 * (vnoise(Math.cos(a) * 1.7 + 5, Math.sin(a) * 1.7 + 5) - 0.5)); }
+function cliffW(x, z) { return smooth(-2250, -2650, x) * smooth(-1000, -200, z); }
+function baseH0(x, z) {
   const d = coastD(x, z);
-  const land = smooth(1.03, 0.9, d);
-  const inland = smooth(0.97, 0.6, d);
-  const hills = Math.pow(fbm(x * 0.00085, z * 0.00085, 5), 1.7) * 150;
+  const cw = cliffW(x, z);
+  const land = smooth(1.03, 0.9, d) * (1 - cw) + smooth(1.005, 0.99, d) * cw;
+  const inland = smooth(0.97, 0.6, d) * (1 - cw) + smooth(0.995, 0.93, d) * cw;
+  const wHigh = regionW(REG.high, x, z);
+  const wFlat = Math.max(regionW(REG.farm, x, z) * 0.7, regionW(REG.meadow, x, z) * 0.45);
+  const hills = Math.pow(fbm(x * 0.00085, z * 0.00085, 5), 1.7) * 150 * (1 - wFlat) * (1 + wHigh * 0.7);
   const ridge = Math.pow(1 - Math.abs(fbm(x * 0.0005 + 11, z * 0.0005 - 5, 3) * 2 - 1), 3) * 45;
-  return -16 + land * 20 + inland * (hills + ridge);
+  // Craggy tops in the highlands.
+  const crags = wHigh * Math.pow(1 - Math.abs(vnoise(x * 0.004, z * 0.004) * 2 - 1), 4) * 35;
+  return -16 + land * 20 + inland * (hills + ridge + crags) + cw * 34 * smooth(1.0, 0.97, d);
+}
+// The lake sits in the land as it is: its surface a little below the
+// lowest point of the ground round it, so it never spills.
+{
+  let lo = 1e9;
+  for (let k = 0; k < 64; k++) {
+    const a = (k / 64) * Math.PI * 2;
+    const r = lakeR(a) * 1.15;
+    lo = Math.min(lo, baseH0(LAKE.x + Math.cos(a) * r, LAKE.z + Math.sin(a) * r));
+  }
+  LAKE.y = Math.max(6, lo - 2.5);
+}
+function baseH(x, z) {
+  let h = baseH0(x, z);
+  // The lake: a bowl below its water, a low rim round it.
+  const ld = Math.hypot(x - LAKE.x, z - LAKE.z);
+  if (ld < LAKE.r * 1.4 + 160) {
+    const lr = lakeR(Math.atan2(z - LAKE.z, x - LAKE.x));
+    // The bed below the water; round it, a shore that rises gently to
+    // meet the land over 150 m.
+    const rim = LAKE.y + 0.4;
+    if (ld < lr) h = LAKE.y - 1 - 6 * smooth(lr, lr * 0.3, ld);
+    else h = rim + (Math.max(h, rim) - rim) * smooth(lr, lr + 150, ld);
+  }
+  return h;
 }
 
 // ---------- Towns ----------
 const TOWNS = [
-  { name: "Verdant Bay", ox: 0, oz: 0, n: 10, y: 3, style: "city", downtown: [6.5, 6.5], parks: ["3,3", "3,4", "4,3", "4,4", "8,1", "1,7"] },
-  { name: "Saltmarsh", ox: -600, oz: -2950, n: 4, y: 4, style: "harbor", downtown: [2, 2], parks: ["0,3"] },
-  { name: "Larkhill", ox: -2900, oz: 560, n: 3, y: 46, style: "village", downtown: [1.5, 1.5], parks: ["1,1"] },
+  { name: "Verdant Bay", ox: 0, oz: 0, n: 10, y: 3, style: "city", downtown: [6.5, 6.5], parks: ["3,3", "3,4", "4,3", "4,4", "8,1", "1,7"], landmarks: { "6,6": "spire", "5,3": "civic", "2,5": "church", "8,8": "stadium", "6,2": "clock", "3,7": "museum" } },
+  { name: "Saltmarsh", ox: -600, oz: -2950, n: 4, y: 4, style: "harbor", downtown: [2, 2], parks: ["0,3"], landmarks: { "1,0": "market" } },
+  { name: "Larkhill", ox: -2900, oz: 560, n: 3, y: 46, style: "village", downtown: [1.5, 1.5], parks: ["1,1"], landmarks: { "1,2": "chapel" } },
 ];
 for (const t of TOWNS) { t.size = t.n * P; t.x0 = t.ox - EDGE - 6; t.z0 = t.oz - EDGE - 6; t.x1 = t.ox + t.size + EDGE + 6; t.z1 = t.oz + t.size + EDGE + 6; }
 function townAt(x, z, margin = 0) {
@@ -194,7 +239,7 @@ function natH(x, z) {
     const dx = Math.max(t.x0 - x, 0, x - t.x1);
     const dz = Math.max(t.z0 - z, 0, z - t.z1);
     const d = Math.hypot(dx, dz);
-    const reach = h > t.y ? 1000 : t.y > 10 ? 650 : 170;
+    const reach = h > t.y ? 820 : t.y > 10 ? 650 : 170;
     if (d < reach) h += (t.y - 0.06 - h) * smooth(reach, 30, d);
   }
   return h;
@@ -249,4 +294,11 @@ function groundAt(x, z) {
   if (r) { surface = "road"; return r.y + 0.03; }
   surface = "grass";
   return terrainH(x, z);
+}
+
+// Places of interest, so the woods leave room round them.
+const POIS = [];
+function nearPOI(x, z) {
+  for (const p of POIS) if ((x - p.x) ** 2 + (z - p.z) ** 2 < p.r * p.r) return true;
+  return false;
 }

@@ -236,75 +236,6 @@ const T = {
   }),
 };
 
-// Facades: one texture is one bay, 4 m wide and one 3.5 m storey tall.
-function facade(draw) { return canvasTex(64, 56, draw); }
-function windowAt(g, x, y, w, h, glass, frame) {
-  g.fillStyle = frame;
-  g.fillRect(x - 2, y - 2, w + 4, h + 4);
-  const grad = g.createLinearGradient(x, y, x + w, y + h);
-  grad.addColorStop(0, glass[0]);
-  grad.addColorStop(1, glass[1]);
-  g.fillStyle = grad;
-  g.fillRect(x, y, w, h);
-  g.fillStyle = "rgba(255,255,255,0.35)";
-  g.fillRect(x + 2, y + 2, Math.max(2, w * 0.25), 2);
-}
-const FACADES = {
-  glass: [0x7fb3d9, 0x6aa1c8, 0x8ec3c9, 0x9db5c9].map((c, k) => facade((g) => {
-    const grad = g.createLinearGradient(0, 0, 64, 56);
-    grad.addColorStop(0, shade(c, 1.15));
-    grad.addColorStop(1, shade(c, 0.78));
-    g.fillStyle = grad;
-    g.fillRect(0, 0, 64, 56);
-    g.fillStyle = "rgba(255,255,255,0.22)";
-    g.beginPath(); g.moveTo(10 + k * 8, 0); g.lineTo(26 + k * 8, 0); g.lineTo(8 + k * 8, 56); g.lineTo(-8 + k * 8, 56); g.fill();
-    g.fillStyle = "#3c4a58";
-    g.fillRect(0, 0, 64, 3);
-    g.fillRect(0, 0, 2, 56);
-    g.fillRect(31, 0, 2, 56);
-  })),
-  brick: [0xa8553c, 0x8f4a36, 0xb7765a].map((c) => facade((g) => {
-    noiseFill(g, 64, 56, c, 0.14, c & 255, 2);
-    g.fillStyle = "rgba(60,30,20,0.25)";
-    for (let y = 0; y < 56; y += 4) g.fillRect(0, y, 64, 1);
-    windowAt(g, 18, 12, 28, 30, ["#5b7d99", "#2c3e52"], "#efe9dc");
-    g.fillStyle = "#e6dfcf";
-    g.fillRect(14, 44, 36, 3);
-  })),
-  stucco: [0xf2d7c6, 0xf6e7b8, 0xcfe8dc, 0xf5f1e8, 0xf3c9b4, 0xd8e2f0].map((c) => facade((g) => {
-    noiseFill(g, 64, 56, c, 0.05, c & 255, 2);
-    windowAt(g, 22, 14, 20, 28, ["#6f8fa8", "#33475b"], "#ffffff");
-    const sh = pick(["#3f7f6a", "#4a6fa5", "#b5643f", "#6b8f3a"]);
-    g.fillStyle = sh;
-    g.fillRect(12, 12, 8, 32);
-    g.fillRect(44, 12, 8, 32);
-    g.fillStyle = "rgba(0,0,0,0.15)";
-    for (let y = 14; y < 44; y += 4) { g.fillRect(12, y, 8, 1); g.fillRect(44, y, 8, 1); }
-  })),
-  concrete: [0xd9d0bf, 0xc8c4bb, 0xe2d9c4].map((c) => facade((g) => {
-    noiseFill(g, 64, 56, c, 0.06, c & 255, 2);
-    windowAt(g, 4, 14, 56, 24, ["#7d9bb3", "#3c5266"], "#6d6a64");
-    g.fillStyle = "rgba(0,0,0,0.2)";
-    g.fillRect(31, 14, 2, 24);
-  })),
-  house: [0xf4efe4, 0xdfe9ef, 0xf1e1c2, 0xe7d4d0].map((c) => facade((g) => {
-    noiseFill(g, 64, 56, c, 0.04, c & 255, 2);
-    g.fillStyle = "rgba(0,0,0,0.07)";
-    for (let y = 0; y < 56; y += 5) g.fillRect(0, y, 64, 1);
-    windowAt(g, 20, 16, 24, 24, ["#7ea2bd", "#3d566d"], "#ffffff");
-    g.fillStyle = "#ffffff";
-    g.fillRect(31, 16, 2, 24);
-  })),
-};
-// Shopfronts for the ground floor: big windows under an awning stripe.
-const SHOPS = [0x2f7d6d, 0xc8553d, 0x2d5f9a, 0xe0a030, 0x7a4f9a, 0x3b3b3b].map((c) => facade((g) => {
-  noiseFill(g, 64, 56, 0xe7e1d4, 0.05, 31, 2);
-  windowAt(g, 6, 18, 52, 36, ["#a9c6d8", "#3f5a70"], hexs(c));
-  g.fillStyle = hexs(c);
-  g.fillRect(0, 2, 64, 12);
-  g.fillStyle = "rgba(255,255,255,0.85)";
-  for (let x = 0; x < 64; x += 8) g.fillRect(x, 2, 4, 12);
-}));
 const lam = (map, o = {}) => new THREE.MeshLambertMaterial({ map, ...o });
 const M = {
   asphalt: lam(T.asphalt), sidewalk: lam(T.sidewalk), grass: lam(T.grass), plaza: lam(T.plaza), path: lam(T.path),
@@ -317,6 +248,54 @@ const M = {
   terracotta: new THREE.MeshLambertMaterial({ color: 0xc0623f }),
   slate: new THREE.MeshLambertMaterial({ color: 0x55606e }),
 };
-const facadeMats = {};
-for (const [k, list] of Object.entries(FACADES)) facadeMats[k] = list.map((t) => lam(t));
-const shopMats = SHOPS.map((t) => lam(t));
+
+// ---------- What's in the way ----------
+const statics = []; // boxes in the way: {x0, z0, x1, z1, h}
+const posts = []; // round things in the way: {x, z, r}
+const nodes = []; // every crossing in every town
+
+const CELL = 24;
+const grid = new Map();
+const cellKey = (cx, cz) => cx * 8192 + cz;
+function addToGrid(obj, x0, z0, x1, z1) {
+  for (let cx = Math.floor(x0 / CELL); cx <= Math.floor(x1 / CELL); cx++) for (let cz = Math.floor(z0 / CELL); cz <= Math.floor(z1 / CELL); cz++) {
+    const k = cellKey(cx, cz);
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(obj);
+  }
+}
+function addBox(x0, z0, x1, z1, h) {
+  const b = { box: true, x0, z0, x1, z1, h };
+  statics.push(b);
+  addToGrid(b, x0, z0, x1, z1);
+  return b;
+}
+function addPost(x, z, r) {
+  const p = { box: false, x, z, r };
+  posts.push(p);
+  addToGrid(p, x - r, z - r, x + r, z + r);
+}
+const _near = [];
+let _stamp = 0;
+function nearStatics(x, z, r) {
+  _near.length = 0;
+  _stamp++;
+  for (let cx = Math.floor((x - r) / CELL); cx <= Math.floor((x + r) / CELL); cx++) for (let cz = Math.floor((z - r) / CELL); cz <= Math.floor((z + r) / CELL); cz++) {
+    const list = grid.get(cellKey(cx, cz));
+    if (list) for (const o of list) if (o.seen !== _stamp) { o.seen = _stamp; _near.push(o); }
+  }
+  return _near;
+}
+
+
+// A unit triangular prism (a gable roof, a tent).
+const PRISM = (() => {
+  const sh = new THREE.Shape();
+  sh.moveTo(-0.5, 0);
+  sh.lineTo(0.5, 0);
+  sh.lineTo(0, 1);
+  sh.lineTo(-0.5, 0);
+  const g = new THREE.ExtrudeGeometry(sh, { depth: 1, bevelEnabled: false });
+  g.translate(0, 0, -0.5);
+  return g;
+})();

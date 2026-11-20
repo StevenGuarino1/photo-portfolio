@@ -99,6 +99,8 @@ function spawnTraffic(px, pz) {
     if (spot) start(c, spot);
     traffic.push(c);
   }
+  // Cars left at the places worth visiting.
+  for (const [x, z, h] of poiParked) makeCar(pick(["sedan", "hatch", "coupe", "pickup", "van"]), pick(PAINTS), x, z, h).parked = true;
   for (let k = 0; k < PARKED; k++) {
     const spot = randomSpot(0, 0, 0, 1e9, true);
     if (!spot) continue;

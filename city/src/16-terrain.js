@@ -29,7 +29,25 @@ const groundMat = new THREE.MeshLambertMaterial({ map: grain, vertexColors: true
 const COL = {
   sand: new THREE.Color(0xe3d3a4), grass: new THREE.Color(0x6aa548), meadow: new THREE.Color(0x8db752), dark: new THREE.Color(0x4c8a3c),
   rock: new THREE.Color(0x8c8a80), gravel: new THREE.Color(0xa59e8c), wet: new THREE.Color(0xb7a77c),
+  forestFloor: new THREE.Color(0x4a7234), heather: new THREE.Color(0x8a6f7a), dry: new THREE.Color(0xb9b26a), cliff: new THREE.Color(0x9a9286),
 };
+// The crops in the farmland's fields.
+const CROPS = [0xd8c06a, 0x7fb24a, 0x5c8f3a, 0x8a6a4a, 0xe8d23a, 0x9a86c8, 0x8ec45a, 0xc9a85a, 0x6f9e3e].map((c) => new THREE.Color(c));
+const FIELD_A = 0.38; // the fields' grid is turned a little off true
+// Which field a point is in, and how close it is to the field's edge.
+function fieldAt(x, z) {
+  const u = x * Math.cos(FIELD_A) + z * Math.sin(FIELD_A);
+  const v = -x * Math.sin(FIELD_A) + z * Math.cos(FIELD_A);
+  const fu = Math.floor(u / 95);
+  const row = Math.floor(v / 70);
+  // Fields in a row don't all line up.
+  const shift = hash2(row, 9) * 95;
+  const fu2 = Math.floor((u + shift) / 95);
+  const eu = Math.min(((u + shift) % 95 + 95) % 95, 95 - (((u + shift) % 95 + 95) % 95));
+  const ev = Math.min(((v % 70) + 70) % 70, 70 - (((v % 70) + 70) % 70));
+  void fu;
+  return { id: hash2(fu2, row), edge: Math.min(eu, ev), u, v, alongV: eu > ev };
+}
 const _c = new THREE.Color();
 function groundColour(x, z, h, slope) {
   const r = roadAt(x, z, ROAD_HW + 3);
@@ -40,7 +58,21 @@ function groundColour(x, z, h, slope) {
   if (shore < 3.4) return _c.copy(COL.sand).lerp(COL.grass, smooth(2.4, 3.4, shore));
   const m = fbm(x * 0.004, z * 0.004, 3);
   _c.copy(COL.grass).lerp(COL.meadow, smooth(0.45, 0.7, m)).lerp(COL.dark, smooth(0.55, 0.75, fbm(x * 0.0025 + 5, z * 0.0025, 3)));
-  if (slope > 0.55) _c.lerp(COL.rock, smooth(0.55, 0.9, slope));
+  const wf = regionW(REG.farm, x, z);
+  if (wf > 0.05 && !townAt(x, z, 30)) {
+    const f = fieldAt(x, z);
+    const crop = CROPS[Math.floor(f.id * CROPS.length)];
+    const rows = 0.9 + 0.1 * Math.sin((f.alongV ? f.u : f.v) * 2.2);
+    const field = new THREE.Color().copy(crop).multiplyScalar(rows);
+    if (f.edge < 3) field.copy(COL.dark);
+    _c.lerp(field, smooth(0.05, 0.4, wf));
+  }
+  const wForest = regionW(REG.forest, x, z);
+  if (wForest > 0) _c.lerp(COL.forestFloor, wForest * 0.7);
+  const wHigh = regionW(REG.high, x, z);
+  if (wHigh > 0) _c.lerp(fbm(x * 0.01, z * 0.01, 2) > 0.5 ? COL.heather : COL.dry, wHigh * 0.55);
+  if (h > 140) _c.lerp(COL.dry, smooth(140, 200, h) * 0.5);
+  if (slope > 0.55) _c.lerp(cliffW(x, z) > 0.3 ? COL.cliff : COL.rock, smooth(0.55, 0.9, slope));
   return _c;
 }
 const tiles = new Map();
@@ -126,6 +158,11 @@ const TREE = {
   greens: [0x4f9a3a, 0x5aa646, 0x3f8a36, 0x6cb04a, 0x478f3e, 0x7aaa3a].map((c) => new THREE.Color(c)),
   pine: [0x2f6a3a, 0x356f3c, 0x2a5f36].map((c) => new THREE.Color(c)),
   rocks: [0x8a8880, 0x9c978c, 0x76777a].map((c) => new THREE.Color(c)),
+  autumn: [0xd9822b, 0xe0a52a, 0xc4552a, 0xd8b23a, 0xb8402e].map((c) => new THREE.Color(c)),
+  birch: [0x9ccf5a, 0xb5d86a].map((c) => new THREE.Color(c)),
+  barkTinted: new THREE.MeshLambertMaterial({ color: 0xffffff }),
+  birchBark: new THREE.Color(0xe8e4dc),
+  brownBark: new THREE.Color(0x6b4a32),
 };
 function instanced(geo, mat, list, f, color) {
   if (!list.length) return null;
@@ -140,20 +177,46 @@ const postsDone = new Set();
 function treesFor(cx, cz) {
   const list = [];
   const r = rng(cx * 7919 + cz * 104729 + 13);
-  for (let b = 0; b < CH; b += 8) for (let a = 0; a < CH; a += 8) {
-    const x = cx * CH + a + r() * 7;
-    const z = cz * CH + b + r() * 7;
-    const forest = fbm(x * 0.0028 + 40, z * 0.0028 - 12, 4);
-    const p = smooth(0.48, 0.66, forest) * 0.85 + 0.035;
+  for (let b = 0; b < CH; b += 7) for (let a = 0; a < CH; a += 7) {
+    const x = cx * CH + a + r() * 6;
+    const z = cz * CH + b + r() * 6;
+    const wForest = regionW(REG.forest, x, z);
+    const wFarm = regionW(REG.farm, x, z);
+    const wHigh = regionW(REG.high, x, z);
+    const wMeadow = regionW(REG.meadow, x, z);
+    const wWind = regionW(REG.wind, x, z);
+    const woods = fbm(x * 0.0028 + 40, z * 0.0028 - 12, 4);
+    // Ordinary country: woods in patches. The forest: nearly solid. The
+    // highlands: a few hardy pines. Meadow and downs: the odd big oak.
+    let p = smooth(0.5, 0.68, woods) * 0.8 + 0.02;
+    p = p * (1 - wForest) + 0.82 * wForest;
+    p *= 1 - 0.85 * wHigh;
+    p *= 1 - 0.95 * Math.max(wMeadow, wWind);
+    let hedgerow = false;
+    if (wFarm > 0.2) {
+      const f = fieldAt(x, z);
+      hedgerow = f.edge < 2.5;
+      p = p * (1 - wFarm) + (hedgerow ? 0.3 : 0.0) * wFarm;
+    }
     if (r() > p) continue;
     if (townAt(x, z, 14)) continue;
-    const road = roadAt(x, z, ROAD_HW + 5);
-    if (road) continue;
+    if (roadAt(x, z, ROAD_HW + 5)) continue;
+    const ld = Math.hypot(x - LAKE.x, z - LAKE.z);
+    if (ld < lakeR(Math.atan2(z - LAKE.z, x - LAKE.x)) + 4) continue;
+    if (nearPOI(x, z)) continue;
     const h = terrainH(x, z);
     if (h < 1.5) continue;
-    const kind = Math.min(h, baseH(x, z)) < 4.5 ? (r() < 0.5 ? "palm" : null) : h > 55 || r() < 0.3 ? "pine" : "round";
+    const nearLake = ld < LAKE.r * 1.8;
+    const autumn = fbm(x * 0.0016 - 30, z * 0.0016 + 8, 3) > 0.62;
+    let kind;
+    if (Math.min(h, baseH(x, z)) < 4.5) kind = r() < 0.5 ? "palm" : null;
+    else if (nearLake) kind = r() < 0.7 ? "birch" : "round";
+    else if (wHigh > 0.4 || h > 70) kind = "pine";
+    else if (wForest > 0.3) kind = r() < 0.55 ? "pine" : r() < 0.25 ? "birch" : "round";
+    else kind = r() < 0.25 ? "pine" : r() < 0.12 ? "birch" : "round";
     if (!kind) continue;
-    list.push({ x, z, y: h - 0.2, s: 0.8 + r() * 0.7, kind, k: r() });
+    const big = Math.max(wMeadow, wWind) > 0.3 ? 1.7 : 1;
+    list.push({ x, z, y: h - 0.2, s: (0.8 + r() * 0.7) * big, kind, k: r(), autumn: autumn && kind === "round" });
   }
   return list;
 }
@@ -165,6 +228,7 @@ function buildTrees(cx, cz) {
   const round = list.filter((t) => t.kind === "round");
   const pines = list.filter((t) => t.kind === "pine");
   const palms = list.filter((t) => t.kind === "palm");
+  const birches = list.filter((t) => t.kind === "birch");
   const blobs = [];
   // Rocks and bushes scattered through the fields and under the trees.
   const r2 = rng(cx * 31 + cz * 977 + 5);
@@ -179,11 +243,15 @@ function buildTrees(cx, cz) {
     blobs.push({ x, y: h + (rock ? s * 0.15 : s * 0.4), z, s, sy: s * (rock ? 0.55 : 0.75), c: rock ? TREE.rocks[Math.floor(r2() * 3)] : TREE.greens[Math.floor(r2() * 6)] });
   }
   for (const t of round) {
-    blobs.push({ x: t.x, y: t.y + 3.7 * t.s, z: t.z, s: 2.2 * t.s, sy: 1.8 * t.s, c: TREE.greens[Math.floor(t.k * 6)] });
-    blobs.push({ x: t.x + (t.k - 0.5) * 1.8 * t.s, y: t.y + 4.9 * t.s, z: t.z + (0.5 - t.k) * 1.4 * t.s, s: 1.5 * t.s, sy: 1.3 * t.s, c: TREE.greens[Math.floor(t.k * 6)] });
+    const c = t.autumn ? TREE.autumn[Math.floor(t.k * TREE.autumn.length)] : TREE.greens[Math.floor(t.k * 6)];
+    blobs.push({ x: t.x, y: t.y + 3.7 * t.s, z: t.z, s: 2.2 * t.s, sy: 1.8 * t.s, c });
+    blobs.push({ x: t.x + (t.k - 0.5) * 1.8 * t.s, y: t.y + 4.9 * t.s, z: t.z + (0.5 - t.k) * 1.4 * t.s, s: 1.5 * t.s, sy: 1.3 * t.s, c });
+  }
+  for (const t of birches) {
+    blobs.push({ x: t.x, y: t.y + 5.2 * t.s, z: t.z, s: 1.3 * t.s, sy: 2.4 * t.s, c: TREE.birch[Math.floor(t.k * 2)] });
   }
   const add = (m) => m && grp.add(m);
-  add(instanced(TREE.trunk, TREE.bark, [...round, ...pines], (t, m) => m.compose(tmpV.set(t.x, t.y, t.z), tmpQ.identity(), new THREE.Vector3(t.s, (t.kind === "pine" ? 2 : 2.8) * t.s, t.s))));
+  add(instanced(TREE.trunk, TREE.barkTinted, [...round, ...pines, ...birches], (t, m) => m.compose(tmpV.set(t.x, t.y, t.z), tmpQ.identity(), new THREE.Vector3(t.kind === "birch" ? 0.7 * t.s : t.s, (t.kind === "pine" ? 2 : t.kind === "birch" ? 4.5 : 2.8) * t.s, t.kind === "birch" ? 0.7 * t.s : t.s)), (t) => (t.kind === "birch" ? TREE.birchBark : TREE.brownBark)));
   add(instanced(TREE.blob, TREE.leaf, blobs, (b, m) => m.compose(tmpV.set(b.x, b.y, b.z), tmpQ.setFromEuler(tmpE.set(0, b.x, 0)), new THREE.Vector3(b.s, b.sy, b.s)), (b) => b.c));
   add(instanced(TREE.cone, TREE.leaf, pines, (t, m) => m.compose(tmpV.set(t.x, t.y + 1.4 * t.s, t.z), tmpQ.setFromEuler(tmpE.set(0, t.k * 6, 0)), new THREE.Vector3(2.2 * t.s, 8 * t.s, 2.2 * t.s)), (t) => TREE.pine[Math.floor(t.k * 3)]));
   add(instanced(new THREE.CylinderGeometry(0.16, 0.24, 1, 6).translate(0, 0.5, 0), TREE.palmBark, palms, (t, m) => m.compose(tmpV.set(t.x, t.y, t.z), tmpQ.identity(), new THREE.Vector3(t.s, 8 * t.s, t.s))));
@@ -374,17 +442,18 @@ function streamLand(px, pz, budget = 2, limit = TERRAIN_R) {
 const turbines = [];
 {
   const spots = [];
-  for (let k = 0; k < 4000 && spots.length < 9; k++) {
-    const x = ISLE.cx + (hash2(k, 3) - 0.5) * ISLE.rx * 1.6;
-    const z = ISLE.cz + (hash2(k, 7) - 0.5) * ISLE.rz * 1.6;
-    const h = baseH(x, z);
-    if (h < 70 || townAt(x, z, 200) || roadAt(x, z, 70)) continue;
-    if (spots.some(([sx, sz]) => Math.hypot(sx - x, sz - z) < 260)) continue;
+  // A wind farm along the northern downs, in two staggered rows.
+  for (let k = 0; k < 4000 && spots.length < 8; k++) {
+    const x = REG.wind.x + (hash2(k, 3) - 0.5) * REG.wind.r * 1.8;
+    const z = REG.wind.z + (hash2(k, 7) - 0.5) * REG.wind.r * 1.4;
+    if (townAt(x, z, 120) || roadAt(x, z, 60) || natH(x, z) < 12) continue;
+    if (spots.some(([sx, sz]) => Math.hypot(sx - x, sz - z) < 150)) continue;
     spots.push([x, z]);
   }
   const white = new THREE.MeshLambertMaterial({ color: 0xf2f3f0 });
   for (const [x, z] of spots) {
     const y = landH(x, z) - 1;
+    POIS.push({ x, z, r: 14 });
     const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 2.0, 70, 12), white);
     tower.position.set(x, y + 35, z);
     tower.castShadow = true;
@@ -490,7 +559,8 @@ function mountainH(x, z) {
     // Snow, where the ground is high and not too steep to hold it.
     const snowy = smooth(snowLine - 120, snowLine + 150, h) * (1 - smooth(0.75, 1.15, slope));
     c.lerp(snow, snowy);
-    c.lerp(haze, 0.4);
+    // Thicker haze low down, where you look through more air.
+    c.lerp(haze, 0.32 + 0.5 * (1 - smooth(0, 900, h)));
     col[k * 3] = c.r;
     col[k * 3 + 1] = c.g;
     col[k * 3 + 2] = c.b;
